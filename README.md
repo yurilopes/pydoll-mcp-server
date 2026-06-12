@@ -1,80 +1,97 @@
 # Pydoll MCP Server
 
-Servidor MCP de automação de navegador baseado na biblioteca [Pydoll](https://github.com/autoscrape-labs/pydoll).
+MCP server for browser automation built on the [Pydoll](https://github.com/autoscrape-labs/pydoll) library.
 
-O objetivo é oferecer uma alternativa local ao Playwright MCP Server, com API própria orientada a agentes e implementação sobre Pydoll. O projeto não copia a API do Playwright. Ele busca entregar uma camada previsível para agentes: observar página, escolher elementos, agir por `element_id`, navegar, capturar screenshots, executar JavaScript com limites e lidar com iframes e shadow DOM.
+This project offers a local alternative to the Playwright MCP Server, with its own agent-oriented API built on Pydoll. It does not copy the Playwright API. It provides a predictable layer for agents: observe pages, choose elements, act by `element_id`, navigate, capture screenshots, execute JavaScript with limits, and handle iframes and shadow DOM.
 
 ## Status
 
-Alpha local em estabilização.
+Local alpha (v0.1.0a1). HTTP on `127.0.0.1` is the primary transport. `stdio` transport is available as an option (`--transport stdio`).
 
-Neste ciclo, o transporte principal é HTTP local em `127.0.0.1`. O wrapper `stdio` está planejado para P2. O servidor já expõe endpoints MCP HTTP e exige bearer token por padrão.
+Endpoints:
+- `/health` - Health check (no auth)
+- `/mcp` - Streamable HTTP MCP (bearer token required)
+- `/sse` - Server-Sent Events (bearer token required)
 
-## Requisitos
+## Requirements
 
-- Python `>=3.10`.
-- Chrome ou Chromium instalado.
-- Pydoll `>=2.23.0`.
-- Em desenvolvimento local nesta máquina, use:
+- Python `>=3.10`
+- Chrome or Chromium installed
+- Pydoll `>=2.23.0`
 
-```powershell
-C:\Users\Yuri\anaconda3\python.exe
+## Installation
+
+```bash
+pip install -e ".[dev]"
 ```
 
-## Instalação local
+For release distribution:
 
-```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pip install -e ".[dev]"
+```bash
+pip install pydoll-mcp-server
 ```
 
-Quando distribuído por release, o pacote será instalável via `pip`.
+## Running
 
-## Execução local
-
-Defina um token antes de iniciar:
+Set a token before starting:
 
 ```powershell
-$env:PYDOLL_MCP_AUTH_TOKEN = "troque-este-token"
+# Windows (PowerShell)
+$env:PYDOLL_MCP_AUTH_TOKEN = "your-secret-token"
 ```
 
-Inicie o servidor:
+```bash
+# Linux / macOS
+export PYDOLL_MCP_AUTH_TOKEN="your-secret-token"
+```
 
-```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli --host 127.0.0.1 --port 8765
+Start the server (HTTP, the default):
+
+```bash
+pydoll-mcp-server --host 127.0.0.1 --port 8765
+```
+
+Or via stdio:
+
+```bash
+pydoll-mcp-server --transport stdio
 ```
 
 Endpoints:
 
-- `GET http://127.0.0.1:8765/health`: health público, sem token.
-- `POST http://127.0.0.1:8765/mcp/`: Streamable HTTP MCP, com bearer token.
-- `GET http://127.0.0.1:8765/sse/`: SSE MCP, com bearer token quando suportado pelo SDK instalado.
+- `GET http://127.0.0.1:8765/health` - public health check, no token
+- `POST http://127.0.0.1:8765/mcp/` - Streamable HTTP MCP, with bearer token
+- `GET http://127.0.0.1:8765/sse/` - SSE MCP, with bearer token
 
-Clientes MCP devem enviar:
+MCP clients must send:
 
 ```text
 Authorization: Bearer <PYDOLL_MCP_AUTH_TOKEN>
 ```
 
-`PYDOLL_MCP_ALLOW_NO_AUTH=true` só deve ser usado em desenvolvimento isolado.
+`PYDOLL_MCP_ALLOW_NO_AUTH=true` should only be used in isolated development.
 
-## Ferramentas MCP
+## MCP Tools
 
-Health e diagnóstico:
+Health and diagnostics:
 
 - `health_check`
 - `server_status`
+- `diagnostics_snapshot`
+- `trace_start`, `trace_stop`, `trace_get`, `trace_cleanup`
 
 Lifecycle:
 
 - `browser_launch`
 - `browser_list`
 - `browser_close`
+- `browser_attach`
 - `tab_list`
 - `tab_activate`
 - `tab_close`
 - `tab_recover`
 
-Navegação:
+Navigation:
 
 - `page_goto`
 - `page_reload`
@@ -82,14 +99,14 @@ Navegação:
 - `page_forward`
 - `page_wait`
 
-Observação:
+Observation:
 
 - `page_get_text`
 - `page_get_tree`
 - `page_get_tree_deep`
 - `page_screenshot`
 
-Elementos:
+Elements:
 
 - `element_find`
 - `element_find_deep`
@@ -100,7 +117,7 @@ Elementos:
 - `element_get_attribute`
 - `element_screenshot`
 
-JavaScript e helpers avançados:
+JavaScript and advanced helpers:
 
 - `js_evaluate_readonly`
 - `js_evaluate`
@@ -113,55 +130,64 @@ JavaScript e helpers avançados:
 - `download_expect`
 - `upload_files`
 
-## Modelo agent-friendly
+Network inspection:
 
-`page_get_tree` retorna uma árvore compacta e limitada por padrão. Os nós interativos recebem `element_id`, `selector_hint`, `xpath_hint`, `actionable` e `resolution_confidence`. Um agente pode observar a árvore e chamar `element_click` ou `element_fill` diretamente com o `element_id`, sem chamar `element_find` antes.
+- `network_enable`
+- `network_disable`
+- `network_list`
+- `network_get_response`
 
-`page_get_tree_deep` é a opção recomendada quando a página usa iframes ou shadow DOM. Ela é mais cara, tem timeout próprio e retorna:
+Console inspection:
+
+- `console_enable`, `console_disable`, `console_list` (return `UNSUPPORTED`)
+
+## Agent-friendly model
+
+`page_get_tree` returns a compact, limited tree by default. Interactive nodes receive `element_id`, `selector_hint`, `xpath_hint`, `actionable`, and `resolution_confidence`. An agent can observe the tree and call `element_click` or `element_fill` directly with the `element_id`, without calling `element_find` first.
+
+`page_get_tree_deep` is the recommended option when the page uses iframes or shadow DOM. It is more expensive, has its own timeout, and returns:
 
 - `frame_path`
 - `shadow_path`
 - `partial`
 - `errors`
-- metadados de visibilidade e interação quando disponíveis
+- visibility and interaction metadata when available
 
-O alpha cobre iframe simples, nested iframe same-origin e shadow DOM aberto. Closed shadow root e casos cross-origin complexos ainda exigem validação adicional.
+The alpha covers simple iframes, same-origin nested iframes, and open shadow DOM. Closed shadow roots and complex cross-origin cases still require additional validation.
 
-## Segurança
+## Security
 
-Padrões importantes:
+- Bearer token is required by default.
+- The default bind must remain `127.0.0.1`.
+- Free `execute_cdp_cmd` is not exposed.
+- Operating system commands are not exposed.
+- Arbitrary filesystem read or write is not exposed.
+- Screenshots, downloads, and uploads use controlled directories or an allowlist.
+- Cookies and storage are redacted by default on read.
+- Sensitive attributes such as tokens, passwords, and cookies are redacted.
+- Logs must redact bearer tokens, cookies, authorization headers, and sensitive fields.
 
-- Bearer token é obrigatório por padrão.
-- O bind padrão deve permanecer em `127.0.0.1`.
-- `execute_cdp_cmd` livre não é exposto.
-- Comandos do sistema operacional não são expostos.
-- Leitura ou escrita arbitrária de filesystem não é exposta.
-- Screenshots, downloads e uploads usam diretórios controlados ou allowlist.
-- Cookies e storage são redigidos por padrão em leitura.
-- Atributos sensíveis, como tokens, senhas e cookies, são redigidos.
-- Logs devem redigir bearer tokens, cookies, authorization headers e campos sensíveis.
+`js_evaluate` is a sensitive tool:
 
-`js_evaluate` é tool sensível:
+- Requires explicit `tab_id`.
+- Uses a short timeout by default.
+- Limits code and result size.
+- Logs a summarized audit with hash, duration, and size.
+- Must not log full code or full results.
+- Warns or blocks dangerous patterns, depending on mode.
+- May be disabled in the future via a safe-mode configuration.
 
-- exige `tab_id` explícito;
-- usa timeout curto por padrão;
-- limita tamanho de código e resultado;
-- registra auditoria resumida com hash, duração e tamanho;
-- não deve registrar código completo nem resultado completo em logs;
-- alerta ou bloqueia padrões perigosos, conforme o modo;
-- pode ser desabilitada futuramente por configuração de modo seguro.
+`js_evaluate_readonly` is preferred for inspection, but should also be treated as sensitive.
 
-`js_evaluate_readonly` é preferível para inspeção, mas também deve ser tratada como sensível.
+## Runtime directories
 
-## Diretórios runtime
-
-Dados runtime ficam fora do repositório por padrão:
+Runtime data is stored outside the repository by default:
 
 - Windows: `%LOCALAPPDATA%\pydoll-mcp-server`
 - macOS: `~/Library/Application Support/pydoll-mcp-server`
 - Linux: `~/.local/share/pydoll-mcp-server`
 
-Subdiretórios esperados:
+Expected subdirectories:
 
 - `profiles/`
 - `tmp/`
@@ -169,67 +195,60 @@ Subdiretórios esperados:
 - `artifacts/`
 - `logs/`
 
-Use `PYDOLL_MCP_RUNTIME_DIR` para sobrescrever em testes ou ambientes isolados.
+## Vendored Pydoll documentation
 
-## Documentação local da Pydoll
-
-A documentação vendorizada da Pydoll fica em:
+Vendored Pydoll documentation is available at:
 
 ```text
 references/pydoll-docs/
 ```
 
-Consulte também o repositório local da Pydoll quando estiver trabalhando nesta máquina:
+Do not mix vendored documentation with MCP server code.
 
-```text
-C:\Users\Yuri\Documents\Git\pydoll
+## Testing
+
+Core gates:
+
+```bash
+pytest -q
+ruff check .
+mypy src
+pytest -m browser_smoke -q
 ```
 
-Não misture documentação vendorizada com código do servidor MCP.
+Useful test suites by area:
 
-## Testes
-
-Gates principais:
-
-```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pytest -q
-C:\Users\Yuri\anaconda3\python.exe -m ruff check .
-C:\Users\Yuri\anaconda3\python.exe -m mypy src
-C:\Users\Yuri\anaconda3\python.exe -m pytest -m browser_smoke -q
+```bash
+pytest tests/contract -q
+pytest tests/unit/test_concurrency.py -q
+pytest tests/unit/test_security.py tests/unit/test_files_security.py -q
+pytest tests/p2/ -q
 ```
 
-Testes úteis por área:
+`browser_smoke` opens Chrome/Chromium headless and validates real flows with local fixtures.
 
-```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pytest tests\contract -q
-C:\Users\Yuri\anaconda3\python.exe -m pytest tests\unit\test_concurrency.py -q
-C:\Users\Yuri\anaconda3\python.exe -m pytest tests\unit\test_security.py tests\unit\test_files_security.py -q
-```
+## Known limitations
 
-`browser_smoke` abre Chrome/Chromium headless e valida fluxos reais com fixtures locais.
+- Console inspection is not available (returns `UNSUPPORTED`; depends on additional Pydoll Runtime API validation).
+- `browser_attach` does not support reconnection across server sessions (returns `UNSUPPORTED`).
+- Closed shadow roots and complex OOPIFs still require dedicated validation.
+- Deep traversal is more expensive than `page_get_tree` and should be used explicitly.
+- Downloads depend on Pydoll's `expect_download` flow and must remain in the controlled runtime dir.
+- Uploads must only use paths allowed by the allowlist.
 
-## Limitações conhecidas do alpha
+## Plans and progress
 
-- Transporte `stdio` ainda é P2.
-- Inspeção completa de network e console ainda é P2.
-- Closed shadow root e OOPIFs complexos ainda precisam de validação dedicada.
-- Deep traversal é mais caro que `page_get_tree` e deve ser usado de forma explícita.
-- Downloads dependem do fluxo `expect_download` da Pydoll e devem permanecer no runtime dir controlado.
-- Uploads só devem usar caminhos permitidos pela allowlist.
+- Overview: `PLAN.md`
+- P1: `plans/PLAN_P1.md` (completed)
+- P2: `plans/PLAN_P2.md` (completed)
+- Agent progress logs: `progress/`
 
-## Planos e progresso
-
-- Visão geral: `PLAN.md`
-- P1 atual: `plans/PLAN_P1.md`
-- P2: `plans/PLAN_P2.md`, quando existir ou for atualizado
-- Progresso dos agentes: `progress/`
-
-Agentes devem registrar progresso curto em:
+Agents should log short progress entries at:
 
 ```text
 progress/YYYY-MM-DD_AGENT_PLAN_XX.md
 ```
 
-## Licença
+## License
 
 MIT
