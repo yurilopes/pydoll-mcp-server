@@ -15,6 +15,9 @@ from starlette.routing import Mount, Route
 
 from pydoll_mcp_server.auth import BearerTokenBackend
 from pydoll_mcp_server.errors import StructuredError
+from pydoll_mcp_server.version import get_version
+
+SCHEMA_VERSION = '2026-06-12.p2'
 
 _start_time = time.time()
 
@@ -82,7 +85,8 @@ def health_check(include_runtime: bool = False) -> dict[str, Any]:
     config = get_config()
     result: dict[str, Any] = {
         'status': 'ok',
-        'version': '0.1.0',
+        'version': get_version(),
+        'schema_version': SCHEMA_VERSION,
         'uptime_seconds': round(_server_state.uptime_seconds, 1),
         'auth_mode': 'token' if config.auth_enabled else 'none',
     }
@@ -103,9 +107,19 @@ def server_status(
     config = get_config()
     result: dict[str, Any] = {
         'status': 'ok',
-        'version': '0.1.0',
+        'version': get_version(),
+        'schema_version': SCHEMA_VERSION,
         'uptime_seconds': round(_server_state.uptime_seconds, 1),
         'auth_mode': 'token' if config.auth_enabled else 'none',
+        'capabilities': {
+            'transports': ['http', 'sse', 'stdio'],
+            'browser': ['launch', 'close', 'list', 'attach'],
+            'page': ['navigation', 'tree', 'deep_tree', 'screenshot'],
+            'elements': ['find', 'find_deep', 'click', 'type', 'fill', 'attributes'],
+            'diagnostics': ['health', 'status', 'diagnostics_snapshot', 'trace'],
+            'inspection': ['network', 'console'],
+            'security': ['auth', 'redaction', 'path_allowlist', 'no_free_cdp'],
+        },
     }
     try:
         browsers = registry.list_browsers(client_id)
@@ -494,10 +508,243 @@ async def upload_files(
     return await impl(client_id, tab_id, element_id, paths)
 
 
+@mcp.tool()
+async def network_enable(
+    client_id: str,
+    tab_id: str,
+    max_events: int = 1000,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.tools.inspection import network_enable as impl
+    return await impl(client_id, tab_id, max_events)
+
+
+@mcp.tool()
+async def network_disable(
+    client_id: str,
+    tab_id: str,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.tools.inspection import network_disable as impl
+    return await impl(client_id, tab_id)
+
+
+@mcp.tool()
+async def network_list(
+    client_id: str,
+    tab_id: str,
+    filter_url: str = '',
+    limit: int = 100,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.tools.inspection import network_list as impl
+    return await impl(client_id, tab_id, filter_url, limit)
+
+
+@mcp.tool()
+async def network_get_response(
+    client_id: str,
+    tab_id: str,
+    request_id: str,
+    max_bytes: int = 65536,
+    redact: bool = True,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.tools.inspection import network_get_response as impl
+    return await impl(client_id, tab_id, request_id, max_bytes, redact)
+
+
+@mcp.tool()
+async def console_enable(
+    client_id: str,
+    tab_id: str,
+    max_events: int = 1000,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.tools.inspection import console_enable as impl
+    return await impl(client_id, tab_id, max_events)
+
+
+@mcp.tool()
+async def console_disable(
+    client_id: str,
+    tab_id: str,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.tools.inspection import console_disable as impl
+    return await impl(client_id, tab_id)
+
+
+@mcp.tool()
+async def console_list(
+    client_id: str,
+    tab_id: str,
+    filter_level: str = '',
+    limit: int = 100,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.tools.inspection import console_list as impl
+    return await impl(client_id, tab_id, filter_level, limit)
+
+
+@mcp.tool()
+async def diagnostics_snapshot(
+    client_id: str = 'anonymous',
+    include_clients: bool = False,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.browser.registry import get_registry
+    from pydoll_mcp_server.config import get_config
+
+    registry = get_registry()
+    config = get_config()
+    browsers = registry.list_browsers(client_id)
+    tabs = registry.list_tabs(client_id)
+
+    from pydoll_mcp_server.diagnostics.trace import TraceEvent, get_trace_manager
+    get_trace_manager().add_event_to_active(client_id, TraceEvent(
+        timestamp=time.time(),
+        tool='diagnostics_snapshot',
+        status='success',
+        summary=f'Browsers: {len(browsers)}, tabs: {len(tabs)}',
+    ))
+
+    return {
+        'success': True,
+        'schema_version': SCHEMA_VERSION,
+        'uptime_seconds': round(_server_state.uptime_seconds, 1),
+        'auth_mode': 'token' if config.auth_enabled else 'none',
+        'browsers': [
+            {
+                'browser_id': b.browser_id,
+                'headless': b.headless,
+                'health': b.health.value,
+                'tabs': len(b.tabs),
+            }
+            for b in browsers
+        ],
+        'tabs': [{'tab_id': t.tab_id, 'url': t.url, 'health': t.health.value} for t in tabs],
+        'resources': _server_state.summary(),
+        'clients': registry.list_clients() if include_clients else [],
+    }
+
+
+@mcp.tool()
+async def trace_start(
+    client_id: str,
+    name: str = '',
+    include_screenshots: bool = False,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.diagnostics.trace import TraceEvent, get_trace_manager
+
+    tm = get_trace_manager()
+    trace = tm.create(client_id, name=name, include_screenshots=include_screenshots)
+    trace.add_event(TraceEvent(
+        timestamp=time.time(),
+        tool='trace_start',
+        status='started',
+        summary=f'Trace started: {trace.trace_id}',
+    ))
+    return {
+        'success': True,
+        'trace_id': trace.trace_id,
+        'name': trace.name,
+        'include_screenshots': include_screenshots,
+        'events_count': len(trace.events),
+    }
+
+
+@mcp.tool()
+async def trace_stop(
+    client_id: str,
+    trace_id: str,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.diagnostics.trace import TraceEvent, get_trace_manager
+
+    tm = get_trace_manager()
+    trace = tm.stop(client_id, trace_id)
+    if trace is None:
+        return {
+            'success': False,
+            'error_code': 'RESOURCE_NOT_FOUND',
+            'message': f'Trace {trace_id} not found or not owned by {client_id}',
+        }
+    trace.add_event(TraceEvent(
+        timestamp=time.time(),
+        tool='trace_stop',
+        status='stopped',
+        summary=f'Trace stopped: {trace_id}',
+    ))
+    return {'success': True, 'trace_id': trace_id, 'stopped': True, 'events_count': len(trace.events)}
+
+
+@mcp.tool()
+async def trace_get(
+    client_id: str,
+    trace_id: str,
+    max_events: int = 200,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.diagnostics.trace import get_trace_manager
+
+    tm = get_trace_manager()
+    trace = tm.get(client_id, trace_id)
+    if trace is None:
+        return {
+            'success': False,
+            'error_code': 'RESOURCE_NOT_FOUND',
+            'message': f'Trace {trace_id} not found or not owned by {client_id}',
+        }
+    events = trace.events[-max_events:] if max_events > 0 else trace.events
+    return {
+        'success': True,
+        'trace_id': trace_id,
+        'status': trace.status,
+        'events': [e.to_dict() for e in events],
+        'count': len(events),
+        'total': len(trace.events),
+    }
+
+
+@mcp.tool()
+async def trace_cleanup(
+    client_id: str,
+    older_than_seconds: int = 86400,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.diagnostics.trace import get_trace_manager
+
+    tm = get_trace_manager()
+    cleaned = tm.cleanup(client_id, older_than_seconds)
+    return {'success': True, 'cleaned': cleaned}
+
+
+@mcp.tool()
+async def browser_attach(
+    client_id: str,
+    browser_id: str,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.browser.registry import get_registry
+    from pydoll_mcp_server.errors import ErrorCode, StructuredError
+
+    registry = get_registry()
+    try:
+        browser_info = registry.get_browser(client_id, browser_id)
+    except StructuredError as e:
+        return e.to_dict()
+
+    if browser_info.client_id != client_id:
+        return StructuredError(
+            error_code=ErrorCode.PERMISSION_DENIED,
+            message=f'Browser {browser_id} belongs to {browser_info.client_id}, not {client_id}',
+            retryable=False,
+        ).to_dict()
+
+    return StructuredError(
+        error_code=ErrorCode.UNSUPPORTED,
+        message=(
+            'Browser attach is not supported after server restart. '
+            'Re-attach is only available during the same server session.'
+        ),
+        retryable=False,
+        recovery_hint='Use browser_launch to create a new browser instance.',
+    ).to_dict()
+
+
 async def health_endpoint(request: Any) -> JSONResponse:
     return JSONResponse({
         'status': 'ok',
-        'version': '0.1.0',
+        'version': get_version(),
         'uptime_seconds': round(_server_state.uptime_seconds, 1),
     })
 
