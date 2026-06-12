@@ -38,6 +38,14 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
+
+# AI agent internal artifacts (not human-facing docs)
+PROMPT_DEVELOPER_*.md
+docs/evaluation-*.md
+progress/*.md
+plans/remediation/
+plans/p2/
+
 .tox/
 .nox/
 .coverage
