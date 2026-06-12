@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Delay Page</title></head>
+<body>
+<h1>Delay Page</h1>
+<p id="delayed-text">Loading...</p>
+<script>
+setTimeout(function() {
+  document.getElementById('delayed-text').textContent = 'Loaded after delay!';
+}, 3000);
+</script>
+</body>
+</html>

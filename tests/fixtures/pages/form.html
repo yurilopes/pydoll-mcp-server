@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Form Test</title></head>
+<body>
+<h1>Form Page</h1>
+<form>
+  <input type="text" id="input-text" name="username" placeholder="Enter username">
+  <input type="password" id="input-password" name="password" placeholder="Enter password">
+  <textarea id="textarea" name="bio" placeholder="Enter bio"></textarea>
+  <select id="select">
+    <option value="1">Option 1</option>
+    <option value="2">Option 2</option>
+  </select>
+  <button type="submit" id="btn-submit">Submit</button>
+</form>
+<div id="output"></div>
+<script>
+document.getElementById('btn-submit').addEventListener('click', function(e) {
+  e.preventDefault();
+  var v = document.getElementById('input-text').value;
+  document.getElementById('output').textContent = 'Submitted: ' + v;
+});
+</script>
+</body>
+</html>

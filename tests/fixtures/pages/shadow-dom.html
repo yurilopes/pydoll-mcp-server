@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Shadow DOM Test</title></head>
+<body>
+<h1>Shadow DOM Page</h1>
+<div id="shadow-host"></div>
+<p id="outside-shadow">Outside shadow root.</p>
+<script>
+const host = document.getElementById('shadow-host');
+const root = host.attachShadow({mode: 'open'});
+root.innerHTML = '<p id="shadow-text">Inside shadow root.</p><button id="shadow-btn">Shadow Button</button><span id="shadow-result"></span>';
+root.getElementById('shadow-btn').addEventListener('click', function() {
+  root.getElementById('shadow-result').textContent = 'shadow-clicked';
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pydoll-mcp-server"
+version = "0.1.0"
+description = "MCP server for browser automation using Pydoll"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Pydoll MCP Server Contributors"},
+]
+keywords = ["mcp", "browser", "automation", "pydoll", "chrome", "chromium"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "pydoll-python>=2.23.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "starlette>=0.37.0",
+    "uvicorn[standard]>=0.29.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.5.0",
+    "mypy>=1.9.0",
+]
+
+[project.scripts]
+pydoll-mcp-server = "pydoll_mcp_server.cli:main"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "N", "UP", "B", "C4", "SIM",
+]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests that do not require a browser",
+    "integration: Integration tests that may require a browser",
+    "browser: Tests that require a running browser instance",
+    "slow: Tests that take a long time to run",
+    "contract: Tests that validate the MCP contract",
+    "browser_smoke: Smoke test with real browser (headless Chrome)",
+]

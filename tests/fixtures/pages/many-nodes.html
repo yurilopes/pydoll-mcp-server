@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Many Nodes</title></head>
+<body>
+<h1>Many Nodes Page</h1>
+<ul id="big-list">
+<script>
+var list = document.getElementById('big-list');
+for (var i = 0; i < 200; i++) {
+  var li = document.createElement('li');
+  li.textContent = 'Item ' + i;
+  li.className = 'list-item';
+  list.appendChild(li);
+}
+</script>
+</ul>
+</body>
+</html>
