@@ -216,3 +216,50 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project runtime artifacts
+logs/
+*.log
+downloads/
+screenshots/
+artifacts/
+traces/
+videos/
+har/
+
+# Browser automation local state
+.pydoll-mcp/
+.browser-profiles/
+browser-profiles/
+user-data-dir/
+chrome-user-data/
+chromium-user-data/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# Windows and editor noise
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.tmp
+*.temp
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Test and type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.coverage
+.coverage.*
+htmlcov/

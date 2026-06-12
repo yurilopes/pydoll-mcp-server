@@ -1,0 +1,181 @@
+"""JavaScript execution tools with security scanning."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import time
+from typing import Any
+
+from pydoll_mcp_server.browser.registry import get_registry
+from pydoll_mcp_server.browser.script_utils import extract_script_value
+from pydoll_mcp_server.config import get_limits_config, get_timeout_config
+from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
+from pydoll_mcp_server.logging import OperationLog, get_logger
+
+BLOCKED_PATTERNS = [
+    (re.compile(r'\bdocument\.cookie\b'), 'document.cookie access'),
+    (re.compile(r'\blocalStorage\.'), 'localStorage access'),
+    (re.compile(r'\bsessionStorage\.'), 'sessionStorage access'),
+    (re.compile(r'(?:^|\W)submit\s*\('), 'form submission'),
+    (re.compile(r'\blocation\s*=\s*["\']'), 'location assignment'),
+    (re.compile(r'\blocation\.href\s*='), 'location.href assignment'),
+    (re.compile(r'while\s*\(\s*true\s*\)'), 'infinite loop pattern'),
+    (re.compile(r'while\s*\(\s*1\s*\)'), 'infinite loop pattern'),
+]
+
+FETCH_PATTERN = re.compile(r'\bfetch\s*\(\s*["\'][^"\']*["\']\s*\)')
+
+
+def scan_script(script: str) -> list[str]:
+    warnings: list[str] = []
+    for pattern, description in BLOCKED_PATTERNS:
+        if pattern.search(script):
+            warnings.append(description)
+    if FETCH_PATTERN.search(script):
+        warnings.append('fetch() call - potential external data exfiltration')
+    return warnings
+
+
+async def js_evaluate_readonly(
+    client_id: str,
+    tab_id: str,
+    script: str,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    config = get_timeout_config()
+    limits = get_limits_config()
+    timeout = timeout or config.js_execute
+    timeout = min(timeout, config.max_js_timeout)
+    get_logger()
+
+    if len(script) > limits.max_js_code:
+        return StructuredError(
+            error_code=ErrorCode.INVALID_INPUT,
+            message=f'Script too long: {len(script)} chars. Max {limits.max_js_code}.',
+            retryable=False,
+        ).to_dict()
+
+    warnings = scan_script(script)
+    if any(w in ['document.cookie access', 'localStorage access', 'sessionStorage access',
+                 'form submission', 'location assignment', 'location.href assignment']
+           for w in warnings):
+        return StructuredError(
+            error_code=ErrorCode.BLOCKED_PATTERN,
+            message=f'Script contains blocked patterns: {", ".join(warnings)}',
+            retryable=False,
+            details={'warnings': warnings},
+            recovery_hint='Use js_evaluate for scripts with side effects, or remove the blocked patterns.',
+        ).to_dict()
+
+    return await _execute_js(client_id, tab_id, script, timeout, read_only=True)
+
+
+async def js_evaluate(
+    client_id: str,
+    tab_id: str,
+    script: str,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    config = get_timeout_config()
+    limits = get_limits_config()
+    timeout = timeout or config.js_execute
+    timeout = min(timeout, config.max_js_timeout)
+    logger = get_logger()
+
+    if len(script) > limits.max_js_code:
+        return StructuredError(
+            error_code=ErrorCode.INVALID_INPUT,
+            message=f'Script too long: {len(script)} chars. Max {limits.max_js_code}.',
+            retryable=False,
+        ).to_dict()
+
+    warnings = scan_script(script)
+    if warnings:
+        logger.warning(f'JS evaluate warnings for client {client_id}: {warnings}')
+
+    return await _execute_js(client_id, tab_id, script, timeout, read_only=False)
+
+
+async def _execute_js(
+    client_id: str,
+    tab_id: str,
+    script: str,
+    timeout: float,
+    read_only: bool,
+) -> dict[str, Any]:
+    registry = get_registry()
+    logger = get_logger()
+    limits = get_limits_config()
+
+    try:
+        tab_info = registry.get_tab(client_id, tab_id)
+    except StructuredError as e:
+        return e.to_dict()
+
+    pydoll_tab = tab_info._pydoll_tab
+    start = time.time()
+
+    try:
+        import asyncio
+        result = await asyncio.wait_for(
+            pydoll_tab.execute_script(script, return_by_value=True),
+            timeout=timeout + 2,
+        )
+    except asyncio.TimeoutError:
+        duration_ms = (time.time() - start) * 1000
+        return StructuredError(
+            error_code=ErrorCode.TIMEOUT,
+            message=f'JS execution timed out after {timeout}s',
+            retryable=True,
+            resource_state=ResourceState.DEGRADED,
+            details={'timing_ms': round(duration_ms, 1)},
+        ).to_dict()
+    except Exception as e:
+        duration_ms = (time.time() - start) * 1000
+        return StructuredError(
+            error_code=ErrorCode.EXECUTION_ERROR,
+            message=f'JS execution error: {e}',
+            retryable=True,
+            details={'error': str(e), 'timing_ms': round(duration_ms, 1)},
+        ).to_dict()
+
+    duration_ms = (time.time() - start) * 1000
+
+    try:
+        raw_value = extract_script_value(result)
+        result_str = json.dumps(raw_value, ensure_ascii=False, default=str)
+    except Exception:
+        result_str = str(result)
+
+    truncated = len(result_str.encode('utf-8')) > limits.max_js_result
+    if truncated:
+        result_bytes = result_str.encode('utf-8')[:limits.max_js_result]
+        result_str = result_bytes.decode('utf-8', errors='replace')
+
+    script_hash = hashlib.sha256(script.encode()).hexdigest()[:16]
+
+    logger.log_operation(OperationLog(
+        client_id=client_id, tab_id=tab_id,
+        tool='js_evaluate_readonly' if read_only else 'js_evaluate',
+        status='success', duration_ms=duration_ms,
+        extra={
+            'script_hash': script_hash,
+            'result_size': len(result_str.encode('utf-8')),
+            'truncated': truncated,
+            'read_only': read_only,
+        },
+    ))
+
+    return {
+        'success': True,
+        'value': result_str,
+        'truncated': truncated,
+        'timing_ms': round(duration_ms, 1),
+        'audit': {
+            'script_hash': script_hash,
+            'duration_ms': round(duration_ms, 1),
+            'result_size_bytes': len(result_str.encode('utf-8')),
+        },
+    }

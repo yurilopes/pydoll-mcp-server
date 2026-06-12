@@ -1,0 +1,27 @@
+{
+  "mcp": {
+    "openpets": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@open-pets/cli@2.1.1",
+        "mcp",
+        "--pet",
+        "bebe-madoka-magica"
+      ],
+      "enabled": true
+    }
+  },
+  "instructions": [
+    ".opencode/openpets.md"
+  ],
+  "plugin": [
+    [
+      "@open-pets/opencode@2.1.1",
+      {
+        "pet": "bebe-madoka-magica"
+      }
+    ]
+  ]
+}
