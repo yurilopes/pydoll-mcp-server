@@ -19,10 +19,16 @@ Endpoints:
 - Chrome or Chromium installed
 - Pydoll `>=2.23.0`
 
+On this machine, Python is available via Anaconda at:
+
+```text
+C:\Users\Yuri\anaconda3\python.exe
+```
+
 ## Installation
 
-```bash
-pip install -e ".[dev]"
+```powershell
+C:\Users\Yuri\anaconda3\python.exe -m pip install -e ".[dev]"
 ```
 
 For release distribution:
@@ -47,14 +53,14 @@ export PYDOLL_MCP_AUTH_TOKEN="your-secret-token"
 
 Start the server (HTTP, the default):
 
-```bash
-pydoll-mcp-server --host 127.0.0.1 --port 8765
+```powershell
+C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli --host 127.0.0.1 --port 8765
 ```
 
 Or via stdio:
 
-```bash
-pydoll-mcp-server --transport stdio
+```powershell
+C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli --transport stdio
 ```
 
 Endpoints:
@@ -209,20 +215,20 @@ Do not mix vendored documentation with MCP server code.
 
 Core gates:
 
-```bash
-pytest -q
-ruff check .
-mypy src
-pytest -m browser_smoke -q
+```powershell
+C:\Users\Yuri\anaconda3\python.exe -m pytest -q
+C:\Users\Yuri\anaconda3\python.exe -m ruff check .
+C:\Users\Yuri\anaconda3\python.exe -m mypy src
+C:\Users\Yuri\anaconda3\python.exe -m pytest -m browser_smoke -q
 ```
 
 Useful test suites by area:
 
-```bash
-pytest tests/contract -q
-pytest tests/unit/test_concurrency.py -q
-pytest tests/unit/test_security.py tests/unit/test_files_security.py -q
-pytest tests/p2/ -q
+```powershell
+C:\Users\Yuri\anaconda3\python.exe -m pytest tests\contract -q
+C:\Users\Yuri\anaconda3\python.exe -m pytest tests\unit\test_concurrency.py -q
+C:\Users\Yuri\anaconda3\python.exe -m pytest tests\unit\test_security.py tests\unit\test_files_security.py -q
+C:\Users\Yuri\anaconda3\python.exe -m pytest tests\p2\ -q
 ```
 
 `browser_smoke` opens Chrome/Chromium headless and validates real flows with local fixtures.

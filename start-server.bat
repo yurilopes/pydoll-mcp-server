@@ -10,6 +10,6 @@ echo   Auth token: %PYDOLL_MCP_AUTH_TOKEN%
 echo ============================================
 echo.
 
-python -m pydoll_mcp_server.cli %*
+C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli %*
 
 endlocal
