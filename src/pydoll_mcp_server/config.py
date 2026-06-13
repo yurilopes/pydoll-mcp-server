@@ -50,9 +50,12 @@ class ServerConfig(BaseSettings):
     def validate_auth(self) -> ServerConfig:
         env_token = os.environ.get('PYDOLL_MCP_AUTH_TOKEN', '')
         env_allow = os.environ.get('PYDOLL_MCP_ALLOW_NO_AUTH', '')
+        env_transport = os.environ.get('PYDOLL_MCP_TRANSPORT', '')
         if env_token:
             self.auth_token = env_token
         if env_allow and env_allow.lower() in ('true', '1', 'yes'):
+            self.allow_no_auth = True
+        if env_transport == 'stdio':
             self.allow_no_auth = True
         if not self.allow_no_auth and not self.auth_token:
             raise ValueError(

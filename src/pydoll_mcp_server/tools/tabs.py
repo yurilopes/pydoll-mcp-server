@@ -7,6 +7,7 @@ from typing import Any
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.models import ResourceHealth
+from pydoll_mcp_server.browser.pydoll_compat import get_tab_title, get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
 from pydoll_mcp_server.logging import get_logger
@@ -19,6 +20,17 @@ async def tab_list(
 ) -> dict[str, Any]:
     registry = get_registry()
     tabs = registry.list_tabs(client_id, browser_id if browser_id else None)
+
+    for t in tabs:
+        pydoll_tab = t._pydoll_tab
+        if pydoll_tab is not None:
+            live_url = await get_tab_url(pydoll_tab)
+            if live_url:
+                t.url = live_url
+            live_title = await get_tab_title(pydoll_tab)
+            if live_title:
+                t.title = live_title
+
     return {
         'success': True,
         'tabs': [t.summary() for t in tabs],
