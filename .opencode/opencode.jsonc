@@ -12,6 +12,20 @@
         "bebe-madoka-magica"
       ],
       "enabled": true
+    },
+    "pydoll": {
+      "type": "local",
+      "command": [
+        "C:\\Users\\Yuri\\anaconda3\\python.exe",
+        "-m",
+        "pydoll_mcp_server.cli",
+        "--transport",
+        "stdio"
+      ],
+      "enabled": true,
+      "env": {
+        "PYDOLL_MCP_ALLOW_NO_AUTH": "true"
+      }
     }
   },
   "instructions": [

@@ -65,6 +65,13 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 check_untyped_defs = true
 
+[tool.pyright]
+pythonVersion = "3.10"
+pythonPlatform = "Windows"
+venvPath = "C:/Users/Yuri/anaconda3"
+venv = "."
+typeCheckingMode = "basic"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

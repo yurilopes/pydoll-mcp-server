@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 import uuid
 from typing import Any
@@ -764,6 +765,11 @@ def create_app() -> Starlette:
             status_code=401,
         )
 
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with mcp._session_manager.run():
+            yield
+
     routes: list = [
         Route('/health', health_endpoint, methods=['GET']),
         Mount('/mcp', app=mcp_stream),
@@ -780,6 +786,7 @@ def create_app() -> Starlette:
             ),
         ],
         routes=routes,
+        lifespan=lifespan,
     )
 
     return app

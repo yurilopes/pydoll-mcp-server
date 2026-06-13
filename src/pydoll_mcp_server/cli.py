@@ -43,6 +43,7 @@ def main() -> None:
     logger.set_level(args.log_level)
 
     if args.transport == 'stdio':
+        os.environ.setdefault('PYDOLL_MCP_TRANSPORT', 'stdio')
         logger.info('Starting Pydoll MCP Server via stdio')
         _run_stdio()
         return
