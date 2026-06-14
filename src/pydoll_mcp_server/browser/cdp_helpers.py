@@ -55,6 +55,38 @@ async def set_user_agent(
         ).to_dict()
 
 
+async def get_user_agent(
+    client_id: str,
+    tab_id: str,
+) -> dict[str, Any]:
+    registry = get_registry()
+
+    try:
+        tab_info = registry.get_tab(client_id, tab_id)
+        pydoll_tab = tab_info._pydoll_tab
+    except StructuredError as e:
+        return e.to_dict()
+
+    try:
+        result = await pydoll_tab.execute_script(
+            'return navigator.userAgent;',
+            return_by_value=True,
+        )
+        value = extract_script_value(result)
+        return {
+            'success': True,
+            'tab_id': tab_id,
+            'user_agent': str(value or ''),
+            'source': 'navigator.userAgent',
+        }
+    except Exception as e:
+        return StructuredError(
+            error_code=ErrorCode.EXECUTION_ERROR,
+            message=f'Failed to get user agent: {e}',
+            retryable=True,
+        ).to_dict()
+
+
 async def set_viewport(
     client_id: str,
     tab_id: str,
@@ -95,5 +127,41 @@ async def set_viewport(
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,
             message=f'Failed to set viewport: {e}',
+            retryable=True,
+        ).to_dict()
+
+
+async def get_viewport(
+    client_id: str,
+    tab_id: str,
+) -> dict[str, Any]:
+    registry = get_registry()
+
+    try:
+        tab_info = registry.get_tab(client_id, tab_id)
+        pydoll_tab = tab_info._pydoll_tab
+    except StructuredError as e:
+        return e.to_dict()
+
+    try:
+        js = """
+        return {
+            width: window.innerWidth,
+            height: window.innerHeight,
+            device_pixel_ratio: window.devicePixelRatio
+        };
+        """
+        result = await pydoll_tab.execute_script(js, return_by_value=True)
+        value = extract_script_value(result) or {}
+        return {
+            'success': True,
+            'tab_id': tab_id,
+            'viewport': value,
+            'source': 'window',
+        }
+    except Exception as e:
+        return StructuredError(
+            error_code=ErrorCode.EXECUTION_ERROR,
+            message=f'Failed to get viewport: {e}',
             retryable=True,
         ).to_dict()

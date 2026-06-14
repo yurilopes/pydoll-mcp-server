@@ -256,6 +256,8 @@ class TestMCPTools:
             'js_evaluate_readonly',
             'js_evaluate',
             'user_agent_set',
+            'user_agent_get',
             'viewport_set',
+            'viewport_get',
         }
         assert expected_p0.issubset(tool_names)

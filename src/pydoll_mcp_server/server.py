@@ -431,6 +431,15 @@ async def user_agent_set(
 
 
 @mcp.tool()
+async def user_agent_get(
+    client_id: str,
+    tab_id: str,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.browser.cdp_helpers import get_user_agent as impl
+    return await impl(client_id, tab_id)
+
+
+@mcp.tool()
 async def viewport_set(
     client_id: str,
     tab_id: str,
@@ -440,6 +449,15 @@ async def viewport_set(
 ) -> dict[str, Any]:
     from pydoll_mcp_server.browser.cdp_helpers import set_viewport as impl
     return await impl(client_id, tab_id, width, height, scale)
+
+
+@mcp.tool()
+async def viewport_get(
+    client_id: str,
+    tab_id: str,
+) -> dict[str, Any]:
+    from pydoll_mcp_server.browser.cdp_helpers import get_viewport as impl
+    return await impl(client_id, tab_id)
 
 
 @mcp.tool()
