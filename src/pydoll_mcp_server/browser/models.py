@@ -88,6 +88,10 @@ class BrowserInfo:
     profile: ProfileInfo | None = None
     health: ResourceHealth = ResourceHealth.HEALTHY
     headless: bool = False
+    proxy_server: str = ''
+    proxy_scheme: str = ''
+    proxy_has_credentials: bool = False
+    proxy_bypass_list: str = ''
     tabs: dict[str, TabInfo] = field(default_factory=dict)
     windows: dict[str, WindowInfo] = field(default_factory=dict)
     _pydoll_browser: Any = field(default=None, repr=False)
@@ -100,6 +104,11 @@ class BrowserInfo:
             'health': self.health.value,
             'tabs': len(self.tabs),
             'profile': self.profile.summary() if self.profile else None,
+            'proxy_enabled': bool(self.proxy_server),
+            'proxy_scheme': self.proxy_scheme,
+            'proxy_server': self.proxy_server,
+            'proxy_has_credentials': self.proxy_has_credentials,
+            'proxy_bypass_list': self.proxy_bypass_list,
         }
 
 

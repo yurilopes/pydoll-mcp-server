@@ -92,6 +92,13 @@ Lifecycle:
 - `tab_recover`
 - `tab_new`, `tab_duplicate`, `tab_health_check`, `tab_recreate`
 - `dialog_list`, `dialog_handle`, `popup_prepare`, `popup_wait`
+- `proxy_validate`, `proxy_get`
+
+`browser_launch` accepts an optional `proxy_server` using `http`, `https`,
+`socks4`, or `socks5`, plus an optional `proxy_bypass_list`. Proxy credentials
+may be embedded for Pydoll authentication, but MCP responses and browser
+listings expose only sanitized metadata without usernames or passwords. Proxy
+configuration is immutable after browser launch.
 
 Navigation:
 
@@ -177,10 +184,12 @@ The alpha covers simple iframes, same-origin nested iframes, and open shadow DOM
 - Free `execute_cdp_cmd` is not exposed.
 - Operating system commands are not exposed.
 - Arbitrary filesystem read or write is not exposed.
+- Navigation to `file://` is blocked completely. Serve local fixtures through loopback HTTP.
 - Screenshots, downloads, and uploads use controlled directories or an allowlist.
 - Cookies and storage are redacted by default on read.
 - Sensitive attributes such as tokens, passwords, and cookies are redacted.
 - Logs must redact bearer tokens, cookies, authorization headers, and sensitive fields.
+- Proxy credentials are never returned or stored in browser metadata.
 
 `js_evaluate` is a sensitive tool:
 

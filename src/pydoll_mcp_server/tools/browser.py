@@ -11,6 +11,7 @@ from pydoll_mcp_server.browser.pydoll_compat import get_tab_title, get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
 from pydoll_mcp_server.logging import get_logger
+from pydoll_mcp_server.security.proxy import validate_proxy
 
 
 async def browser_launch(
@@ -18,10 +19,18 @@ async def browser_launch(
     headless: bool = False,
     profile_mode: str = 'persistent',
     profile_id: str = '',
+    proxy_server: str = '',
+    proxy_bypass_list: str = '',
 ) -> dict[str, Any]:
     logger = get_logger()
     registry = get_registry()
     profile_mgr = get_profile_manager()
+    proxy = None
+    if proxy_server:
+        try:
+            proxy = validate_proxy(proxy_server, proxy_bypass_list)
+        except StructuredError as exc:
+            return exc.to_dict()
 
     if profile_mode == 'temporary':
         profile = profile_mgr.create_temporary(client_id)
@@ -55,6 +64,10 @@ async def browser_launch(
 
         options = ChromiumOptions()
         options.add_argument(f'--user-data-dir={profile.path}')
+        if proxy:
+            options.add_argument(f'--proxy-server={proxy.launch_url}')
+            if proxy.bypass_list:
+                options.add_argument(f'--proxy-bypass-list={proxy.bypass_list}')
         options.headless = headless
 
         browser = Chrome(options=options)
@@ -68,6 +81,10 @@ async def browser_launch(
             browser=browser,
             profile=profile,
             headless=headless,
+            proxy_server=proxy.sanitized_url if proxy else '',
+            proxy_scheme=proxy.scheme if proxy else '',
+            proxy_has_credentials=proxy.has_credentials if proxy else False,
+            proxy_bypass_list=proxy.bypass_list if proxy else '',
         )
 
         tab_info = registry.register_tab(
@@ -87,6 +104,10 @@ async def browser_launch(
             'tab_id': tab_info.tab_id,
             'profile_mode': profile.mode.value,
             'headless': headless,
+            'proxy_enabled': bool(proxy),
+            'proxy_server': proxy.sanitized_url if proxy else '',
+            'proxy_scheme': proxy.scheme if proxy else '',
+            'proxy_has_credentials': proxy.has_credentials if proxy else False,
         }
     except asyncio.TimeoutError:
         profile_mgr.unlock(profile.profile_id)
@@ -98,11 +119,14 @@ async def browser_launch(
         ).to_dict()
     except Exception as e:
         profile_mgr.unlock(profile.profile_id)
+        message = str(e)
+        if proxy:
+            message = message.replace(proxy.launch_url, proxy.sanitized_url)
         return StructuredError(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f'Failed to launch browser: {e}',
+            message=f'Failed to launch browser: {message}',
             retryable=True,
-            details={'error': str(e)},
+            details={'error': message},
         ).to_dict()
 
 
@@ -112,6 +136,22 @@ async def browser_list(client_id: str) -> dict[str, Any]:
     return {
         'success': True,
         'browsers': [b.summary() for b in browsers],
+    }
+
+
+async def proxy_get(client_id: str, browser_id: str) -> dict[str, Any]:
+    try:
+        browser = get_registry().get_browser(client_id, browser_id)
+    except StructuredError as exc:
+        return exc.to_dict()
+    return {
+        'success': True,
+        'browser_id': browser_id,
+        'proxy_enabled': bool(browser.proxy_server),
+        'proxy_server': browser.proxy_server,
+        'proxy_scheme': browser.proxy_scheme,
+        'proxy_has_credentials': browser.proxy_has_credentials,
+        'proxy_bypass_list': browser.proxy_bypass_list,
     }
 
 

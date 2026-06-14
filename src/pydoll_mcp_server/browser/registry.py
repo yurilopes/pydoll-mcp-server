@@ -35,6 +35,10 @@ class BrowserRegistry:
         browser: Any,
         profile: ProfileInfo,
         headless: bool = False,
+        proxy_server: str = '',
+        proxy_scheme: str = '',
+        proxy_has_credentials: bool = False,
+        proxy_bypass_list: str = '',
     ) -> BrowserInfo:
         client = self.get_or_create_client(client_id)
         browser_id = generate_id('br')
@@ -43,6 +47,10 @@ class BrowserRegistry:
             client_id=client_id,
             profile=profile,
             headless=headless,
+            proxy_server=proxy_server,
+            proxy_scheme=proxy_scheme,
+            proxy_has_credentials=proxy_has_credentials,
+            proxy_bypass_list=proxy_bypass_list,
             _pydoll_browser=browser,
         )
         client.browsers[browser_id] = info

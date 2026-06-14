@@ -56,6 +56,8 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
 - Network events are opt-in per tab via `network_enable`.
 - Network response bodies are size-limited and redacted by default.
 - Console inspection uses bounded, redacted Chromium Runtime events and returns `UNSUPPORTED` when unavailable.
+- Proxy URLs are validated before browser launch. Responses and browser metadata never expose proxy credentials.
+- Loopback and unspecified proxy hosts are blocked, and proxy settings cannot be changed after launch.
 
 ## Diagnostics and Trace
 

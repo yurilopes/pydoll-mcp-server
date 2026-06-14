@@ -3,91 +3,31 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import time
-from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_title, get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import extract_script_value
-from pydoll_mcp_server.config import get_config, get_timeout_config
+from pydoll_mcp_server.config import get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
 from pydoll_mcp_server.logging import OperationLog, get_logger
-from pydoll_mcp_server.security.policy import PathAllowlist
 
 URL_PATTERN = re.compile(r'^https?://')
-FILE_URL_PATTERN = re.compile(r'^file://', re.IGNORECASE)
-
-
-def _file_url_to_path(url: str) -> Path | None:
-    parsed = urlparse(url)
-    if parsed.scheme.lower() != 'file':
-        return None
-    if parsed.netloc and parsed.netloc.lower() not in ('localhost',):
-        return None
-    try:
-        return Path(url2pathname(unquote(parsed.path))).resolve(strict=False)
-    except Exception:
-        return None
-
-
-def _file_navigation_allowlist() -> PathAllowlist:
-    config = get_config()
-    allowed_dirs = [
-        str(Path.cwd()),
-        str(config.artifacts_dir),
-        str(config.downloads_dir),
-        str(config.tmp_dir),
-    ]
-    extra_allowed = os.environ.get('PYDOLL_MCP_FILE_ALLOWLIST', '')
-    if extra_allowed:
-        allowed_dirs.extend(extra_allowed.split(os.pathsep))
-    return PathAllowlist(allowed_dirs)
 
 
 def _normalize_navigation_url(url: str) -> tuple[str | None, StructuredError | None]:
     if URL_PATTERN.match(url):
         return url, None
 
-    if not FILE_URL_PATTERN.match(url):
-        return None, StructuredError(
-            error_code=ErrorCode.INVALID_INPUT,
-            message=(
-                f'Invalid URL: {url}. Must start with http://, https://, '
-                'or file:// for allowed local files'
-            ),
-            retryable=False,
-        )
-
-    path = _file_url_to_path(url)
-    if path is None:
-        return None, StructuredError(
-            error_code=ErrorCode.INVALID_INPUT,
-            message=f'Invalid file URL: {url}. Only local file URLs are allowed.',
-            retryable=False,
-        )
-    if not path.is_file():
-        return None, StructuredError(
-            error_code=ErrorCode.INVALID_INPUT,
-            message=f'Local file URL does not point to an existing file: {url}',
-            retryable=False,
-        )
-    if not _file_navigation_allowlist().is_allowed(str(path)):
-        return None, StructuredError(
-            error_code=ErrorCode.PERMISSION_DENIED,
-            message=f'Local file path not in allowed directories: {path}',
-            retryable=False,
-            recovery_hint=(
-                'Place the file under the server working directory or runtime '
-                'directories, or configure PYDOLL_MCP_FILE_ALLOWLIST.'
-            ),
-        )
-    return path.as_uri(), None
+    return None, StructuredError(
+        error_code=ErrorCode.INVALID_INPUT,
+        message=f'Invalid URL: {url}. Only http:// and https:// navigation is allowed.',
+        retryable=False,
+        recovery_hint='Serve local pages through a loopback HTTP server such as http://127.0.0.1.',
+    )
 
 
 async def page_goto(

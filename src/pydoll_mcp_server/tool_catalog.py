@@ -10,7 +10,8 @@ from mcp.server.fastmcp import FastMCP
 from pydoll_mcp_server.browser.cdp_helpers import get_user_agent, get_viewport, set_user_agent, set_viewport
 from pydoll_mcp_server.dom.deep_traversal import element_find_deep, page_get_tree_deep
 from pydoll_mcp_server.dom.tree import build_page_tree, page_get_text, page_screenshot
-from pydoll_mcp_server.tools.browser import browser_close, browser_launch, browser_list
+from pydoll_mcp_server.security.proxy import proxy_validate
+from pydoll_mcp_server.tools.browser import browser_close, browser_launch, browser_list, proxy_get
 from pydoll_mcp_server.tools.diagnostics import (
     browser_attach,
     diagnostics_snapshot,
@@ -99,6 +100,7 @@ Tool = Callable[..., Any]
 
 TOOLS: tuple[Tool, ...] = (
     health_check, server_status, browser_launch, browser_list, browser_close, browser_attach,
+    proxy_validate, proxy_get,
     tab_list, tab_activate, tab_close, tab_recover,
     page_goto, page_reload, page_back, page_forward, page_wait, page_get_text,
     build_page_tree, page_screenshot, page_get_tree_deep,

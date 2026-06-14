@@ -57,17 +57,9 @@ python -m pydoll_mcp_server.cli --transport stdio
 ```
 
 For sandboxed manual validation, set `PYDOLL_MCP_RUNTIME_DIR`, `TEMP`, and `TMP`
-to controlled temporary directories. `page_goto` accepts `http://`, `https://`,
-and `file://` for allowed local files. Local file navigation is limited to files
-under the server working directory, runtime directories, or directories listed in
-`PYDOLL_MCP_FILE_ALLOWLIST`:
-
-```powershell
-$env:PYDOLL_MCP_FILE_ALLOWLIST = "C:\path\to\allowed\fixtures"
-```
-
-For fixtures with iframe or network behavior, serving them through
-`http://127.0.0.1:<port>/...` remains the most browser-like validation path.
+to controlled temporary directories. `page_goto` accepts only `http://` and
+`https://`. Local fixtures must be served through a loopback HTTP server such as
+`http://127.0.0.1:<port>/...`. Navigation to `file://` is blocked completely.
 
 Suggested validation prompt:
 
@@ -76,7 +68,7 @@ Use the pydoll MCP server.
 
 1. Show server status.
 2. Launch a headless browser with a temporary profile.
-3. Open a local page through file:// or http://127.0.0.1.
+3. Open a local page served through http://127.0.0.1.
 4. Get the page tree.
 5. Click a button by the returned element_id.
 6. Fill an input with: Olá mundo, 日本語, 한국어, 中文.

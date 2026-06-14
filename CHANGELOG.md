@@ -8,11 +8,14 @@
 - Cancelable waits for URL, functions, element state, and network activity
 - Runtime console inspection, network summaries, and buffer cleanup
 - Two-phase popup and download workflows, safe PDF generation, and explicit tab recreation
+- Secure HTTP, HTTPS, SOCKS4, and SOCKS5 proxy configuration during browser launch
+- `proxy_validate` and `proxy_get` tools with credential-safe metadata
 
 ### Changed
 - Refactored Python modules to a flexible 400-line target with a 420-line hard gate
 - Made public documentation and project configuration portable across machines
 - Updated the declarative MCP tool catalog and capabilities for the v0.2 alpha
+- Blocked `file://` navigation completely to prevent indirect local filesystem reads
 
 ## 0.1.0a1 (2026-06-12)
 
