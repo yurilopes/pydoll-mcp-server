@@ -69,7 +69,7 @@ async def upload_files(
     element_id: str,
     paths: list[str],
 ) -> dict[str, Any]:
-    from pydoll_mcp_server.dom.element_cache import get_element_cache
+    from pydoll_mcp_server.tools.element_resolver import _resolve_element
 
     server_config = get_config()
     registry = get_registry()
@@ -98,16 +98,13 @@ async def upload_files(
     except StructuredError as e:
         return e.to_dict()
 
-    cache = get_element_cache()
-    entry = cache.get_valid(element_id, tab_info.tab_id, tab_info.document_generation)
-    if not entry or not entry._pydoll_element:
+    element = await _resolve_element(tab_info, element_id)
+    if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
             message=f'Element {element_id} is stale',
             retryable=False,
         ).to_dict()
-
-    element = entry._pydoll_element
 
     try:
         await element.set_input_files(paths)

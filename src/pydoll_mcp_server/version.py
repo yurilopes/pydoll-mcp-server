@@ -8,4 +8,4 @@ def get_version() -> str:
         from importlib.metadata import version
         return version('pydoll-mcp-server')
     except Exception:
-        return '0.1.0a1'
+        return '0.2.0a1'

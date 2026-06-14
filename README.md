@@ -6,7 +6,7 @@ This project offers a local alternative to the Playwright MCP Server, with its o
 
 ## Status
 
-Local alpha (v0.1.0a1). HTTP on `127.0.0.1` is the primary transport. `stdio` transport is available as an option (`--transport stdio`).
+Experimental alpha (v0.2.0a1). HTTP on `127.0.0.1` is the primary transport. `stdio` transport is available as an option (`--transport stdio`).
 
 Endpoints:
 - `/health` - Health check (no auth)
@@ -19,16 +19,10 @@ Endpoints:
 - Chrome or Chromium installed
 - Pydoll `>=2.23.0`
 
-On this machine, Python is available via Anaconda at:
-
-```text
-C:\Users\Yuri\anaconda3\python.exe
-```
-
 ## Installation
 
 ```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 For release distribution:
@@ -54,13 +48,13 @@ export PYDOLL_MCP_AUTH_TOKEN="your-secret-token"
 Start the server (HTTP, the default):
 
 ```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli --host 127.0.0.1 --port 8765
+python -m pydoll_mcp_server.cli --host 127.0.0.1 --port 8765
 ```
 
 Or via stdio:
 
 ```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli --transport stdio
+python -m pydoll_mcp_server.cli --transport stdio
 ```
 
 Endpoints:
@@ -96,6 +90,8 @@ Lifecycle:
 - `tab_activate`
 - `tab_close`
 - `tab_recover`
+- `tab_new`, `tab_duplicate`, `tab_health_check`, `tab_recreate`
+- `dialog_list`, `dialog_handle`, `popup_prepare`, `popup_wait`
 
 Navigation:
 
@@ -104,6 +100,8 @@ Navigation:
 - `page_back`
 - `page_forward`
 - `page_wait`
+- `page_wait_for_url`, `page_wait_for_function`
+- `page_scroll`, `page_scroll_to`
 
 Observation:
 
@@ -111,6 +109,9 @@ Observation:
 - `page_get_tree`
 - `page_get_tree_deep`
 - `page_screenshot`
+- `page_snapshot`, `page_diff`
+- `page_get_accessibility_tree`, `frame_list`, `frame_snapshot`
+- `page_print_pdf`
 
 Elements:
 
@@ -122,6 +123,10 @@ Elements:
 - `element_get_text`
 - `element_get_attribute`
 - `element_screenshot`
+- `element_get_state`, `element_wait_for_state`
+- `element_select_option`, `element_check`, `element_uncheck`
+- `element_hover`, `element_scroll_into_view`, `keyboard_press`
+- semantic finders by role, text, label, placeholder, and test ID
 
 JavaScript and advanced helpers:
 
@@ -134,7 +139,9 @@ JavaScript and advanced helpers:
 - `storage_get`
 - `storage_set`
 - `download_expect`
+- `download_prepare`, `download_wait`, `download_list`, `download_get_info`
 - `upload_files`
+- `operation_cancel`
 
 Network inspection:
 
@@ -142,10 +149,12 @@ Network inspection:
 - `network_disable`
 - `network_list`
 - `network_get_response`
+- `network_summary`, `network_clear`
+- `network_wait_for_request`, `network_wait_for_response`
 
 Console inspection:
 
-- `console_enable`, `console_disable`, `console_list` (return `UNSUPPORTED`)
+- `console_enable`, `console_disable`, `console_list`
 
 ## Agent-friendly model
 
@@ -216,44 +225,33 @@ Do not mix vendored documentation with MCP server code.
 Core gates:
 
 ```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pytest -q
-C:\Users\Yuri\anaconda3\python.exe -m ruff check .
-C:\Users\Yuri\anaconda3\python.exe -m mypy src
-C:\Users\Yuri\anaconda3\python.exe -m pytest -m browser_smoke -q
+python -m pytest -q
+python -m ruff check .
+python -m mypy src
+python -m pytest -m browser_smoke -q
 ```
 
 Useful test suites by area:
 
 ```powershell
-C:\Users\Yuri\anaconda3\python.exe -m pytest tests\contract -q
-C:\Users\Yuri\anaconda3\python.exe -m pytest tests\unit\test_concurrency.py -q
-C:\Users\Yuri\anaconda3\python.exe -m pytest tests\unit\test_security.py tests\unit\test_files_security.py -q
-C:\Users\Yuri\anaconda3\python.exe -m pytest tests\p2\ -q
+python -m pytest tests/contract -q
+python -m pytest tests/unit/test_concurrency.py -q
+python -m pytest tests/unit/test_security.py tests/unit/test_files_security.py -q
+python -m pytest tests/p2/ -q
 ```
 
 `browser_smoke` opens Chrome/Chromium headless and validates real flows with local fixtures.
 
 ## Known limitations
 
-- Console inspection is not available (returns `UNSUPPORTED`; depends on additional Pydoll Runtime API validation).
+- Console inspection depends on Chromium Runtime events and may return `UNSUPPORTED` when unavailable.
 - `browser_attach` does not support reconnection across server sessions (returns `UNSUPPORTED`).
+- JavaScript dialogs can block the originating browser command; handle them from an independent MCP request.
 - Closed shadow roots and complex OOPIFs still require dedicated validation.
 - Deep traversal is more expensive than `page_get_tree` and should be used explicitly.
 - Downloads depend on Pydoll's `expect_download` flow and must remain in the controlled runtime dir.
 - Uploads must only use paths allowed by the allowlist.
-
-## Plans and progress
-
-- Overview: `PLAN.md`
-- P1: `plans/PLAN_P1.md` (completed)
-- P2: `plans/PLAN_P2.md` (completed)
-- Agent progress logs: `progress/`
-
-Agents should log short progress entries at:
-
-```text
-progress/YYYY-MM-DD_AGENT_PLAN_XX.md
-```
+- `operation_cancel` currently applies to waits that receive an explicit caller-provided `operation_id`.
 
 ## License
 

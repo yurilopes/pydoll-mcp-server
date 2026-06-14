@@ -1,12 +1,12 @@
 # Release Checklist
 
-## 0.1.0a1 - Experimental Alpha
+## 0.2.0a1 - Experimental Alpha
 
 ### Pre-release checks
-- [x] `pytest -q`: 184 passed
+- [x] `pytest -q`: 200 passed
 - [x] `ruff check .`: All checks passed
-- [x] `mypy src`: Success (38 source files)
-- [x] `pytest -m browser_smoke -q`: 9 passed
+- [x] `mypy src`: Success (52 source files)
+- [x] `pytest -m browser_smoke -q`: 11 passed
 - [x] `sdist` and `wheel` built successfully
 - [x] Wheel installed in temporary venv and import verified
 - [x] `LICENSE` exists (MIT)
@@ -24,10 +24,10 @@
 - [x] `stdio` probe passes: `'' | python -m pydoll_mcp_server.cli --transport stdio`
 
 ### Version consistency
-- [x] `pyproject.toml`: `0.1.0a1`
-- [x] `health_check["version"]`: `0.1.0a1`
-- [x] `server_status["version"]`: `0.1.0a1`
-- [x] `/health` response: `version: 0.1.0a1`
+- [x] `pyproject.toml`: `0.2.0a1`
+- [x] `health_check["version"]`: `0.2.0a1`
+- [x] `server_status["version"]`: `0.2.0a1`
+- [x] `/health` response: `version: 0.2.0a1`
 
 ### Tool coverage
 - [x] Lifecycle: launch, list, close
@@ -41,7 +41,7 @@
 - [x] Storage: cookies_get/set, storage_get/set
 - [x] Files: download_expect, upload_files
 - [x] Network: enable, disable, list, get_response (with redaction)
-- [x] Console: enable, disable, list (returns UNSUPPORTED)
+- [x] Console: enable, disable, list using bounded Runtime events
 - [x] Diagnostics: snapshot (with trace integration)
 - [x] Trace: start, stop, get, cleanup (real events, not stubs)
 - [x] Attach: browser_attach (returns UNSUPPORTED, ownership validated)
@@ -53,7 +53,7 @@
 - [x] trace start/stop/get/cleanup tested
 - [x] trace integration with diagnostics_snapshot and network_* tested
 - [x] capabilities and schema_version tested
-- [x] console UNSUPPORTED tested
+- [x] console behavior and unavailable-runtime fallback tested
 - [x] browser_attach ownership and no-arbitrary-input tested
 
 ### Security validation

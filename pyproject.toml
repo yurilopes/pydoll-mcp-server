@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pydoll-mcp-server"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "MCP server for browser automation using Pydoll"
 readme = "README.md"
 license = {text = "MIT"}
@@ -67,9 +67,6 @@ check_untyped_defs = true
 
 [tool.pyright]
 pythonVersion = "3.10"
-pythonPlatform = "Windows"
-venvPath = "C:/Users/Yuri/anaconda3"
-venv = "."
 typeCheckingMode = "basic"
 
 [tool.pytest.ini_options]

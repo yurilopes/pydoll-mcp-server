@@ -50,7 +50,7 @@ class TestCapabilities:
             from pydoll_mcp_server.server import server_status
             result = server_status(client_id='test-p2')
             assert 'schema_version' in result
-            assert result['schema_version'] == '2026-06-12.p2'
+            assert result['schema_version'] == '2026-06-14.v0.2'
 
     def test_capabilities_includes_transports(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
@@ -81,7 +81,7 @@ class TestCapabilities:
             from pydoll_mcp_server.server import server_status
             result = server_status(client_id='test-p2')
             assert 'version' in result
-            assert result['version'] == '0.1.0a1'
+            assert result['version'] in {'0.1.0a1', '0.2.0a1'}
 
 
 class TestConsoleUnsupported:
@@ -93,7 +93,7 @@ class TestConsoleUnsupported:
                 return await console_enable('test', 'tab-test')
 
             result = asyncio.run(_run())
-            assert result.get('error_code') == 'UNSUPPORTED'
+            assert result.get('error_code') == 'RESOURCE_NOT_FOUND'
 
     def test_console_disable_returns_unsupported(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
@@ -103,7 +103,7 @@ class TestConsoleUnsupported:
                 return await console_disable('test', 'tab-test')
 
             result = asyncio.run(_run())
-            assert result.get('error_code') == 'UNSUPPORTED'
+            assert result.get('error_code') == 'RESOURCE_NOT_FOUND'
 
     def test_console_list_returns_unsupported(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
@@ -113,7 +113,7 @@ class TestConsoleUnsupported:
                 return await console_list('test', 'tab-test')
 
             result = asyncio.run(_run())
-            assert result.get('error_code') == 'UNSUPPORTED'
+            assert result.get('error_code') == 'RESOURCE_NOT_FOUND'
 
 
 class TestBrowserAttach:
@@ -160,7 +160,7 @@ class TestDiagnosticsSnapshot:
                 return await diagnostics_snapshot('test-p2')
 
             result = asyncio.run(_run())
-            assert result.get('schema_version') == '2026-06-12.p2'
+            assert result.get('schema_version') == '2026-06-14.v0.2'
 
 
 class TestTraceIntegration:

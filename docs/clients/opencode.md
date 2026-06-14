@@ -27,13 +27,12 @@ In your OpenCode project config (`.opencode/opencode.jsonc`):
 
 ## stdio transport (optional)
 
-For Windows native mode, prefer the Anaconda Python used by this project and keep
-stdio UTF-8 explicit:
+For Windows native mode, keep stdio UTF-8 explicit:
 
 ```powershell
 $env:PYDOLL_MCP_ALLOW_NO_AUTH = "true"
 $env:PYTHONIOENCODING = "utf-8"
-C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli --transport stdio
+python -m pydoll_mcp_server.cli --transport stdio
 ```
 
 ```jsonc
@@ -42,7 +41,7 @@ C:\Users\Yuri\anaconda3\python.exe -m pydoll_mcp_server.cli --transport stdio
     "pydoll-mcp": {
       "type": "local",
       "command": [
-        "C:\\Users\\Yuri\\anaconda3\\python.exe",
+        "python",
         "-m",
         "pydoll_mcp_server.cli",
         "--transport",
@@ -64,7 +63,7 @@ under the server working directory, runtime directories, or directories listed i
 `PYDOLL_MCP_FILE_ALLOWLIST`:
 
 ```powershell
-$env:PYDOLL_MCP_FILE_ALLOWLIST = "C:\Users\Yuri\Documents\Git\pydoll-mcp-server\tests\fixtures\pages"
+$env:PYDOLL_MCP_FILE_ALLOWLIST = "C:\path\to\allowed\fixtures"
 ```
 
 For fixtures with iframe or network behavior, serving them through

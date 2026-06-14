@@ -23,12 +23,15 @@ def _redact_url(url: str) -> str:
 def _normalize_network_log(log: dict) -> dict:
     params = log.get('params', {}) if isinstance(log, dict) else {}
     request = params.get('request', {}) if isinstance(params, dict) else {}
+    response = params.get('response', {}) if isinstance(params, dict) else {}
     return {
         'request_id': params.get('requestId', ''),
-        'url': _redact_url(str(request.get('url', ''))),
+        'url': _redact_url(str(request.get('url') or response.get('url', ''))),
         'method': request.get('method', ''),
+        'status': response.get('status', 0),
         'type': params.get('type', ''),
         'timestamp': params.get('timestamp', 0),
+        'event': log.get('method', ''),
     }
 
 
@@ -76,7 +79,7 @@ async def network_disable(
     with contextlib.suppress(Exception):
         await pydoll_tab.disable_network_events()
 
-    get_inspection_manager().get(tab_id).clear_network()
+    get_inspection_manager().get(tab_id).disable_network()
     return {'success': True, 'tab_id': tab_id, 'network_enabled': False}
 
 
@@ -104,10 +107,8 @@ async def network_list(
         ).to_dict()
 
     logs = raw_logs if isinstance(raw_logs, list) else []
-    events = [
-        _normalize_network_log(log) for log in logs
-        if isinstance(log, dict) and log.get('params', {}).get('request', {}).get('url')
-    ]
+    events = [_normalize_network_log(log) for log in logs if isinstance(log, dict)]
+    events = [event for event in events if event.get('url')]
 
     if filter_url:
         events = [e for e in events if filter_url in e.get('url', '')]
@@ -182,26 +183,51 @@ async def console_enable(
     tab_id: str,
     max_events: int = 1000,
 ) -> dict[str, Any]:
-    return StructuredError(
-        error_code=ErrorCode.UNSUPPORTED,
-        message=(
-            'Console inspection is not yet supported with the installed '
-            'Pydoll runtime event API.'
-        ),
-        retryable=False,
-        details={'reason': 'Runtime domain events require additional Pydoll API validation.'},
-    ).to_dict()
+    try:
+        tab = get_registry().get_tab(client_id, tab_id)._pydoll_tab
+        state = get_inspection_manager().get(tab_id)
+        state.max_events = max(1, min(max_events, 10000))
+        if state.console_enabled:
+            return {'success': True, 'tab_id': tab_id, 'console_enabled': True}
+        from pydoll.protocol.runtime.events import RuntimeEvent
+
+        async def on_console(event: dict) -> None:
+            params = event.get('params', {})
+            values = []
+            for arg in params.get('args', []):
+                value = arg.get('value', arg.get('description', '')) if isinstance(arg, dict) else str(arg)
+                values.append(_redact_sensitive(str(value))[:4000])
+            state.add_console_event({
+                'level': params.get('type', 'log'),
+                'text': ' '.join(values),
+                'timestamp': params.get('timestamp', 0),
+            })
+
+        await tab.enable_runtime_events()
+        state.console_callback_id = await tab.on(RuntimeEvent.CONSOLE_API_CALLED, on_console)
+        state.console_enabled = True
+        return {'success': True, 'tab_id': tab_id, 'console_enabled': True}
+    except StructuredError as exc:
+        return exc.to_dict()
+    except Exception as exc:
+        return StructuredError(ErrorCode.UNSUPPORTED, f'Console inspection unavailable: {exc}').to_dict()
 
 
 async def console_disable(
     client_id: str,
     tab_id: str,
 ) -> dict[str, Any]:
-    return StructuredError(
-        error_code=ErrorCode.UNSUPPORTED,
-        message='Console inspection is not yet supported.',
-        retryable=False,
-    ).to_dict()
+    try:
+        tab = get_registry().get_tab(client_id, tab_id)._pydoll_tab
+        state = get_inspection_manager().get(tab_id)
+        if state.console_callback_id is not None:
+            await tab.remove_callback(state.console_callback_id)
+        state.disable_console()
+        return {'success': True, 'tab_id': tab_id, 'console_enabled': False}
+    except StructuredError as exc:
+        return exc.to_dict()
+    except Exception as exc:
+        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Console disable failed: {exc}').to_dict()
 
 
 async def console_list(
@@ -210,11 +236,41 @@ async def console_list(
     filter_level: str = '',
     limit: int = 100,
 ) -> dict[str, Any]:
-    return StructuredError(
-        error_code=ErrorCode.UNSUPPORTED,
-        message='Console inspection is not yet supported.',
-        retryable=False,
-    ).to_dict()
+    try:
+        get_registry().get_tab(client_id, tab_id)
+        events = get_inspection_manager().get(tab_id).console_events
+        if filter_level:
+            events = [event for event in events if event.get('level') == filter_level]
+        selected = events[-max(0, min(limit, 1000)):]
+        return {'success': True, 'events': selected, 'count': len(selected), 'total': len(events)}
+    except StructuredError as exc:
+        return exc.to_dict()
+
+
+async def network_summary(client_id: str, tab_id: str) -> dict[str, Any]:
+    result = await network_list(client_id, tab_id, limit=1000)
+    if not result.get('success'):
+        return result
+    events = result.get('events', [])
+    methods: dict[str, int] = {}
+    types: dict[str, int] = {}
+    statuses: dict[str, int] = {}
+    for event in events:
+        methods[event.get('method', '')] = methods.get(event.get('method', ''), 0) + 1
+        types[event.get('type', '')] = types.get(event.get('type', ''), 0) + 1
+        if event.get('status'):
+            key = str(event['status'])
+            statuses[key] = statuses.get(key, 0) + 1
+    return {'success': True, 'total': len(events), 'methods': methods, 'types': types, 'statuses': statuses}
+
+
+async def network_clear(client_id: str, tab_id: str) -> dict[str, Any]:
+    try:
+        get_registry().get_tab(client_id, tab_id)
+        get_inspection_manager().get(tab_id).clear_network()
+        return {'success': True, 'tab_id': tab_id, 'cleared': True}
+    except StructuredError as exc:
+        return exc.to_dict()
 
 
 def _trace_event(

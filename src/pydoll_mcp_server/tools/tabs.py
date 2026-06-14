@@ -11,7 +11,7 @@ from pydoll_mcp_server.browser.pydoll_compat import get_tab_title, get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
 from pydoll_mcp_server.logging import get_logger
-from pydoll_mcp_server.server import get_server_state
+from pydoll_mcp_server.server_state import get_server_state
 
 
 async def tab_list(

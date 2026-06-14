@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
@@ -11,13 +10,20 @@ from pydoll_mcp_server.browser.pydoll_compat import (
     get_element_text,
 )
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_value
 from pydoll_mcp_server.config import get_config, get_limits_config, get_timeout_config
-from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
+from pydoll_mcp_server.dom.element_cache import get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.logging import get_logger
 from pydoll_mcp_server.security.paths import validate_artifact_path
 from pydoll_mcp_server.security.policy import is_sensitive_field
+from pydoll_mcp_server.tools.element_resolver import (
+    _cache_element,
+    _read_element_value_via_js,
+    _resolve_element,
+    _safe_is_visible,
+    _safe_text,
+    _set_element_value_via_js,
+)
 
 
 async def element_find(
@@ -359,107 +365,3 @@ async def element_screenshot(
             message=f'Element screenshot failed: {e}',
             retryable=True,
         ).to_dict()
-
-
-async def _resolve_element(tab_info: Any, element_id: str) -> Any:
-    cache = get_element_cache()
-    entry = cache.get_valid(element_id, tab_info.tab_id, tab_info.document_generation)
-    if entry is None:
-        return None
-
-    if entry._pydoll_element is not None:
-        return entry._pydoll_element
-
-    pydoll_tab = tab_info._pydoll_tab
-    if pydoll_tab is None:
-        return None
-
-    hints_to_try = []
-    if entry.selector_hint:
-        hints_to_try.append(('css', entry.selector_hint))
-    if entry.xpath_hint:
-        hints_to_try.append(('xpath', entry.xpath_hint))
-
-    for _strategy, hint in hints_to_try:
-        try:
-            element = await pydoll_tab.query(
-                hint, timeout=5, find_all=False, raise_exc=False,
-            )
-            if element is not None:
-                entry._pydoll_element = element
-                cache.store(entry)
-                return element
-        except Exception:
-            continue
-
-    return None
-
-
-def _cache_element(cache: Any, tab_info: Any, element: Any) -> str:
-    import uuid
-    element_id = f'el_{uuid.uuid4().hex[:12]}'
-    text_summary = ''
-    tag = ''
-    try:
-        if hasattr(element, 'tag_name'):
-            tag = element.tag_name or ''
-    except Exception:
-        pass
-    entry = ElementCacheEntry(
-        element_id=element_id,
-        tab_id=tab_info.tab_id,
-        document_generation=tab_info.document_generation,
-        tag_name=tag,
-        text_summary=text_summary,
-        _pydoll_element=element,
-    )
-    cache.store(entry)
-    return element_id
-
-
-async def _safe_text(element: Any) -> str:
-    return await get_element_text(element)
-
-
-async def _safe_is_visible(element: Any) -> bool:
-    try:
-        result = await element.is_visible()
-        return bool(result)
-    except Exception:
-        return False
-
-
-async def _set_element_value_via_js(element: Any, value: str) -> None:
-    value_literal = json.dumps(value)
-    script = f"""
-    const nextValue = {value_literal};
-    if (this.tagName === 'INPUT' || this.tagName === 'TEXTAREA') {{
-        this.value = nextValue;
-        this.dispatchEvent(new Event('input', {{ bubbles: true }}));
-        this.dispatchEvent(new Event('change', {{ bubbles: true }}));
-        return this.value;
-    }}
-    if (this.isContentEditable) {{
-        this.textContent = nextValue;
-        this.dispatchEvent(new Event('input', {{ bubbles: true }}));
-        return this.textContent;
-    }}
-    return null;
-    """
-    result = await element.execute_script(script, return_by_value=True)
-    actual = extract_script_value(result)
-    if actual != value:
-        raise ValueError('Element value could not be set through JavaScript fallback')
-
-
-async def _read_element_value_via_js(element: Any) -> str | None:
-    result = await element.execute_script(
-        """
-        if (this.tagName === 'INPUT' || this.tagName === 'TEXTAREA') return this.value;
-        if (this.isContentEditable) return this.textContent;
-        return null;
-        """,
-        return_by_value=True,
-    )
-    actual = extract_script_value(result)
-    return actual if isinstance(actual, str) else None

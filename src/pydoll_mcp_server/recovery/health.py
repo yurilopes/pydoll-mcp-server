@@ -9,7 +9,7 @@ from pydoll_mcp_server.browser.models import ResourceHealth
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import extract_script_value
 from pydoll_mcp_server.errors import StructuredError
-from pydoll_mcp_server.server import get_server_state
+from pydoll_mcp_server.server_state import get_server_state
 
 HEALTH_CHECK_JS = 'return {url: location.href, title: document.title, readyState: document.readyState};'
 

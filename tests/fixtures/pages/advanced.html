@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Advanced Test</title></head>
+<body>
+<label for="agent-input">Agent input</label>
+<input id="agent-input" data-testid="agent-input" placeholder="Agent text">
+<label><input id="agree" type="checkbox"> Agree</label>
+<select id="choice"><option value="one">One</option><option value="two">Two</option></select>
+<button id="change" role="button" onclick="document.getElementById('result').textContent='changed'">Change</button>
+<button id="log" onclick="console.log('safe console message')">Log</button>
+<button id="dialog" onclick="alert('dialog message')">Dialog</button>
+<a id="popup" target="_blank" href="simple.html">Popup</a>
+<a id="download" download="sample.txt" href="data:text/plain,download-content">Download</a>
+<div id="result"></div>
+</body>
+</html>

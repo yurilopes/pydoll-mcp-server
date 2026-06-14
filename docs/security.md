@@ -55,7 +55,7 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
 
 - Network events are opt-in per tab via `network_enable`.
 - Network response bodies are size-limited and redacted by default.
-- Console inspection returns `UNSUPPORTED` (pending Pydoll runtime event validation).
+- Console inspection uses bounded, redacted Chromium Runtime events and returns `UNSUPPORTED` when unavailable.
 
 ## Diagnostics and Trace
 

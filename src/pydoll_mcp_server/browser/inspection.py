@@ -11,6 +11,7 @@ class InspectionState:
         self.console_events: list[dict] = []
         self.network_enabled: bool = False
         self.console_enabled: bool = False
+        self.console_callback_id: int | None = None
         self.max_events = max_events
 
     def add_network_event(self, event: dict) -> None:
@@ -25,11 +26,18 @@ class InspectionState:
 
     def clear_network(self) -> None:
         self.network_events.clear()
+
+    def disable_network(self) -> None:
+        self.clear_network()
         self.network_enabled = False
 
     def clear_console(self) -> None:
         self.console_events.clear()
+
+    def disable_console(self) -> None:
+        self.clear_console()
         self.console_enabled = False
+        self.console_callback_id = None
 
 
 class InspectionManager:
