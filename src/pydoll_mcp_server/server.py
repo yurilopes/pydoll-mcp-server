@@ -757,6 +757,7 @@ def create_app() -> Starlette:
     config.ensure_directories()
 
     mcp_stream = mcp.streamable_http_app()
+    session_manager = mcp.session_manager
     mcp_sse = mcp.sse_app()
 
     def auth_error(request: Any, exc: Exception) -> JSONResponse:
@@ -767,7 +768,7 @@ def create_app() -> Starlette:
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
-        async with mcp._session_manager.run():
+        async with session_manager.run():
             yield
 
     routes: list = [
