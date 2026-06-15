@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+
+from pydoll.protocol.network.types import CookieParam
+from typing_extensions import NotRequired, TypedDict
 
 from pydoll_mcp_server.browser.locks import browser_operation_lock, tab_operation_lock
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_value
+from pydoll_mcp_server.browser.script_utils import extract_script_number, extract_script_object
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_object
+
+
+class StorageSetItem(TypedDict):
+    key: str
+    value: str
+    type: NotRequired[str]
 
 
 async def cookies_get(
@@ -17,7 +26,7 @@ async def cookies_get(
     tab_id: str = '',
     url_filter: str = '',
     redact_values: bool = True,
-) -> dict[str, Any]:
+) -> JsonObject:
     if not browser_id and not tab_id:
         return StructuredError(
             error_code=ErrorCode.INVALID_INPUT,
@@ -30,7 +39,7 @@ async def cookies_get(
     try:
         if tab_id:
             tab_info = registry.get_tab(client_id, tab_id)
-            pydoll_tab = tab_info._pydoll_tab
+            pydoll_tab = tab_info.pydoll_tab
             raw_cookies = await pydoll_tab.get_cookies()
         else:
             browser = registry.get_pydoll_browser(client_id, browser_id)
@@ -44,25 +53,24 @@ async def cookies_get(
             retryable=True,
         ).to_dict()
 
-    cookies = []
-    for c in (raw_cookies or []):
-        entry = {
-            'name': c.get('name', '') if isinstance(c, dict) else getattr(c, 'name', ''),
-            'domain': c.get('domain', '') if isinstance(c, dict) else getattr(c, 'domain', ''),
-            'path': c.get('path', '/') if isinstance(c, dict) else getattr(c, 'path', '/'),
-            'value': '[REDACTED]' if redact_values else (
-                c.get('value', '') if isinstance(c, dict) else getattr(c, 'value', '')
-            ),
-            'http_only': c.get('httpOnly', False) if isinstance(c, dict) else getattr(c, 'httpOnly', False),
-            'secure': c.get('secure', False) if isinstance(c, dict) else getattr(c, 'secure', False),
+    cookies: list[JsonObject] = []
+    for c in raw_cookies or []:
+        entry: JsonObject = {
+            'name': c['name'],
+            'domain': c['domain'],
+            'path': c['path'],
+            'value': '[REDACTED]' if redact_values else c['value'],
+            'http_only': c['httpOnly'],
+            'secure': c['secure'],
         }
-        if url_filter and url_filter not in entry.get('domain', ''):
+        if url_filter and url_filter not in c['domain']:
             continue
         cookies.append(entry)
 
+    cookie_values: JsonArray = list(cookies)
     return {
         'success': True,
-        'cookies': cookies,
+        'cookies': cookie_values,
         'count': len(cookies),
         'redacted': redact_values,
     }
@@ -72,8 +80,8 @@ async def cookies_set(
     client_id: str,
     browser_id: str = '',
     tab_id: str = '',
-    cookies: list[dict] | None = None,
-) -> dict[str, Any]:
+    cookies: list[CookieParam] | None = None,
+) -> JsonObject:
     if not browser_id and not tab_id:
         return StructuredError(
             error_code=ErrorCode.INVALID_INPUT,
@@ -94,7 +102,7 @@ async def cookies_set(
         if tab_id:
             async with tab_operation_lock(tab_id):
                 tab_info = registry.get_tab(client_id, tab_id)
-                pydoll_tab = tab_info._pydoll_tab
+                pydoll_tab = tab_info.pydoll_tab
                 await pydoll_tab.set_cookies(cookies)
         else:
             async with browser_operation_lock(browser_id):
@@ -112,7 +120,7 @@ async def cookies_set(
     return {
         'success': True,
         'count': len(cookies),
-        'domains': list({c.get('domain', '') for c in cookies if isinstance(c, dict)}),
+        'domains': list({c.get('domain', '') for c in cookies}),
     }
 
 
@@ -122,7 +130,7 @@ async def storage_get(
     origin: str = '',
     keys: list[str] | None = None,
     redact_values: bool = True,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
 
     try:
@@ -130,7 +138,7 @@ async def storage_get(
     except StructuredError as e:
         return e.to_dict()
 
-    pydoll_tab = tab_info._pydoll_tab
+    pydoll_tab = tab_info.pydoll_tab
 
     try:
         js_keys = json.dumps(keys) if keys else 'null'
@@ -159,7 +167,7 @@ async def storage_get(
         return result;
         """
         result = await pydoll_tab.execute_script(js, return_by_value=True)
-        raw = extract_script_value(result) or {}
+        raw = extract_script_object(result)
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,
@@ -167,10 +175,10 @@ async def storage_get(
             retryable=True,
         ).to_dict()
 
-    if redact_values and isinstance(raw, dict):
+    if redact_values:
         for storage_type in ('local', 'session'):
-            if storage_type in raw and isinstance(raw[storage_type], dict):
-                raw[storage_type] = dict.fromkeys(raw[storage_type], '[REDACTED]')
+            values = get_object(raw, storage_type, {})
+            raw[storage_type] = dict.fromkeys(values, '[REDACTED]')
 
     return {
         'success': True,
@@ -183,8 +191,8 @@ async def storage_set(
     client_id: str,
     tab_id: str,
     origin: str = '',
-    items: list[dict] | None = None,
-) -> dict[str, Any]:
+    items: list[StorageSetItem] | None = None,
+) -> JsonObject:
     if not items:
         return StructuredError(
             error_code=ErrorCode.INVALID_INPUT,
@@ -199,7 +207,7 @@ async def storage_set(
     except StructuredError as e:
         return e.to_dict()
 
-    pydoll_tab = tab_info._pydoll_tab
+    pydoll_tab = tab_info.pydoll_tab
 
     js_items = json.dumps(items)
     js = f"""
@@ -215,8 +223,7 @@ async def storage_set(
     try:
         async with tab_operation_lock(tab_id):
             result = await pydoll_tab.execute_script(js, return_by_value=True)
-            raw_count = extract_script_value(result)
-            count = int(raw_count) if isinstance(raw_count, int | float) else len(items)
+            count = int(extract_script_number(result))
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,

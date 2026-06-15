@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -96,41 +95,119 @@ from pydoll_mcp_server.tools.waits import (
     page_wait_for_url,
 )
 
-Tool = Callable[..., Any]
+Tool = Callable[..., object]
 
 TOOLS: tuple[Tool, ...] = (
-    health_check, server_status, browser_launch, browser_list, browser_close, browser_attach,
-    proxy_validate, proxy_get,
-    tab_list, tab_activate, tab_close, tab_recover,
-    page_goto, page_reload, page_back, page_forward, page_wait, page_get_text,
-    build_page_tree, page_screenshot, page_get_tree_deep,
-    element_find, element_find_deep, element_click, element_type, element_fill,
-    element_get_text, element_get_attribute, element_screenshot,
-    js_evaluate_readonly, js_evaluate, set_user_agent, get_user_agent, set_viewport, get_viewport,
-    cookies_get, cookies_set, storage_get, storage_set, download_expect, upload_files,
-    network_enable, network_disable, network_list, network_get_response,
-    console_enable, console_disable, console_list,
-    diagnostics_snapshot, trace_start, trace_stop, trace_get, trace_cleanup,
-    tab_new, tab_duplicate, tab_health_check, tab_recreate,
-    element_get_state, element_select_option, element_check, element_uncheck, element_hover,
-    element_scroll_into_view, element_find_by_role, element_find_by_text, element_find_by_label,
-    element_find_by_placeholder, element_find_by_test_id, keyboard_press,
-    page_scroll, page_scroll_to, page_snapshot, page_diff, page_get_accessibility_tree,
-    frame_list, frame_snapshot, page_wait_for_url, page_wait_for_function, element_wait_for_state,
-    network_wait_for_request, network_wait_for_response, operation_cancel,
-    network_summary, network_clear, dialog_list, dialog_handle, popup_prepare, popup_wait,
-    download_prepare, download_wait, download_list, download_get_info, page_print_pdf,
+    health_check,
+    server_status,
+    browser_launch,
+    browser_list,
+    browser_close,
+    browser_attach,
+    proxy_validate,
+    proxy_get,
+    tab_list,
+    tab_activate,
+    tab_close,
+    tab_recover,
+    page_goto,
+    page_reload,
+    page_back,
+    page_forward,
+    page_wait,
+    page_get_text,
+    build_page_tree,
+    page_screenshot,
+    page_get_tree_deep,
+    element_find,
+    element_find_deep,
+    element_click,
+    element_type,
+    element_fill,
+    element_get_text,
+    element_get_attribute,
+    element_screenshot,
+    js_evaluate_readonly,
+    js_evaluate,
+    set_user_agent,
+    get_user_agent,
+    set_viewport,
+    get_viewport,
+    cookies_get,
+    cookies_set,
+    storage_get,
+    storage_set,
+    download_expect,
+    upload_files,
+    network_enable,
+    network_disable,
+    network_list,
+    network_get_response,
+    console_enable,
+    console_disable,
+    console_list,
+    diagnostics_snapshot,
+    trace_start,
+    trace_stop,
+    trace_get,
+    trace_cleanup,
+    tab_new,
+    tab_duplicate,
+    tab_health_check,
+    tab_recreate,
+    element_get_state,
+    element_select_option,
+    element_check,
+    element_uncheck,
+    element_hover,
+    element_scroll_into_view,
+    element_find_by_role,
+    element_find_by_text,
+    element_find_by_label,
+    element_find_by_placeholder,
+    element_find_by_test_id,
+    keyboard_press,
+    page_scroll,
+    page_scroll_to,
+    page_snapshot,
+    page_diff,
+    page_get_accessibility_tree,
+    frame_list,
+    frame_snapshot,
+    page_wait_for_url,
+    page_wait_for_function,
+    element_wait_for_state,
+    network_wait_for_request,
+    network_wait_for_response,
+    operation_cancel,
+    network_summary,
+    network_clear,
+    dialog_list,
+    dialog_handle,
+    popup_prepare,
+    popup_wait,
+    download_prepare,
+    download_wait,
+    download_list,
+    download_get_info,
+    page_print_pdf,
 )
-
-PUBLIC_NAMES = {
-    build_page_tree: 'page_get_tree',
-    set_user_agent: 'user_agent_set',
-    get_user_agent: 'user_agent_get',
-    set_viewport: 'viewport_set',
-    get_viewport: 'viewport_get',
-}
 
 
 def register_tools(mcp: FastMCP) -> None:
     for function in TOOLS:
-        mcp.tool(name=PUBLIC_NAMES.get(function, function.__name__))(function)
+        mcp.tool(name=_public_tool_name(function), structured_output=False)(function)
+
+
+def _public_tool_name(function: Tool) -> str:
+    if function is build_page_tree:
+        return 'page_get_tree'
+    if function is set_user_agent:
+        return 'user_agent_set'
+    if function is get_user_agent:
+        return 'user_agent_get'
+    if function is set_viewport:
+        return 'viewport_set'
+    if function is get_viewport:
+        return 'viewport_get'
+    return function.__name__

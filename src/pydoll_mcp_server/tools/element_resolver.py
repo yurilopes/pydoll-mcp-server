@@ -4,87 +4,84 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
 
-from pydoll_mcp_server.browser.pydoll_compat import get_element_attribute, get_element_text
+from pydoll.browser.tab import Tab
+from pydoll.elements.shadow_root import ShadowRoot
+from pydoll.elements.web_element import WebElement
+
+from pydoll_mcp_server.browser.models import TabInfo
+from pydoll_mcp_server.browser.pydoll_compat import get_element_attribute, get_element_text, is_element_visible
 from pydoll_mcp_server.browser.script_utils import extract_script_value
-from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
+from pydoll_mcp_server.dom.element_cache import ElementCache, ElementCacheEntry, get_element_cache
+
+QueryScope = Tab | WebElement | ShadowRoot
 
 
-async def _resolve_element(tab_info: Any, element_id: str) -> Any:
+async def resolve_element(tab_info: TabInfo, element_id: str) -> WebElement | None:
     cache = get_element_cache()
     entry = cache.get_valid(element_id, tab_info.tab_id, tab_info.document_generation)
     if entry is None:
         return None
 
-    if entry._pydoll_element is not None:
-        return entry._pydoll_element
+    if entry.pydoll_element is not None:
+        return entry.pydoll_element
 
-    pydoll_tab = tab_info._pydoll_tab
-    if pydoll_tab is None:
-        return None
-
-    scoped = await _resolve_deep_scope(pydoll_tab, entry)
+    pydoll_tab = tab_info.pydoll_tab
+    scoped = await resolve_deep_scope(pydoll_tab, entry)
     if scoped is not None:
-        entry._pydoll_element = scoped
+        entry.pydoll_element = scoped
         cache.store(entry)
         return scoped
 
-    hints_to_try = []
+    hints_to_try: list[str] = []
     if entry.selector_hint:
-        hints_to_try.append(('css', entry.selector_hint))
+        hints_to_try.append(entry.selector_hint)
     if entry.xpath_hint:
-        hints_to_try.append(('xpath', entry.xpath_hint))
+        hints_to_try.append(entry.xpath_hint)
 
-    for _strategy, hint in hints_to_try:
-        try:
-            element = await pydoll_tab.query(
-                hint, timeout=5, find_all=False, raise_exc=False,
-            )
-            if element is not None:
-                entry._pydoll_element = element
-                cache.store(entry)
-                return element
-        except Exception:
-            continue
+    for hint in hints_to_try:
+        element = await pydoll_tab.query(
+            hint,
+            timeout=5,
+            find_all=False,
+            raise_exc=False,
+        )
+        if element is not None:
+            entry.pydoll_element = element
+            cache.store(entry)
+            return element
 
     return None
 
 
-async def _resolve_deep_scope(tab: Any, entry: ElementCacheEntry) -> Any:
+async def resolve_deep_scope(tab: Tab, entry: ElementCacheEntry) -> WebElement | None:
     if not entry.frame_path and not entry.shadow_path:
         return None
-    scope = tab
-    try:
-        for frame_selector in entry.frame_path:
-            scope = await scope.query(frame_selector, timeout=2, find_all=False, raise_exc=False)
-            if scope is None:
-                return None
-        for shadow_selector in entry.shadow_path:
-            host = await scope.query(shadow_selector, timeout=2, find_all=False, raise_exc=False)
-            if host is None:
-                return None
-            scope = await host.get_shadow_root()
-        for hint in (entry.selector_hint, entry.xpath_hint):
-            if not hint:
-                continue
-            element = await scope.query(hint, timeout=2, find_all=False, raise_exc=False)
-            if element is not None:
-                return element
-    except Exception:
-        return None
+    scope: QueryScope = tab
+    for frame_selector in entry.frame_path:
+        frame = await scope.query(frame_selector, timeout=2, find_all=False, raise_exc=False)
+        if frame is None:
+            return None
+        scope = frame
+    for shadow_selector in entry.shadow_path:
+        host = await scope.query(shadow_selector, timeout=2, find_all=False, raise_exc=False)
+        if host is None:
+            return None
+        scope = await host.get_shadow_root()
+    for hint in (entry.selector_hint, entry.xpath_hint):
+        if not hint:
+            continue
+        element = await scope.query(hint, timeout=2, find_all=False, raise_exc=False)
+        if element is not None:
+            return element
     return None
 
 
-def _cache_element(cache: Any, tab_info: Any, element: Any) -> str:
+def cache_element(cache: ElementCache, tab_info: TabInfo, element: WebElement) -> str:
     element_id = f'el_{uuid.uuid4().hex[:12]}'
     text_summary = ''
     tag = ''
-    try:
-        if hasattr(element, 'tag_name'):
-            tag = element.tag_name or ''
-    except Exception:
-        pass
+    tag = element.tag_name or ''
     attrs = {name: get_element_attribute(element, name) for name in ('id', 'data-testid', 'name')}
     selector_hint = ''
     xpath_hint = ''
@@ -105,25 +102,21 @@ def _cache_element(cache: Any, tab_info: Any, element: Any) -> str:
         text_summary=text_summary,
         selector_hint=selector_hint,
         xpath_hint=xpath_hint,
-        _pydoll_element=element,
+        pydoll_element=element,
     )
     cache.store(entry)
     return element_id
 
 
-async def _safe_text(element: Any) -> str:
+async def safe_text(element: WebElement) -> str:
     return await get_element_text(element)
 
 
-async def _safe_is_visible(element: Any) -> bool:
-    try:
-        result = await element.is_visible()
-        return bool(result)
-    except Exception:
-        return False
+async def safe_is_visible(element: WebElement) -> bool:
+    return await is_element_visible(element)
 
 
-async def _set_element_value_via_js(element: Any, value: str) -> None:
+async def set_element_value_via_js(element: WebElement, value: str) -> None:
     value_literal = json.dumps(value)
     script = f"""
     const nextValue = {value_literal};
@@ -146,7 +139,7 @@ async def _set_element_value_via_js(element: Any, value: str) -> None:
         raise ValueError('Element value could not be set through JavaScript fallback')
 
 
-async def _read_element_value_via_js(element: Any) -> str | None:
+async def read_element_value_via_js(element: WebElement) -> str | None:
     result = await element.execute_script(
         """
         if (this.tagName === 'INPUT' || this.tagName === 'TEXTAREA') return this.value;

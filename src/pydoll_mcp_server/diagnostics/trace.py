@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+
+from pydoll_mcp_server.json_types import JsonObject
 
 
 @dataclass
@@ -19,7 +20,7 @@ class TraceEvent:
     error_code: str = ''
     summary: str = ''
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         return {
             'timestamp': self.timestamp,
             'tool': self.tool,
@@ -39,7 +40,7 @@ class Trace:
     name: str
     created_at: float
     status: str = 'running'
-    events: list[TraceEvent] = field(default_factory=list)
+    events: list[TraceEvent] = field(default_factory=lambda: [])
     max_events: int = 500
     include_screenshots: bool = False
 
@@ -51,7 +52,7 @@ class Trace:
     def stop(self) -> None:
         self.status = 'stopped'
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonObject:
         return {
             'trace_id': self.trace_id,
             'client_id': self.client_id,
@@ -96,27 +97,19 @@ class TraceManager:
 
     def cleanup(self, client_id: str, older_than_seconds: int = 86400) -> int:
         cutoff = time.time() - older_than_seconds
-        to_remove = [
-            tid
-            for tid, t in self._traces.items()
-            if t.client_id == client_id and t.created_at < cutoff
-        ]
+        to_remove = [tid for tid, t in self._traces.items() if t.client_id == client_id and t.created_at < cutoff]
         for tid in to_remove:
             del self._traces[tid]
         return len(to_remove)
 
-    def list_client_traces(self, client_id: str) -> list[dict[str, Any]]:
-        return [
-            t.summary()
-            for t in self._traces.values()
-            if t.client_id == client_id
-        ]
+    def list_client_traces(self, client_id: str) -> list[JsonObject]:
+        return [t.summary() for t in self._traces.values() if t.client_id == client_id]
+
+    def trace_count(self) -> int:
+        return len(self._traces)
 
     def get_active(self, client_id: str) -> Trace | None:
-        running = [
-            t for t in self._traces.values()
-            if t.client_id == client_id and t.status == 'running'
-        ]
+        running = [t for t in self._traces.values() if t.client_id == client_id and t.status == 'running']
         return running[-1] if running else None
 
     def add_event_to_active(self, client_id: str, event: TraceEvent) -> bool:

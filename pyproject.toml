@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pydoll-mcp-server"
-version = "0.2.0a1"
+dynamic = ["version"]
 description = "MCP server for browser automation using Pydoll"
 readme = "README.md"
 license = {text = "MIT"}
@@ -40,10 +40,14 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.5.0",
     "mypy>=1.9.0",
+    "pyright>=1.1.400",
 ]
 
 [project.scripts]
 pydoll-mcp-server = "pydoll_mcp_server.cli:main"
+
+[tool.hatch.version]
+path = "src/pydoll_mcp_server/version.py"
 
 [tool.ruff]
 target-version = "py310"
@@ -51,7 +55,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-    "E", "F", "W", "I", "N", "UP", "B", "C4", "SIM",
+    "E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "ASYNC", "RET", "RUF",
 ]
 
 [tool.ruff.format]
@@ -60,18 +64,18 @@ indent-style = "space"
 
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-check_untyped_defs = true
+strict = true
 
 [tool.pyright]
 pythonVersion = "3.10"
-typeCheckingMode = "basic"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "--basetemp=.tmp/pytest"
+cache_dir = ".tmp/pytest-cache"
 markers = [
     "unit: Unit tests that do not require a browser",
     "integration: Integration tests that may require a browser",
@@ -79,4 +83,5 @@ markers = [
     "slow: Tests that take a long time to run",
     "contract: Tests that validate the MCP contract",
     "browser_smoke: Smoke test with real browser (headless Chrome)",
+    "mcp_e2e: End-to-end tests through a real MCP client and server process",
 ]

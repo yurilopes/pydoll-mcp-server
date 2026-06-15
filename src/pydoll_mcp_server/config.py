@@ -20,6 +20,10 @@ def _default_runtime_dir() -> Path:
     return Path.home() / '.local' / 'share' / 'pydoll-mcp-server'
 
 
+def default_runtime_dir() -> Path:
+    return _default_runtime_dir()
+
+
 class ServerConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix='PYDOLL_MCP_',

@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Protocol
 
 
-def validate_artifact_path(path: str, config: Any) -> str | None:
+class ArtifactPathConfig(Protocol):
+    @property
+    def artifacts_dir(self) -> Path: ...
+
+    @property
+    def downloads_dir(self) -> Path: ...
+
+    @property
+    def tmp_dir(self) -> Path: ...
+
+
+def validate_artifact_path(path: str, config: ArtifactPathConfig) -> str | None:
     p = Path(path)
 
     if p.is_absolute():
@@ -19,8 +30,8 @@ def validate_artifact_path(path: str, config: Any) -> str | None:
                     return str(resolved)
                 except ValueError:
                     continue
-        except Exception:
-            pass
+        except (OSError, RuntimeError):
+            return None
         return None
 
     base = config.artifacts_dir.resolve(strict=False)

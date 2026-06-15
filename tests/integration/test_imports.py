@@ -15,6 +15,7 @@ async def test_can_import_pydoll() -> None:
     try:
         from pydoll.browser import Chrome
         from pydoll.browser.options import ChromiumOptions
+
         assert Chrome is not None
         assert ChromiumOptions is not None
     except ImportError as e:
@@ -28,6 +29,7 @@ async def test_can_import_server_modules() -> None:
         from pydoll_mcp_server.browser.profiles import get_profile_manager
         from pydoll_mcp_server.browser.registry import get_registry
         from pydoll_mcp_server.config import get_config
+
         assert get_config() is not None
         assert get_registry() is not None
         assert get_profile_manager() is not None

@@ -4,15 +4,39 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from pydoll.browser import Chrome
+from pydoll.browser.tab import Tab
+from pytest import MonkeyPatch
 
-from tests.unit.test_concurrency import _FakeBrowser, _FakeTab
+
+class _CloseBrowser(Chrome):
+    def __init__(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+
+class _CloseTab(Tab):
+    def __init__(self) -> None:
+        pass
+
+
+class LaunchTab:
+    @property
+    async def current_url(self) -> str:
+        return 'about:blank'
+
+    @property
+    async def title(self) -> str:
+        return ''
 
 
 class TestLifecycle:
     @pytest.mark.asyncio
     async def test_concurrent_launches_with_same_profile_are_locked(
         self,
-        monkeypatch,
+        monkeypatch: MonkeyPatch,
         tmp_path: Path,
     ) -> None:
         from pydoll_mcp_server.browser.profiles import ProfileManager
@@ -28,12 +52,12 @@ class TestLifecycle:
         registry = BrowserRegistry()
 
         class FakeChrome:
-            def __init__(self, options=None) -> None:
+            def __init__(self, options: object = None) -> None:
                 self.options = options
 
-            async def start(self) -> _FakeTab:
+            async def start(self, headless: bool = False) -> LaunchTab:
                 await asyncio.sleep(0.05)
-                return _FakeTab()
+                return LaunchTab()
 
             async def stop(self) -> None:
                 pass
@@ -55,7 +79,7 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_browser_close_removes_temporary_profile_and_registry_state(
         self,
-        monkeypatch,
+        monkeypatch: MonkeyPatch,
         tmp_path: Path,
     ) -> None:
         import pydoll_mcp_server.browser.registry as registry_module
@@ -74,17 +98,18 @@ class TestLifecycle:
         profile_path = Path(profile.path)
         browser_info = registry.register_browser(
             'cleanup-client',
-            _FakeBrowser(),
+            _CloseBrowser(),
             profile,
             headless=True,
         )
         registry.register_tab(
             'cleanup-client',
             browser_info.browser_id,
-            _FakeTab(),
+            _CloseTab(),
         )
 
         monkeypatch.setattr(browser_tools, 'get_registry', lambda: registry)
+        monkeypatch.setattr(browser_tools, 'get_profile_manager', lambda: profile_manager)
         monkeypatch.setattr(registry_module, 'get_profile_manager', lambda: profile_manager)
 
         result = await browser_tools.browser_close(

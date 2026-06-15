@@ -7,7 +7,21 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from pydoll_mcp_server.dom.models import RawTreeNode
+
 pytestmark = [pytest.mark.integration]
+
+
+def _node(tag: str, attrs: dict[str, str], text: str = '') -> RawTreeNode:
+    return {
+        'element_id': 'node-1',
+        'tag': tag,
+        'text': text,
+        'attrs': attrs,
+        'bounds': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
+        'visible': True,
+        'children': [],
+    }
 
 
 class TestElementResolution:
@@ -25,7 +39,7 @@ class TestElementResolution:
         tab_info = MagicMock()
         tab_info.tab_id = 'tab_test'
         tab_info.document_generation = 1
-        tab_info._pydoll_tab = mock_tab
+        tab_info.pydoll_tab = mock_tab
 
         entry = ElementCacheEntry(
             element_id='el_test_resolver',
@@ -36,18 +50,21 @@ class TestElementResolution:
         )
         cache.store(entry)
 
-        from pydoll_mcp_server.tools.elements import _resolve_element
+        from pydoll_mcp_server.tools.element_resolver import resolve_element
 
-        async def run_test():
-            return await _resolve_element(tab_info, 'el_test_resolver')
+        async def run_test() -> object:
+            return await resolve_element(tab_info, 'el_test_resolver')
 
         result = asyncio.run(run_test())
         assert result is not None
         mock_tab.query.assert_called_once_with(
-            '#btn-click', timeout=5, find_all=False, raise_exc=False,
+            '#btn-click',
+            timeout=5,
+            find_all=False,
+            raise_exc=False,
         )
 
-    def test_resolver_returns_cached_pydoll_element(self) -> None:
+    def test_resolver_returns_cachedpydoll_element(self) -> None:
         from pydoll_mcp_server.dom.element_cache import (
             ElementCacheEntry,
             get_element_cache,
@@ -66,14 +83,14 @@ class TestElementResolution:
             tab_id='tab_test',
             document_generation=1,
             tag_name='button',
-            _pydoll_element=mock_element,
+            pydoll_element=mock_element,
         )
         cache.store(entry)
 
-        from pydoll_mcp_server.tools.elements import _resolve_element
+        from pydoll_mcp_server.tools.element_resolver import resolve_element
 
-        async def run_test():
-            return await _resolve_element(tab_info, 'el_cached')
+        async def run_test() -> object:
+            return await resolve_element(tab_info, 'el_cached')
 
         result = asyncio.run(run_test())
         assert result is mock_element
@@ -82,53 +99,61 @@ class TestElementResolution:
         tab_info = MagicMock()
         tab_info.tab_id = 'tab_test'
         tab_info.document_generation = 1
-        tab_info._pydoll_tab = MagicMock()
+        tab_info.pydoll_tab = MagicMock()
 
-        from pydoll_mcp_server.tools.elements import _resolve_element
+        from pydoll_mcp_server.tools.element_resolver import resolve_element
 
-        async def run_test():
-            return await _resolve_element(tab_info, 'nonexistent')
+        async def run_test() -> object:
+            return await resolve_element(tab_info, 'nonexistent')
 
         result = asyncio.run(run_test())
         assert result is None
 
     def test_build_selector_hint_uses_id(self) -> None:
-        from pydoll_mcp_server.dom.tree import _build_selector_hint
-        node = {'tag': 'button', 'attrs': {'id': 'btn-submit'}}
-        assert _build_selector_hint(node) == '#btn-submit'
+        from pydoll_mcp_server.dom.tree import build_selector_hint
+
+        node = _node('button', {'id': 'btn-submit'})
+        assert build_selector_hint(node) == '#btn-submit'
 
     def test_build_selector_hint_uses_data_testid(self) -> None:
-        from pydoll_mcp_server.dom.tree import _build_selector_hint
-        node = {'tag': 'div', 'attrs': {'data-testid': 'result'}}
-        assert _build_selector_hint(node) == '[data-testid="result"]'
+        from pydoll_mcp_server.dom.tree import build_selector_hint
+
+        node = _node('div', {'data-testid': 'result'})
+        assert build_selector_hint(node) == '[data-testid="result"]'
 
     def test_build_selector_hint_uses_name(self) -> None:
-        from pydoll_mcp_server.dom.tree import _build_selector_hint
-        node = {'tag': 'input', 'attrs': {'name': 'username'}}
-        assert _build_selector_hint(node) == 'input[name="username"]'
+        from pydoll_mcp_server.dom.tree import build_selector_hint
+
+        node = _node('input', {'name': 'username'})
+        assert build_selector_hint(node) == 'input[name="username"]'
 
     def test_build_selector_hint_uses_class(self) -> None:
-        from pydoll_mcp_server.dom.tree import _build_selector_hint
-        node = {'tag': 'div', 'attrs': {'class': 'container main'}}
-        assert _build_selector_hint(node) == 'div.container'
+        from pydoll_mcp_server.dom.tree import build_selector_hint
+
+        node = _node('div', {'class': 'container main'})
+        assert build_selector_hint(node) == 'div.container'
 
     def test_build_selector_hint_uses_text(self) -> None:
-        from pydoll_mcp_server.dom.tree import _build_selector_hint
-        node = {'tag': 'button', 'attrs': {}, 'text': 'Click Me'}
-        assert _build_selector_hint(node) == 'button'
+        from pydoll_mcp_server.dom.tree import build_selector_hint
+
+        node = _node('button', {}, 'Click Me')
+        assert build_selector_hint(node) == 'button'
 
     def test_build_xpath_hint_uses_id(self) -> None:
-        from pydoll_mcp_server.dom.tree import _build_xpath_hint
-        node = {'tag': 'button', 'attrs': {'id': 'btn-submit'}}
-        assert _build_xpath_hint(node) == '//*[@id="btn-submit"]'
+        from pydoll_mcp_server.dom.tree import build_xpath_hint
+
+        node = _node('button', {'id': 'btn-submit'})
+        assert build_xpath_hint(node) == '//*[@id="btn-submit"]'
 
     def test_build_xpath_hint_uses_text(self) -> None:
-        from pydoll_mcp_server.dom.tree import _build_xpath_hint
-        node = {'tag': 'button', 'attrs': {}, 'text': 'Click Me'}
-        assert 'Click' in _build_xpath_hint(node)
+        from pydoll_mcp_server.dom.tree import build_xpath_hint
+
+        node = _node('button', {}, 'Click Me')
+        assert 'Click' in build_xpath_hint(node)
 
     def test_cache_entry_stores_hints(self) -> None:
         from pydoll_mcp_server.dom.element_cache import ElementCacheEntry
+
         entry = ElementCacheEntry(
             element_id='el_1',
             tab_id='tab_1',

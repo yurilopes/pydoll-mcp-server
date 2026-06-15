@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -54,7 +55,7 @@ def test_browser_launch_passes_proxy_to_pydoll_but_returns_sanitized_metadata() 
     from pydoll_mcp_server.tools import browser as browser_tools
 
     async def run() -> None:
-        options_seen = None
+        options_seen: FakeOptions | None = None
 
         class FakeOptions:
             def __init__(self) -> None:
@@ -65,32 +66,44 @@ def test_browser_launch_passes_proxy_to_pydoll_but_returns_sanitized_metadata() 
                 self.arguments.append(value)
 
         class FakeChrome:
-            def __init__(self, options) -> None:
+            def __init__(self, options: FakeOptions) -> None:
                 nonlocal options_seen
                 options_seen = options
 
-            async def start(self):
+            async def start(self) -> SimpleNamespace:
                 return SimpleNamespace(current_url=_awaitable('about:blank'), title=_awaitable(''))
 
         profile = SimpleNamespace(path='profile', mode=SimpleNamespace(value='temporary'), profile_id='profile')
-        profile_manager = SimpleNamespace(create_temporary=lambda client_id: profile, unlock=lambda profile_id: None)
-        registry = SimpleNamespace(
-            register_browser=lambda **kwargs: SimpleNamespace(browser_id='browser', **kwargs),
-            register_tab=lambda **kwargs: SimpleNamespace(tab_id='tab'),
-        )
+
+        class FakeProfileManager:
+            def create_temporary(self, client_id: str) -> SimpleNamespace:
+                return profile
+
+            def unlock(self, profile_id: str) -> None:
+                return None
+
+        class FakeRegistry:
+            def register_browser(self, **kwargs: object) -> SimpleNamespace:
+                return SimpleNamespace(browser_id='browser', **kwargs)
+
+            def register_tab(self, **kwargs: object) -> SimpleNamespace:
+                return SimpleNamespace(tab_id='tab')
+
         with (
-            patch.object(browser_tools, 'get_profile_manager', return_value=profile_manager),
-            patch.object(browser_tools, 'get_registry', return_value=registry),
+            patch.object(browser_tools, 'get_profile_manager', return_value=FakeProfileManager()),
+            patch.object(browser_tools, 'get_registry', return_value=FakeRegistry()),
             patch('pydoll.browser.Chrome', FakeChrome),
             patch('pydoll.browser.options.ChromiumOptions', FakeOptions),
         ):
             result = await browser_tools.browser_launch(
-                'client', profile_mode='temporary',
+                'client',
+                profile_mode='temporary',
                 proxy_server='socks5://user:secret@proxy.example:1080',
             )
         assert result['success'] is True
         assert result['proxy_server'] == 'socks5://proxy.example:1080'
         assert 'secret' not in str(result)
+        assert options_seen is not None
         assert '--proxy-server=socks5://user:secret@proxy.example:1080' in options_seen.arguments
 
     asyncio.run(run())
@@ -101,20 +114,28 @@ def test_browser_launch_redacts_proxy_credentials_from_errors() -> None:
 
     async def run() -> None:
         class FailingChrome:
-            def __init__(self, options) -> None:
+            def __init__(self, options: object) -> None:
                 pass
 
-            async def start(self):
+            async def start(self) -> SimpleNamespace:
                 raise RuntimeError('Cannot connect using http://user:secret@proxy.example:8080')
 
         profile = SimpleNamespace(path='profile', mode=SimpleNamespace(value='temporary'), profile_id='profile')
-        profile_manager = SimpleNamespace(create_temporary=lambda client_id: profile, unlock=lambda profile_id: None)
+
+        class FakeProfileManager:
+            def create_temporary(self, client_id: str) -> SimpleNamespace:
+                return profile
+
+            def unlock(self, profile_id: str) -> None:
+                return None
+
         with (
-            patch.object(browser_tools, 'get_profile_manager', return_value=profile_manager),
+            patch.object(browser_tools, 'get_profile_manager', return_value=FakeProfileManager()),
             patch('pydoll.browser.Chrome', FailingChrome),
         ):
             result = await browser_tools.browser_launch(
-                'client', profile_mode='temporary',
+                'client',
+                profile_mode='temporary',
                 proxy_server='http://user:secret@proxy.example:8080',
             )
         assert result['error_code'] == 'INTERNAL_ERROR'
@@ -125,7 +146,7 @@ def test_browser_launch_redacts_proxy_credentials_from_errors() -> None:
     asyncio.run(run())
 
 
-def _awaitable(value: str):
+def _awaitable(value: str) -> Awaitable[str]:
     async def result() -> str:
         return value
 

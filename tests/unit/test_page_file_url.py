@@ -10,9 +10,9 @@ pytestmark = [pytest.mark.unit]
 
 
 def test_normalize_navigation_url_rejects_file_url() -> None:
-    from pydoll_mcp_server.tools.page import _normalize_navigation_url
+    from pydoll_mcp_server.tools.page import normalize_navigation_url
 
-    url, error = _normalize_navigation_url('file:///C:/allowed/local.html')
+    url, error = normalize_navigation_url('file:///C:/allowed/local.html')
 
     assert url is None
     assert error is not None
@@ -21,10 +21,10 @@ def test_normalize_navigation_url_rejects_file_url() -> None:
 
 
 def test_normalize_navigation_url_accepts_http_and_https() -> None:
-    from pydoll_mcp_server.tools.page import _normalize_navigation_url
+    from pydoll_mcp_server.tools.page import normalize_navigation_url
 
     for url in ('http://127.0.0.1:8000/local.html', 'https://example.test/page'):
-        normalized, error = _normalize_navigation_url(url)
+        normalized, error = normalize_navigation_url(url)
         assert error is None
         assert normalized == url
 

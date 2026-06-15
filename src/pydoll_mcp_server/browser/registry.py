@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+
+from pydoll.browser.chromium.base import Browser
+from pydoll.browser.tab import Tab
 
 from pydoll_mcp_server.browser.models import (
     BrowserInfo,
     ClientSession,
+    ProfileInfo,
     ProfileMode,
     ResourceHealth,
     TabInfo,
     generate_id,
 )
-from pydoll_mcp_server.browser.profiles import ProfileInfo, get_profile_manager
+from pydoll_mcp_server.browser.profiles import get_profile_manager
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
+from pydoll_mcp_server.json_types import JsonObject
 
 
 class BrowserRegistry:
@@ -32,7 +36,7 @@ class BrowserRegistry:
     def register_browser(
         self,
         client_id: str,
-        browser: Any,
+        browser: Browser,
         profile: ProfileInfo,
         headless: bool = False,
         proxy_server: str = '',
@@ -51,7 +55,7 @@ class BrowserRegistry:
             proxy_scheme=proxy_scheme,
             proxy_has_credentials=proxy_has_credentials,
             proxy_bypass_list=proxy_bypass_list,
-            _pydoll_browser=browser,
+            pydoll_browser=browser,
         )
         client.browsers[browser_id] = info
         return info
@@ -60,7 +64,7 @@ class BrowserRegistry:
         self,
         client_id: str,
         browser_id: str,
-        pydoll_tab: Any,
+        pydoll_tab: Tab,
         url: str = '',
         title: str = '',
     ) -> TabInfo:
@@ -76,7 +80,7 @@ class BrowserRegistry:
             client_id=client_id,
             url=url,
             title=title,
-            _pydoll_tab=pydoll_tab,
+            pydoll_tab=pydoll_tab,
         )
         client.browsers[browser_id].tabs[tab_id] = info
         return info
@@ -99,7 +103,9 @@ class BrowserRegistry:
         raise error_not_found('tab', tab_id)
 
     def resolve_tab_with_browser(
-        self, client_id: str, tab_id: str,
+        self,
+        client_id: str,
+        tab_id: str,
     ) -> tuple[TabInfo, BrowserInfo]:
         tab = self.get_tab(client_id, tab_id)
         browser = self.get_browser(client_id, tab.browser_id)
@@ -112,7 +118,9 @@ class BrowserRegistry:
         return list(client.browsers.values())
 
     def list_tabs(
-        self, client_id: str, browser_id: str | None = None,
+        self,
+        client_id: str,
+        browser_id: str | None = None,
     ) -> list[TabInfo]:
         client = self._clients.get(client_id)
         if not client:
@@ -124,19 +132,16 @@ class BrowserRegistry:
             tabs.extend(browser.tabs.values())
         return tabs
 
-    def list_clients(self) -> list[dict[str, Any]]:
-        return [
-            {'client_id': cid, 'browsers': len(cs.browsers)}
-            for cid, cs in self._clients.items()
-        ]
+    def list_clients(self) -> list[JsonObject]:
+        return [{'client_id': cid, 'browsers': len(cs.browsers)} for cid, cs in self._clients.items()]
 
-    def remove_browser(self, client_id: str, browser_id: str) -> None:
+    def remove_browser(self, client_id: str, browser_id: str, cleanup_profile: bool = True) -> None:
         client = self._clients.get(client_id)
         if not client:
             return
         if browser_id in client.browsers:
             browser = client.browsers[browser_id]
-            if browser.profile:
+            if browser.profile and cleanup_profile:
                 profile_mgr = get_profile_manager()
                 if browser.profile.mode == ProfileMode.TEMPORARY:
                     profile_mgr.cleanup_temporary(browser.profile.profile_id)
@@ -151,28 +156,34 @@ class BrowserRegistry:
                 return
 
     def update_tab_health(
-        self, client_id: str, tab_id: str, health: ResourceHealth,
+        self,
+        client_id: str,
+        tab_id: str,
+        health: ResourceHealth,
     ) -> None:
         try:
             tab = self.get_tab(client_id, tab_id)
             tab.health = health
-        except Exception:
-            pass
+        except StructuredError:
+            return
 
     def update_browser_health(
-        self, client_id: str, browser_id: str, health: ResourceHealth,
+        self,
+        client_id: str,
+        browser_id: str,
+        health: ResourceHealth,
     ) -> None:
         try:
             browser = self.get_browser(client_id, browser_id)
             browser.health = health
-        except Exception:
-            pass
+        except StructuredError:
+            return
 
-    def get_pydoll_browser(self, client_id: str, browser_id: str) -> Any:
-        return self.get_browser(client_id, browser_id)._pydoll_browser
+    def get_pydoll_browser(self, client_id: str, browser_id: str) -> Browser:
+        return self.get_browser(client_id, browser_id).pydoll_browser
 
-    def get_pydoll_tab(self, client_id: str, tab_id: str) -> Any:
-        return self.get_tab(client_id, tab_id)._pydoll_tab
+    def get_pydoll_tab(self, client_id: str, tab_id: str) -> Tab:
+        return self.get_tab(client_id, tab_id).pydoll_tab
 
 
 def error_not_found(resource_type: str, resource_id: str) -> StructuredError:

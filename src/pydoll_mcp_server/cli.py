@@ -9,9 +9,7 @@ import uvicorn
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description='Pydoll MCP Server - Browser automation via MCP'
-    )
+    parser = argparse.ArgumentParser(description='Pydoll MCP Server - Browser automation via MCP')
     parser.add_argument(
         '--transport',
         default=os.environ.get('PYDOLL_MCP_TRANSPORT', 'http'),
@@ -45,7 +43,7 @@ def main() -> None:
     if args.transport == 'stdio':
         os.environ.setdefault('PYDOLL_MCP_TRANSPORT', 'stdio')
         logger.info('Starting Pydoll MCP Server via stdio')
-        _run_stdio()
+        run_stdio()
         return
 
     from pydoll_mcp_server.config import get_config
@@ -71,9 +69,13 @@ def main() -> None:
     )
 
 
-def _run_stdio() -> None:
+def run_stdio() -> None:
     from pydoll_mcp_server.server import mcp
+
     mcp.run(transport='stdio')
+
+
+_run_stdio = run_stdio
 
 
 if __name__ == '__main__':

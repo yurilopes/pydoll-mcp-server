@@ -42,18 +42,22 @@ class TestTraceManager:
         tm = TraceManager()
         trace = tm.create('client-a', 'test-events')
 
-        trace.add_event(TraceEvent(
-            timestamp=time.time(),
-            tool='network_enable',
-            status='success',
-            tab_id='tab-1',
-        ))
-        trace.add_event(TraceEvent(
-            timestamp=time.time(),
-            tool='page_goto',
-            status='error',
-            error_code='TIMEOUT',
-        ))
+        trace.add_event(
+            TraceEvent(
+                timestamp=time.time(),
+                tool='network_enable',
+                status='success',
+                tab_id='tab-1',
+            )
+        )
+        trace.add_event(
+            TraceEvent(
+                timestamp=time.time(),
+                tool='page_goto',
+                status='error',
+                error_code='TIMEOUT',
+            )
+        )
 
         assert len(trace.events) == 2
         assert trace.events[0].tool == 'network_enable'
@@ -98,11 +102,13 @@ class TestTraceManager:
         trace.max_events = 10
 
         for i in range(20):
-            trace.add_event(TraceEvent(
-                timestamp=time.time(),
-                tool=f'tool_{i}',
-                status='success',
-            ))
+            trace.add_event(
+                TraceEvent(
+                    timestamp=time.time(),
+                    tool=f'tool_{i}',
+                    status='success',
+                )
+            )
 
         assert len(trace.events) <= 10
 
@@ -115,7 +121,7 @@ class TestTraceManager:
         tm.create('client-a', 't3')
         tm.create('client-a', 't4')
 
-        assert len(tm._traces) <= 3
+        assert tm.trace_count() <= 3
         assert tm.get('client-a', t1.trace_id) is None
 
     def test_event_redaction_no_token(self) -> None:

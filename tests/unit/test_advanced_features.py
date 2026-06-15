@@ -9,8 +9,11 @@ from unittest.mock import AsyncMock, patch
 from pydoll_mcp_server.browser.operations import OperationManager
 from pydoll_mcp_server.browser.snapshots import SnapshotManager
 from pydoll_mcp_server.browser.watches import WatchManager
+from pydoll_mcp_server.errors import StructuredError
+from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.tools.element_advanced import element_check, element_get_state
 from pydoll_mcp_server.tools.page_advanced import page_diff
+from tests.typing_helpers import array_at, object_at, value_as_object
 
 
 def test_snapshot_manager_isolates_clients_and_bounds_retention() -> None:
@@ -20,7 +23,7 @@ def test_snapshot_manager_isolates_clients_and_bounds_retention() -> None:
     manager.store('a', 'tab', {'text': 'three'})
     try:
         manager.get('a', 'tab', first)
-    except Exception as exc:
+    except StructuredError as exc:
         assert exc.error_code.value == 'RESOURCE_NOT_FOUND'
     else:
         raise AssertionError('Old snapshot should have been evicted')
@@ -31,7 +34,7 @@ def test_watch_manager_isolates_clients() -> None:
     watch = manager.create('a', 'tab', 'popup')
     try:
         manager.get('b', watch.watch_id, 'popup')
-    except Exception as exc:
+    except StructuredError as exc:
         assert exc.error_code.value == 'RESOURCE_NOT_FOUND'
     else:
         raise AssertionError('Cross-client watch access should fail')
@@ -57,15 +60,24 @@ def test_operation_manager_cancels_only_owned_operation() -> None:
 def test_element_state_redacts_password_value() -> None:
     async def run() -> None:
         element = AsyncMock()
-        element.execute_script.return_value = {'result': {'result': {'value': {
-            'visible': True, 'enabled': True, 'value': 'secret', 'type': 'password',
-        }}}}
+        element.execute_script.return_value = {
+            'result': {
+                'result': {
+                    'value': {
+                        'visible': True,
+                        'enabled': True,
+                        'value': 'secret',
+                        'type': 'password',
+                    }
+                }
+            }
+        }
         with patch(
             'pydoll_mcp_server.tools.element_advanced._get',
             AsyncMock(return_value=element),
         ):
             result = await element_get_state('client', 'tab', 'element')
-        assert result['state']['value'] == '[REDACTED]'
+        assert object_at(result, 'state')['value'] == '[REDACTED]'
 
     asyncio.run(run())
 
@@ -78,6 +90,7 @@ def test_element_check_is_idempotent_scripted_mutation() -> None:
         ) as mutate:
             result = await element_check('client', 'tab', 'element')
         assert result['success'] is True
+        assert mutate.await_args is not None
         assert 'this.checked!==' in mutate.await_args.args[3]
 
     asyncio.run(run())
@@ -86,18 +99,29 @@ def test_element_check_is_idempotent_scripted_mutation() -> None:
 def test_page_diff_reports_added_and_removed_nodes() -> None:
     async def run() -> None:
         manager = SnapshotManager()
-        old_id = manager.store('client', 'tab', {'url': 'a', 'title': 'a', 'text': 'old', 'nodes': [{'tag': 'a'}]})
+        old_nodes: JsonArray = [{'tag': 'a'}]
+        old_snapshot: JsonObject = {'url': 'a', 'title': 'a', 'text': 'old', 'nodes': old_nodes}
+        old_id = manager.store('client', 'tab', old_snapshot)
+        new_nodes: JsonArray = [{'tag': 'button'}]
+        new_snapshot: JsonObject = {
+            'success': True,
+            'snapshot_id': 'new',
+            'url': 'b',
+            'title': 'b',
+            'text': 'new',
+            'nodes': new_nodes,
+        }
         with (
             patch('pydoll_mcp_server.tools.page_advanced.get_snapshot_manager', return_value=manager),
-            patch('pydoll_mcp_server.tools.page_advanced.page_snapshot', AsyncMock(return_value={
-                'success': True, 'snapshot_id': 'new', 'url': 'b', 'title': 'b',
-                'text': 'new', 'nodes': [{'tag': 'button'}],
-            })),
+            patch(
+                'pydoll_mcp_server.tools.page_advanced.page_snapshot',
+                AsyncMock(return_value=new_snapshot),
+            ),
         ):
             result = await page_diff('client', 'tab', old_id)
         assert result['url_changed'] is True
-        assert result['added'][0]['tag'] == 'button'
-        assert result['removed'][0]['tag'] == 'a'
+        assert value_as_object(array_at(result, 'added')[0])['tag'] == 'button'
+        assert value_as_object(array_at(result, 'removed')[0])['tag'] == 'a'
 
     asyncio.run(run())
 
@@ -107,8 +131,16 @@ def test_tool_catalog_contains_new_agent_friendly_tools() -> None:
 
     names = {tool.__name__ for tool in TOOLS}
     expected = {
-        'tab_new', 'element_get_state', 'page_snapshot', 'page_diff',
-        'operation_cancel', 'console_enable', 'popup_prepare', 'download_prepare',
-        'page_print_pdf', 'tab_health_check', 'tab_recreate',
+        'tab_new',
+        'element_get_state',
+        'page_snapshot',
+        'page_diff',
+        'operation_cancel',
+        'console_enable',
+        'popup_prepare',
+        'download_prepare',
+        'page_print_pdf',
+        'tab_health_check',
+        'tab_recreate',
     }
     assert expected <= names

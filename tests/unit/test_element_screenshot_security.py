@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from pydoll_mcp_server.json_types import JsonObject
+from tests.typing_helpers import string_at
+
 pytestmark = [pytest.mark.unit]
 
 
@@ -15,21 +18,16 @@ class TestElementScreenshotSecurity:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.tools.elements import element_screenshot
 
-        forbidden = (
-            'C:\\Windows\\Temp\\forbidden.png'
-            if os.name == 'nt'
-            else '/etc/forbidden.png'
-        )
+        forbidden = 'C:\\Windows\\Temp\\forbidden.png' if os.name == 'nt' else '/etc/forbidden.png'
 
         mock_element = MagicMock()
         mock_element.take_screenshot = AsyncMock()
 
         with (
+            patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
+            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
             patch(
-                'pydoll_mcp_server.tools.elements.get_registry'
-            ) as mock_registry,
-            patch(
-                'pydoll_mcp_server.tools.elements._resolve_element',
+                'pydoll_mcp_server.tools.elements.resolve_element',
                 return_value=mock_element,
             ),
         ):
@@ -40,21 +38,19 @@ class TestElementScreenshotSecurity:
 
             import asyncio
 
-            async def run():
+            async def run() -> JsonObject:
                 return await element_screenshot(
-                    'test-client', 'tab-test', 'el-test',
+                    'test-client',
+                    'tab-test',
+                    'el-test',
                     path=forbidden,
                 )
 
             result = asyncio.run(run())
 
-            assert result.get('success') is not True, (
-                f'Should reject forbidden path: {result}'
-            )
-            error_code = result.get('error_code', '')
-            assert 'PERMISSION_DENIED' in error_code, (
-                f'Expected PERMISSION_DENIED, got: {result}'
-            )
+            assert result.get('success') is not True, f'Should reject forbidden path: {result}'
+            error_code = string_at(result, 'error_code')
+            assert 'PERMISSION_DENIED' in error_code, f'Expected PERMISSION_DENIED, got: {result}'
             mock_element.take_screenshot.assert_not_called()
 
     def test_accepts_valid_relative_path(self) -> None:
@@ -65,11 +61,10 @@ class TestElementScreenshotSecurity:
         mock_element.take_screenshot = AsyncMock(return_value='fake-data')
 
         with (
+            patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
+            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
             patch(
-                'pydoll_mcp_server.tools.elements.get_registry'
-            ) as mock_registry,
-            patch(
-                'pydoll_mcp_server.tools.elements._resolve_element',
+                'pydoll_mcp_server.tools.elements.resolve_element',
                 return_value=mock_element,
             ),
         ):
@@ -80,9 +75,11 @@ class TestElementScreenshotSecurity:
 
             import asyncio
 
-            async def run():
+            async def run() -> JsonObject:
                 return await element_screenshot(
-                    'test-client', 'tab-test', 'el-test',
+                    'test-client',
+                    'tab-test',
+                    'el-test',
                     path='screenshot.png',
                 )
 
@@ -98,11 +95,10 @@ class TestElementScreenshotSecurity:
         mock_element.take_screenshot = AsyncMock(return_value='base64data')
 
         with (
+            patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
+            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
             patch(
-                'pydoll_mcp_server.tools.elements.get_registry'
-            ) as mock_registry,
-            patch(
-                'pydoll_mcp_server.tools.elements._resolve_element',
+                'pydoll_mcp_server.tools.elements.resolve_element',
                 return_value=mock_element,
             ),
         ):
@@ -113,9 +109,11 @@ class TestElementScreenshotSecurity:
 
             import asyncio
 
-            async def run():
+            async def run() -> JsonObject:
                 return await element_screenshot(
-                    'test-client', 'tab-test', 'el-test',
+                    'test-client',
+                    'tab-test',
+                    'el-test',
                 )
 
             result = asyncio.run(run())

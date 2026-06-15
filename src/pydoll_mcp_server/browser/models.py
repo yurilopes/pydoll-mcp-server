@@ -5,7 +5,11 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+
+from pydoll.browser.chromium.base import Browser
+from pydoll.browser.tab import Tab
+
+from pydoll_mcp_server.json_types import JsonObject
 
 
 class ProfileMode(str, Enum):
@@ -33,7 +37,7 @@ class ProfileInfo:
     is_locked: bool = False
     locked_by: str = ''
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonObject:
         return {
             'profile_id': self.profile_id,
             'mode': self.mode.value,
@@ -45,14 +49,15 @@ class ProfileInfo:
 class WindowInfo:
     window_id: str
     browser_id: str
-    bounds: dict[str, int] = field(default_factory=dict)
+    bounds: dict[str, int] = field(default_factory=lambda: {})
     state: str = 'normal'
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonObject:
+        bounds: JsonObject = dict(self.bounds)
         return {
             'window_id': self.window_id,
             'browser_id': self.browser_id,
-            'bounds': self.bounds,
+            'bounds': bounds,
             'state': self.state,
         }
 
@@ -62,13 +67,13 @@ class TabInfo:
     tab_id: str
     browser_id: str
     client_id: str
+    pydoll_tab: Tab = field(repr=False)
     url: str = ''
     title: str = ''
     health: ResourceHealth = ResourceHealth.HEALTHY
     document_generation: int = 0
-    _pydoll_tab: Any = field(default=None, repr=False)
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonObject:
         return {
             'tab_id': self.tab_id,
             'browser_id': self.browser_id,
@@ -85,6 +90,7 @@ class TabInfo:
 class BrowserInfo:
     browser_id: str
     client_id: str
+    pydoll_browser: Browser = field(repr=False)
     profile: ProfileInfo | None = None
     health: ResourceHealth = ResourceHealth.HEALTHY
     headless: bool = False
@@ -92,11 +98,10 @@ class BrowserInfo:
     proxy_scheme: str = ''
     proxy_has_credentials: bool = False
     proxy_bypass_list: str = ''
-    tabs: dict[str, TabInfo] = field(default_factory=dict)
-    windows: dict[str, WindowInfo] = field(default_factory=dict)
-    _pydoll_browser: Any = field(default=None, repr=False)
+    tabs: dict[str, TabInfo] = field(default_factory=lambda: {})
+    windows: dict[str, WindowInfo] = field(default_factory=lambda: {})
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonObject:
         return {
             'browser_id': self.browser_id,
             'client_id': self.client_id,
@@ -115,10 +120,10 @@ class BrowserInfo:
 @dataclass
 class ClientSession:
     client_id: str
-    browsers: dict[str, BrowserInfo] = field(default_factory=dict)
+    browsers: dict[str, BrowserInfo] = field(default_factory=lambda: {})
     created_at: float = 0.0
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonObject:
         return {
             'client_id': self.client_id,
             'browsers': len(self.browsers),

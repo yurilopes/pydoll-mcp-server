@@ -6,6 +6,9 @@ import os
 from unittest.mock import patch
 
 import pytest
+from pydoll.browser import Chrome
+from pydoll.browser.chromium.base import Browser
+from pydoll.browser.tab import Tab
 
 from pydoll_mcp_server.browser.models import (
     ProfileInfo,
@@ -14,6 +17,14 @@ from pydoll_mcp_server.browser.models import (
     generate_id,
 )
 from pydoll_mcp_server.browser.registry import BrowserRegistry
+
+
+def _browser_handle() -> Browser:
+    return Chrome()
+
+
+def _tab_handle() -> Tab:
+    return object.__new__(Tab)
 
 
 class TestIDGeneration:
@@ -62,7 +73,7 @@ class TestBrowserRegistry:
         )
         info = self.registry.register_browser(
             client_id='test-client',
-            browser=None,
+            browser=_browser_handle(),
             profile=profile,
         )
         assert info.browser_id.startswith('br_')
@@ -72,28 +83,34 @@ class TestBrowserRegistry:
 
     def test_register_tab(self) -> None:
         profile = ProfileInfo(
-            profile_id='prof_test', client_id='test-client',
-            mode=ProfileMode.PERSISTENT, path='/tmp/test',
+            profile_id='prof_test',
+            client_id='test-client',
+            mode=ProfileMode.PERSISTENT,
+            path='/tmp/test',
         )
         browser_info = self.registry.register_browser(
-            client_id='test-client', browser=None, profile=profile,
+            client_id='test-client',
+            browser=_browser_handle(),
+            profile=profile,
         )
         tab_info = self.registry.register_tab(
             client_id='test-client',
             browser_id=browser_info.browser_id,
-            pydoll_tab=None,
+            pydoll_tab=_tab_handle(),
         )
         assert tab_info.tab_id.startswith('tab_')
         assert tab_info.browser_id == browser_info.browser_id
 
     def test_get_browser_not_found(self) -> None:
         from pydoll_mcp_server.errors import StructuredError
+
         with pytest.raises(StructuredError) as exc:
             self.registry.get_browser('test-client', 'br_nonexistent')
         assert 'not found' in str(exc.value.message).lower()
 
     def test_get_tab_not_found(self) -> None:
         from pydoll_mcp_server.errors import StructuredError
+
         with pytest.raises(StructuredError) as exc:
             self.registry.get_tab('test-client', 'tab_nonexistent')
         assert 'not found' in str(exc.value.message).lower()
@@ -109,25 +126,35 @@ class TestBrowserRegistry:
     def test_remove_browser_cleans_up(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             profile = ProfileInfo(
-                profile_id='prof_test', client_id='test-client',
-                mode=ProfileMode.PERSISTENT, path='/tmp/test',
+                profile_id='prof_test',
+                client_id='test-client',
+                mode=ProfileMode.PERSISTENT,
+                path='/tmp/test',
             )
             info = self.registry.register_browser(
-                client_id='test-client', browser=None, profile=profile,
+                client_id='test-client',
+                browser=_browser_handle(),
+                profile=profile,
             )
             self.registry.remove_browser('test-client', info.browser_id)
             assert self.registry.list_browsers('test-client') == []
 
     def test_remove_tab(self) -> None:
         profile = ProfileInfo(
-            profile_id='prof_test', client_id='test-client',
-            mode=ProfileMode.PERSISTENT, path='/tmp/test',
+            profile_id='prof_test',
+            client_id='test-client',
+            mode=ProfileMode.PERSISTENT,
+            path='/tmp/test',
         )
         browser = self.registry.register_browser(
-            client_id='test-client', browser=None, profile=profile,
+            client_id='test-client',
+            browser=_browser_handle(),
+            profile=profile,
         )
         tab = self.registry.register_tab(
-            client_id='test-client', browser_id=browser.browser_id, pydoll_tab=None,
+            client_id='test-client',
+            browser_id=browser.browser_id,
+            pydoll_tab=_tab_handle(),
         )
         self.registry.remove_tab('test-client', tab.tab_id)
         tabs = self.registry.list_tabs('test-client')
@@ -135,14 +162,20 @@ class TestBrowserRegistry:
 
     def test_update_tab_health(self) -> None:
         profile = ProfileInfo(
-            profile_id='prof_test', client_id='test-client',
-            mode=ProfileMode.PERSISTENT, path='/tmp/test',
+            profile_id='prof_test',
+            client_id='test-client',
+            mode=ProfileMode.PERSISTENT,
+            path='/tmp/test',
         )
         browser = self.registry.register_browser(
-            client_id='test-client', browser=None, profile=profile,
+            client_id='test-client',
+            browser=_browser_handle(),
+            profile=profile,
         )
         tab = self.registry.register_tab(
-            client_id='test-client', browser_id=browser.browser_id, pydoll_tab=None,
+            client_id='test-client',
+            browser_id=browser.browser_id,
+            pydoll_tab=_tab_handle(),
         )
         assert tab.health == ResourceHealth.HEALTHY
         self.registry.update_tab_health('test-client', tab.tab_id, ResourceHealth.UNHEALTHY)
@@ -157,26 +190,37 @@ class TestBrowserRegistry:
 
     def test_client_isolation(self) -> None:
         profile = ProfileInfo(
-            profile_id='prof_a', client_id='client-a',
-            mode=ProfileMode.PERSISTENT, path='/tmp/a',
+            profile_id='prof_a',
+            client_id='client-a',
+            mode=ProfileMode.PERSISTENT,
+            path='/tmp/a',
         )
         info = self.registry.register_browser(
-            client_id='client-a', browser=None, profile=profile,
+            client_id='client-a',
+            browser=_browser_handle(),
+            profile=profile,
         )
         from pydoll_mcp_server.errors import StructuredError
+
         with pytest.raises(StructuredError):
             self.registry.get_browser('client-b', info.browser_id)
 
     def test_tab_marks_navigated(self) -> None:
         profile = ProfileInfo(
-            profile_id='prof_test', client_id='test-client',
-            mode=ProfileMode.PERSISTENT, path='/tmp/test',
+            profile_id='prof_test',
+            client_id='test-client',
+            mode=ProfileMode.PERSISTENT,
+            path='/tmp/test',
         )
         browser = self.registry.register_browser(
-            client_id='test-client', browser=None, profile=profile,
+            client_id='test-client',
+            browser=_browser_handle(),
+            profile=profile,
         )
         tab = self.registry.register_tab(
-            client_id='test-client', browser_id=browser.browser_id, pydoll_tab=None,
+            client_id='test-client',
+            browser_id=browser.browser_id,
+            pydoll_tab=_tab_handle(),
         )
         gen = tab.document_generation
         tab.mark_navigated()

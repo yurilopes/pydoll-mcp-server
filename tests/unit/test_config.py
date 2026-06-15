@@ -13,7 +13,7 @@ from pydoll_mcp_server.config import (
     LimitsConfig,
     ServerConfig,
     TimeoutConfig,
-    _default_runtime_dir,
+    default_runtime_dir,
 )
 
 
@@ -40,25 +40,26 @@ class TestServerConfig:
             ServerConfig(auth_token='')
 
     def test_runtime_dir_windows(self) -> None:
-        with patch.object(sys, 'platform', 'win32'), \
-                patch.dict(os.environ, {'LOCALAPPDATA': 'C:\\Users\\Test\\AppData\\Local'}):
-            result = _default_runtime_dir()
+        with (
+            patch.object(sys, 'platform', 'win32'),
+            patch.dict(os.environ, {'LOCALAPPDATA': 'C:\\Users\\Test\\AppData\\Local'}),
+        ):
+            result = default_runtime_dir()
             assert 'pydoll-mcp-server' in str(result)
 
     def test_runtime_dir_macos(self) -> None:
-        with patch.object(sys, 'platform', 'darwin'), \
-                patch.object(Path, 'home', return_value=Path('/Users/test')):
-            result = _default_runtime_dir()
+        with patch.object(sys, 'platform', 'darwin'), patch.object(Path, 'home', return_value=Path('/Users/test')):
+            result = default_runtime_dir()
             assert 'pydoll-mcp-server' in str(result)
 
     def test_runtime_dir_linux(self) -> None:
-        with patch.object(sys, 'platform', 'linux'), \
-                patch.object(Path, 'home', return_value=Path('/home/test')):
-            result = _default_runtime_dir()
+        with patch.object(sys, 'platform', 'linux'), patch.object(Path, 'home', return_value=Path('/home/test')):
+            result = default_runtime_dir()
             assert 'pydoll-mcp-server' in str(result)
 
     def test_port_out_of_range(self) -> None:
         from pydantic_core import ValidationError
+
         with pytest.raises(ValidationError):
             ServerConfig(auth_token='test-token', port=0)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
+from tests.typing_helpers import object_at
 
 
 class TestStructuredError:
@@ -29,7 +30,7 @@ class TestStructuredError:
         d = error.to_dict()
         assert d['error_code'] == 'AUTH_REQUIRED'
         assert d['retryable'] is True
-        assert d['details']['hint'] == 'Provide token'
+        assert object_at(d, 'details')['hint'] == 'Provide token'
         assert d['recovery_hint'] == 'Set PYDOLL_MCP_AUTH_TOKEN'
         assert d['resource_state'] == 'closed'
 

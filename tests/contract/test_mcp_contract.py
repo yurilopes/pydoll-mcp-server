@@ -13,7 +13,10 @@ import urllib.request
 from unittest.mock import patch
 
 import pytest
+from starlette.routing import BaseRoute, Mount, Route
 from starlette.testclient import TestClient
+
+from pydoll_mcp_server.json_types import JsonObject, require_json_object
 
 pytestmark = [pytest.mark.integration, pytest.mark.contract]
 
@@ -30,16 +33,22 @@ def _reset_config_cache() -> None:
     get_config.cache_clear()
 
 
+def _route_has_path(route: BaseRoute, path: str) -> bool:
+    return isinstance(route, Route | Mount) and route.path == path
+
+
 class TestAppTransport:
     def test_create_app_with_token(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
             assert app is not None
 
     def test_health_no_auth_required(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
             client = TestClient(app)
             response = client.get('/health')
@@ -51,6 +60,7 @@ class TestAppTransport:
     def test_health_does_not_leak_token(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
             client = TestClient(app)
             response = client.get('/health')
@@ -60,6 +70,7 @@ class TestAppTransport:
     def test_mcp_requires_auth(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
             client = TestClient(app)
             response = client.post('/mcp', json={})
@@ -68,24 +79,21 @@ class TestAppTransport:
     def test_mcp_accepts_valid_token(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
-            assert any(
-                hasattr(r, 'path') and r.path == '/mcp'
-                for r in app.routes
-            ), '/mcp mount not found in app routes'
+            assert any(_route_has_path(route, '/mcp') for route in app.routes), '/mcp mount not found in app routes'
 
     def test_sse_mount_exists(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
-            assert any(
-                hasattr(r, 'path') and r.path == '/sse'
-                for r in app.routes
-            ), '/sse mount not found in app routes'
+            assert any(_route_has_path(route, '/sse') for route in app.routes), '/sse mount not found in app routes'
 
     def test_mcp_rejects_invalid_token(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
             client = TestClient(app)
             response = client.post(
@@ -98,26 +106,23 @@ class TestAppTransport:
     def test_sse_endpoint_exists(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
-            assert any(
-                hasattr(r, 'path') and r.path == '/sse'
-                for r in app.routes
-            ), '/sse mount not found in app routes'
+            assert any(_route_has_path(route, '/sse') for route in app.routes), '/sse mount not found in app routes'
 
     def test_mcp_route_mounted(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import create_app
+
             app = create_app()
-            assert any(
-                hasattr(r, 'path') and r.path == '/mcp'
-                for r in app.routes
-            ), '/mcp mount not found in app routes'
+            assert any(_route_has_path(route, '/mcp') for route in app.routes), '/mcp mount not found in app routes'
 
     def test_no_http_app_reference(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             import inspect
 
             from pydoll_mcp_server.server import create_app
+
             source = inspect.getsource(create_app)
             assert 'mcp.http_app()' not in source
             assert 'streamable_http_app' in source
@@ -150,11 +155,14 @@ class TestAppTransport:
 
             try:
                 deadline = time.time() + 10
-                health_data: dict | None = None
+                health_data: JsonObject | None = None
                 while time.time() < deadline:
                     try:
                         with urllib.request.urlopen(f'{base}/health', timeout=1) as response:
-                            health_data = json.loads(response.read().decode('utf-8'))
+                            health_data = require_json_object(
+                                json.loads(response.read().decode('utf-8')),
+                                'health response',
+                            )
                             break
                     except Exception:
                         time.sleep(0.05)
@@ -194,6 +202,7 @@ class TestMCPTools:
     def test_health_check_tool(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test'}):
             from pydoll_mcp_server.tools.health import get_health_response
+
             result = get_health_response(include_runtime=False)
             assert result['status'] == 'ok'
             assert 'version' in result
@@ -201,11 +210,13 @@ class TestMCPTools:
     def test_server_status(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test'}):
             from pydoll_mcp_server.server import server_status
+
             result = server_status(client_id='test-client')
             assert result['status'] == 'ok'
 
     def test_error_model(self) -> None:
         from pydoll_mcp_server.errors import ErrorCode, StructuredError
+
         error = StructuredError(
             error_code=ErrorCode.TIMEOUT,
             message='Test error',
@@ -217,13 +228,11 @@ class TestMCPTools:
 
     def test_no_prohibited_tools(self) -> None:
         from pydoll_mcp_server.security.policy import PROHIBITED_METHODS
-        from pydoll_mcp_server.server import mcp
-        try:
-            tool_names = list(mcp._tool_manager._tools.keys())
-            for p in PROHIBITED_METHODS:
-                assert p not in tool_names
-        except AttributeError:
-            pass
+        from pydoll_mcp_server.tool_catalog import TOOLS
+
+        tool_names = {tool.__name__ for tool in TOOLS}
+        for prohibited in PROHIBITED_METHODS:
+            assert prohibited not in tool_names
 
     @pytest.mark.asyncio
     async def test_mcp_tool_catalog_contains_expected_alpha_tools(self) -> None:
@@ -261,3 +270,12 @@ class TestMCPTools:
             'viewport_get',
         }
         assert expected_p0.issubset(tool_names)
+
+    @pytest.mark.asyncio
+    async def test_tool_catalog_does_not_generate_recursive_output_schemas(self) -> None:
+        from pydoll_mcp_server.server import mcp
+
+        tools = await mcp.list_tools()
+
+        assert tools
+        assert all(tool.outputSchema is None for tool in tools)

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import shutil
 import tempfile
+import time
 
 from pydoll_mcp_server.auth import ClientIdentity
 from pydoll_mcp_server.browser.models import ProfileInfo, ProfileMode, generate_id
@@ -20,7 +20,8 @@ class ProfileManager:
         self._profiles_dir.mkdir(parents=True, exist_ok=True)
 
     def get_or_create_default(
-        self, client_id: str,
+        self,
+        client_id: str,
     ) -> ProfileInfo:
         identity = ClientIdentity(client_id)
         profile_dir = self._profiles_dir / identity.safe / 'default'
@@ -92,8 +93,19 @@ class ProfileManager:
             return
         info = self._profiles[profile_id]
         if info.mode == ProfileMode.TEMPORARY:
-            with contextlib.suppress(Exception):
-                shutil.rmtree(info.path, ignore_errors=True)
+            for attempt in range(5):
+                try:
+                    shutil.rmtree(info.path, ignore_errors=False)
+                    break
+                except OSError:
+                    if attempt == 4:
+                        raise
+                    # Chromium can briefly retain profile files after process shutdown on Windows.
+                    time.sleep(0.2 * (attempt + 1))
+        self._profiles.pop(profile_id, None)
+        self._locks.pop(profile_id, None)
+
+    def release(self, profile_id: str) -> None:
         self._profiles.pop(profile_id, None)
         self._locks.pop(profile_id, None)
 

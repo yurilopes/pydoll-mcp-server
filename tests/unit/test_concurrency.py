@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
-from unittest.mock import patch
+from types import SimpleNamespace, TracebackType
 
 import pytest
+from pytest import MonkeyPatch
+
+from pydoll_mcp_server.json_types import JsonObject
 
 pytestmark = [pytest.mark.unit]
 
@@ -18,19 +20,19 @@ class TestConcurrency:
         lm = LockManager()
         order: list[str] = []
 
-        async def mutation_a():
+        async def mutation_a() -> None:
             async with lm.tab_mutex('tab-1'):
                 order.append('a-start')
                 await asyncio.sleep(0.05)
                 order.append('a-end')
 
-        async def mutation_b():
+        async def mutation_b() -> None:
             async with lm.tab_mutex('tab-1'):
                 order.append('b-start')
                 await asyncio.sleep(0.01)
                 order.append('b-end')
 
-        async def run():
+        async def run() -> None:
             await asyncio.gather(mutation_a(), mutation_b())
 
         asyncio.run(run())
@@ -45,12 +47,12 @@ class TestConcurrency:
         lm = LockManager()
         completed: set[str] = set()
 
-        async def mutation(tab_id: str):
+        async def mutation(tab_id: str) -> None:
             async with lm.tab_mutex(tab_id):
                 await asyncio.sleep(0.02)
                 completed.add(tab_id)
 
-        async def run():
+        async def run() -> None:
             await asyncio.gather(
                 mutation('tab-1'),
                 mutation('tab-2'),
@@ -60,85 +62,13 @@ class TestConcurrency:
         asyncio.run(run())
         assert completed == {'tab-1', 'tab-2', 'tab-3'}
 
-    def test_page_goto_uses_lock(self) -> None:
-        import os
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            import inspect
-
-            from pydoll_mcp_server.tools.page import page_goto
-            source = inspect.getsource(page_goto)
-            assert 'tab_operation_lock' in source, (
-                'page_goto does not use tab_operation_lock'
-            )
-
-    def test_element_click_uses_lock(self) -> None:
-        import os
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            import inspect
-
-            from pydoll_mcp_server.tools.elements import element_click
-            source = inspect.getsource(element_click)
-            assert 'tab_operation_lock' in source, (
-                'element_click does not use tab_operation_lock'
-            )
-
-    def test_tab_close_uses_lock(self) -> None:
-        import os
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            import inspect
-
-            from pydoll_mcp_server.tools.tabs import tab_close
-            source = inspect.getsource(tab_close)
-            assert 'tab_operation_lock' in source, (
-                'tab_close does not use tab_operation_lock'
-            )
-
-    def test_storage_set_uses_lock(self) -> None:
-        import os
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            import inspect
-
-            from pydoll_mcp_server.tools.storage import storage_set
-            source = inspect.getsource(storage_set)
-            assert 'tab_operation_lock' in source, (
-                'storage_set does not use tab_operation_lock'
-            )
-
-    def test_cookies_set_uses_tab_lock(self) -> None:
-        import os
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            import inspect
-
-            from pydoll_mcp_server.tools.storage import cookies_set
-            source = inspect.getsource(cookies_set)
-            assert 'tab_operation_lock' in source, (
-                'cookies_set does not use tab_operation_lock'
-            )
-
-    def test_cookies_set_uses_browser_lock(self) -> None:
-        import os
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            import inspect
-
-            from pydoll_mcp_server.tools.storage import cookies_set
-            source = inspect.getsource(cookies_set)
-            assert 'browser_operation_lock' in source, (
-                'cookies_set does not use browser_operation_lock'
-            )
-
 
 class _LockProbe:
     def __init__(self) -> None:
         self.events: list[tuple[str, str]] = []
         self.active: set[str] = set()
 
-    def lock(self, resource_id: str):
+    def lock(self, resource_id: str) -> object:
         probe = self
 
         class _Context:
@@ -146,7 +76,12 @@ class _LockProbe:
                 probe.events.append(('enter', resource_id))
                 probe.active.add(resource_id)
 
-            async def __aexit__(self, *args) -> None:
+            async def __aexit__(
+                self,
+                exc_type: type[BaseException] | None,
+                exc: BaseException | None,
+                traceback: TracebackType | None,
+            ) -> None:
                 probe.events.append(('exit', resource_id))
                 probe.active.discard(resource_id)
 
@@ -175,13 +110,13 @@ class _FakeTab:
         self.calls.append(f'go_to:{url}:{timeout}')
         self.url = url
 
-    async def execute_script(self, script: str, return_by_value: bool = False):
+    async def execute_script(self, script: str, return_by_value: bool = False) -> JsonObject:
         assert self.lock_probe is not None
         assert self.tab_id in self.lock_probe.active
         self.calls.append(script)
         return {'result': {'result': {'value': 1 if return_by_value else None}}}
 
-    async def set_cookies(self, cookies: list[dict]) -> None:
+    async def set_cookies(self, cookies: list[JsonObject]) -> None:
         assert self.lock_probe is not None
         assert self.tab_id in self.lock_probe.active
         self.calls.append(f'cookies:{len(cookies)}')
@@ -196,6 +131,11 @@ class _FakeElement:
     async def scroll_into_view(self) -> None:
         assert self.tab_id in self.lock_probe.active
         self.calls.append('scroll')
+
+    async def execute_script(self, script: str, return_by_value: bool = False) -> JsonObject:
+        assert self.tab_id in self.lock_probe.active
+        self.calls.append(script)
+        return {'result': {'result': {'value': True if return_by_value else None}}}
 
     async def click(self) -> None:
         assert self.tab_id in self.lock_probe.active
@@ -216,7 +156,7 @@ class _FakeBrowser:
     async def stop(self) -> None:
         self.stopped = True
 
-    async def set_cookies(self, cookies: list[dict]) -> None:
+    async def set_cookies(self, cookies: list[JsonObject]) -> None:
         assert self.lock_probe is not None
         assert self.browser_id in self.lock_probe.active
         self.calls.append(f'cookies:{len(cookies)}')
@@ -231,23 +171,23 @@ class _FakeRegistry:
         self.tab = tab
         self.browser = browser
 
-    def get_tab(self, client_id: str, tab_id: str):
+    def get_tab(self, client_id: str, tab_id: str) -> SimpleNamespace:
         return SimpleNamespace(
             client_id=client_id,
             tab_id=tab_id,
             browser_id='browser-1',
             document_generation=0,
-            _pydoll_tab=self.tab,
+            pydoll_tab=self.tab,
             mark_navigated=lambda: None,
         )
 
-    def get_pydoll_browser(self, client_id: str, browser_id: str):
+    def get_pydoll_browser(self, client_id: str, browser_id: str) -> _FakeBrowser | None:
         return self.browser
 
 
 class TestBehavioralLocks:
     @pytest.mark.asyncio
-    async def test_page_goto_operation_occurs_inside_tab_lock(self, monkeypatch) -> None:
+    async def test_page_goto_operation_occurs_inside_tab_lock(self, monkeypatch: MonkeyPatch) -> None:
         from pydoll_mcp_server.tools import page as page_tools
 
         lock_probe = _LockProbe()
@@ -262,20 +202,20 @@ class TestBehavioralLocks:
         assert tab.calls[0].startswith('go_to:http://example.test/path')
 
     @pytest.mark.asyncio
-    async def test_element_click_operation_occurs_inside_tab_lock(self, monkeypatch) -> None:
+    async def test_element_click_operation_occurs_inside_tab_lock(self, monkeypatch: MonkeyPatch) -> None:
         from pydoll_mcp_server.tools import elements as element_tools
 
         lock_probe = _LockProbe()
         element = _FakeElement(lock_probe)
 
-        async def resolve_element(tab_info, element_id):
+        async def resolve_element(tab_info: object, element_id: str) -> _FakeElement:
             return element
 
         monkeypatch.setattr(element_tools, 'tab_operation_lock', lock_probe.lock)
         monkeypatch.setattr(element_tools, 'get_registry', lambda: _FakeRegistry())
         monkeypatch.setattr(
             element_tools,
-            '_resolve_element',
+            'resolve_element',
             resolve_element,
         )
 
@@ -283,10 +223,10 @@ class TestBehavioralLocks:
 
         assert result['success'] is True
         assert lock_probe.events == [('enter', 'tab-1'), ('exit', 'tab-1')]
-        assert element.calls == ['scroll', 'click']
+        assert element.calls == ["this.scrollIntoView({block:'center'}); return true;", 'click']
 
     @pytest.mark.asyncio
-    async def test_storage_set_operation_occurs_inside_tab_lock(self, monkeypatch) -> None:
+    async def test_storage_set_operation_occurs_inside_tab_lock(self, monkeypatch: MonkeyPatch) -> None:
         from pydoll_mcp_server.tools import storage as storage_tools
 
         lock_probe = _LockProbe()
@@ -304,7 +244,7 @@ class TestBehavioralLocks:
         assert lock_probe.events == [('enter', 'tab-1'), ('exit', 'tab-1')]
 
     @pytest.mark.asyncio
-    async def test_cookies_set_operation_occurs_inside_tab_lock(self, monkeypatch) -> None:
+    async def test_cookies_set_operation_occurs_inside_tab_lock(self, monkeypatch: MonkeyPatch) -> None:
         from pydoll_mcp_server.tools import storage as storage_tools
 
         lock_probe = _LockProbe()
@@ -322,7 +262,7 @@ class TestBehavioralLocks:
         assert lock_probe.events == [('enter', 'tab-1'), ('exit', 'tab-1')]
 
     @pytest.mark.asyncio
-    async def test_cookies_set_operation_occurs_inside_browser_lock(self, monkeypatch) -> None:
+    async def test_cookies_set_operation_occurs_inside_browser_lock(self, monkeypatch: MonkeyPatch) -> None:
         from pydoll_mcp_server.tools import storage as storage_tools
 
         lock_probe = _LockProbe()

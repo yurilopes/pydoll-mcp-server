@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncGenerator
 
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.authentication import AuthenticationError
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.requests import HTTPConnection, Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
@@ -44,13 +45,15 @@ register_tools(mcp)
 _server_state = get_server_state()
 
 
-async def health_endpoint(request: Any) -> JSONResponse:
-    return JSONResponse({
-        'status': 'ok',
-        'version': get_version(),
-        'schema_version': SCHEMA_VERSION,
-        'uptime_seconds': round(_server_state.uptime_seconds, 1),
-    })
+async def health_endpoint(request: Request) -> JSONResponse:
+    return JSONResponse(
+        {
+            'status': 'ok',
+            'version': get_version(),
+            'schema_version': SCHEMA_VERSION,
+            'uptime_seconds': round(_server_state.uptime_seconds, 1),
+        }
+    )
 
 
 def create_app() -> Starlette:
@@ -62,11 +65,11 @@ def create_app() -> Starlette:
     session_manager = mcp.session_manager
     mcp_sse = mcp.sse_app()
 
-    def auth_error(request: Any, exc: Exception) -> JSONResponse:
+    def auth_error(request: HTTPConnection, exc: AuthenticationError) -> JSONResponse:
         return JSONResponse({'error': 'Authentication required. Provide Bearer token.'}, status_code=401)
 
     @contextlib.asynccontextmanager
-    async def lifespan(app: Starlette) -> AsyncIterator[None]:
+    async def lifespan(app: Starlette) -> AsyncGenerator[None, None]:
         async with session_manager.run():
             yield
 
@@ -83,7 +86,18 @@ def create_app() -> Starlette:
 
 
 __all__ = [
-    'ServerState', 'browser_attach', 'create_app', 'diagnostics_snapshot', 'error_response',
-    'generate_request_id', 'get_server_state', 'health_check', 'mcp', 'server_status',
-    'trace_cleanup', 'trace_get', 'trace_start', 'trace_stop',
+    'ServerState',
+    'browser_attach',
+    'create_app',
+    'diagnostics_snapshot',
+    'error_response',
+    'generate_request_id',
+    'get_server_state',
+    'health_check',
+    'mcp',
+    'server_status',
+    'trace_cleanup',
+    'trace_get',
+    'trace_start',
+    'trace_stop',
 ]

@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_title, get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_value
+from pydoll_mcp_server.browser.script_utils import extract_script_string
 from pydoll_mcp_server.config import get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
+from pydoll_mcp_server.json_types import JsonObject
 from pydoll_mcp_server.logging import OperationLog, get_logger
 
 URL_PATTERN = re.compile(r'^https?://')
@@ -30,12 +30,16 @@ def _normalize_navigation_url(url: str) -> tuple[str | None, StructuredError | N
     )
 
 
+def normalize_navigation_url(url: str) -> tuple[str | None, StructuredError | None]:
+    return _normalize_navigation_url(url)
+
+
 async def page_goto(
     client_id: str,
     tab_id: str,
     url: str,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.goto
     timeout = min(timeout, config.max_timeout)
@@ -55,9 +59,9 @@ async def page_goto(
     start = time.time()
     try:
         async with tab_operation_lock(tab_id):
-            pydoll_tab = tab_info._pydoll_tab
+            pydoll_tab = tab_info.pydoll_tab
             await asyncio.wait_for(
-                pydoll_tab.go_to(normalized_url, timeout=timeout),
+                pydoll_tab.go_to(normalized_url, timeout=max(0, int(timeout))),
                 timeout=timeout + 5,
             )
             tab_info.mark_navigated()
@@ -66,10 +70,15 @@ async def page_goto(
             tab_info.title = await get_tab_title(pydoll_tab)
 
         duration_ms = (time.time() - start) * 1000
-        logger.log_operation(OperationLog(
-            client_id=client_id, tab_id=tab_id, tool='page_goto',
-            status='success', duration_ms=duration_ms,
-        ))
+        logger.log_operation(
+            OperationLog(
+                client_id=client_id,
+                tab_id=tab_id,
+                tool='page_goto',
+                status='success',
+                duration_ms=duration_ms,
+            )
+        )
         return {
             'success': True,
             'url': final_url,
@@ -104,7 +113,7 @@ async def page_reload(
     tab_id: str,
     ignore_cache: bool = False,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.reload
     timeout = min(timeout, config.max_timeout)
@@ -119,7 +128,7 @@ async def page_reload(
     start = time.time()
     try:
         async with tab_operation_lock(tab_id):
-            pydoll_tab = tab_info._pydoll_tab
+            pydoll_tab = tab_info.pydoll_tab
             await asyncio.wait_for(
                 pydoll_tab.refresh(ignore_cache=ignore_cache),
                 timeout=timeout + 5,
@@ -153,7 +162,7 @@ async def page_back(
     client_id: str,
     tab_id: str,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.back_forward
     timeout = min(timeout, config.max_timeout)
@@ -166,13 +175,12 @@ async def page_back(
 
     try:
         async with tab_operation_lock(tab_id):
-            pydoll_tab = tab_info._pydoll_tab
+            pydoll_tab = tab_info.pydoll_tab
             result = await asyncio.wait_for(
-                pydoll_tab.execute_script('history.back(); return location.href;',
-                                            return_by_value=True),
+                pydoll_tab.execute_script('history.back(); return location.href;', return_by_value=True),
                 timeout=timeout,
             )
-            url = extract_script_value(result) or ''
+            url = extract_script_string(result)
             tab_info.mark_navigated()
         return {
             'success': True,
@@ -196,7 +204,7 @@ async def page_forward(
     client_id: str,
     tab_id: str,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.back_forward
     timeout = min(timeout, config.max_timeout)
@@ -209,13 +217,12 @@ async def page_forward(
 
     try:
         async with tab_operation_lock(tab_id):
-            pydoll_tab = tab_info._pydoll_tab
+            pydoll_tab = tab_info.pydoll_tab
             result = await asyncio.wait_for(
-                pydoll_tab.execute_script('history.forward(); return location.href;',
-                                            return_by_value=True),
+                pydoll_tab.execute_script('history.forward(); return location.href;', return_by_value=True),
                 timeout=timeout,
             )
-            url = extract_script_value(result) or ''
+            url = extract_script_string(result)
             tab_info.mark_navigated()
         return {
             'success': True,
@@ -242,7 +249,7 @@ async def page_wait(
     selector: str = '',
     text: str = '',
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.wait_selector
     timeout = min(timeout, config.max_timeout)
@@ -254,13 +261,13 @@ async def page_wait(
     except StructuredError as e:
         return e.to_dict()
 
-    pydoll_tab = tab_info._pydoll_tab
+    pydoll_tab = tab_info.pydoll_tab
     start = time.time()
 
     try:
         if selector:
             element = await asyncio.wait_for(
-                pydoll_tab.query(selector, timeout=timeout, find_all=False, raise_exc=False),
+                pydoll_tab.query(selector, timeout=max(0, int(timeout)), find_all=False, raise_exc=False),
                 timeout=timeout + 5,
             )
             if element is None:
@@ -276,15 +283,14 @@ async def page_wait(
                 'selector': selector,
                 'timing_ms': round(duration_ms, 1),
             }
-        elif text:
+        if text:
             deadline = time.time() + timeout
             while time.time() < deadline:
                 page_text = await asyncio.wait_for(
-                    pydoll_tab.execute_script('return document.body.innerText || "";',
-                                                 return_by_value=True),
+                    pydoll_tab.execute_script('return document.body.innerText || "";', return_by_value=True),
                     timeout=5.0,
                 )
-                page_str = str(page_text) if page_text else ''
+                page_str = extract_script_string(page_text)
                 if text in page_str:
                     duration_ms = (time.time() - start) * 1000
                     return {
@@ -299,14 +305,13 @@ async def page_wait(
                 message=f'Text "{text}" not found within {timeout}s',
                 retryable=True,
             ).to_dict()
-        else:
-            await asyncio.sleep(1.0)
-            duration_ms = (time.time() - start) * 1000
-            return {
-                'success': True,
-                'state': state,
-                'timing_ms': round(duration_ms, 1),
-            }
+        await asyncio.sleep(1.0)
+        duration_ms = (time.time() - start) * 1000
+        return {
+            'success': True,
+            'state': state,
+            'timing_ms': round(duration_ms, 1),
+        }
     except asyncio.TimeoutError:
         return StructuredError(
             error_code=ErrorCode.TIMEOUT,

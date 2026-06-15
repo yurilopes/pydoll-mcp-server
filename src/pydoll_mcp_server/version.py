@@ -1,11 +1,9 @@
-"""Package version resolution."""
+"""Single source of truth for the package version."""
 
 from __future__ import annotations
 
+__version__ = '0.3.0a1'
+
 
 def get_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version('pydoll-mcp-server')
-    except Exception:
-        return '0.2.0a1'
+    return __version__

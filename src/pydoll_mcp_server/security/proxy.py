@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
+from pydoll_mcp_server.json_types import JsonObject
 
 ALLOWED_PROXY_SCHEMES = {'http', 'https', 'socks4', 'socks5'}
 
@@ -21,7 +22,7 @@ class ProxyConfig:
     has_credentials: bool
     bypass_list: str = ''
 
-    def summary(self) -> dict[str, object]:
+    def summary(self) -> JsonObject:
         return {
             'proxy_enabled': True,
             'proxy_scheme': self.scheme,
@@ -68,7 +69,7 @@ def validate_proxy(proxy_server: str, proxy_bypass_list: str = '') -> ProxyConfi
     return ProxyConfig(value, sanitized, scheme, host, port, has_credentials, bypass)
 
 
-def proxy_validate(proxy_server: str, proxy_bypass_list: str = '') -> dict[str, object]:
+def proxy_validate(proxy_server: str, proxy_bypass_list: str = '') -> JsonObject:
     try:
         config = validate_proxy(proxy_server, proxy_bypass_list)
     except StructuredError as exc:
@@ -94,4 +95,3 @@ def _validate_bypass_list(value: str) -> str:
     if any('://' in entry or '@' in entry or any(char.isspace() for char in entry) for entry in entries):
         raise StructuredError(ErrorCode.INVALID_INPUT, 'Proxy bypass entries must be host patterns')
     return ','.join(entries)
-

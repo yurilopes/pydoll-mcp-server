@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0a1 (Unreleased)
+
+### Changed
+- Established strict agent engineering rules and portable development guidance
+- Made mypy strict, Pyright strict, Ruff formatting, and a 450-line hard limit required gates
+- Removed silent Pydoll compatibility fallbacks and made malformed script responses fail explicitly
+- Renamed internal Pydoll runtime handles to make their boundary role explicit
+- Added validated recursive JSON boundaries and explicit MCP input schemas
+- Made mypy strict and Pyright strict pass across both production code and tests
+- Added the `py.typed` marker and validated it in the built wheel
+- Isolated pytest runtime artifacts inside `.tmp/` for portable sandboxed execution
+- Normalized the repository with the enforced Ruff format
+- Changed browser smoke fixtures to use loopback HTTP instead of local file navigation
+- Centralized package version metadata so source, health endpoints, MCP tools, and wheels agree
+- Restricted broad exception catches to registered MCP tool boundaries with an AST architecture gate
+- Added a real MCP stdio end-to-end browser workflow covering element IDs, UTF-8, deep traversal, network, and cleanup
+- Made delayed Windows temporary-profile cleanup explicit without retaining browser ownership
+
+### Migration
+- Internal integrations using `_pydoll_browser`, `_pydoll_tab`, or `_pydoll_element`
+  must use `pydoll_browser`, `pydoll_tab`, or `pydoll_element`.
+
 ## 0.2.0a1 (2026-06-14)
 
 ### Added

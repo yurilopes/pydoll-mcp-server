@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import time
-from typing import Any
+
+from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_value
+from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_value
 from pydoll_mcp_server.config import get_limits_config, get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
+from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.logging import OperationLog, get_logger
 
 BLOCKED_PATTERNS = [
@@ -43,7 +46,7 @@ async def js_evaluate_readonly(
     tab_id: str,
     script: str,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     limits = get_limits_config()
     timeout = timeout or config.js_execute
@@ -58,14 +61,25 @@ async def js_evaluate_readonly(
         ).to_dict()
 
     warnings = scan_script(script)
-    if any(w in ['document.cookie access', 'localStorage access', 'sessionStorage access',
-                 'form submission', 'location assignment', 'location.href assignment']
-           for w in warnings):
+    if any(
+        w
+        in [
+            'document.cookie access',
+            'localStorage access',
+            'sessionStorage access',
+            'form submission',
+            'location assignment',
+            'location.href assignment',
+        ]
+        for w in warnings
+    ):
+        warning_values: JsonArray = []
+        warning_values.extend(warnings)
         return StructuredError(
             error_code=ErrorCode.BLOCKED_PATTERN,
             message=f'Script contains blocked patterns: {", ".join(warnings)}',
             retryable=False,
-            details={'warnings': warnings},
+            details={'warnings': warning_values},
             recovery_hint='Use js_evaluate for scripts with side effects, or remove the blocked patterns.',
         ).to_dict()
 
@@ -77,7 +91,7 @@ async def js_evaluate(
     tab_id: str,
     script: str,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     limits = get_limits_config()
     timeout = timeout or config.js_execute
@@ -104,7 +118,7 @@ async def _execute_js(
     script: str,
     timeout: float,
     read_only: bool,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
     logger = get_logger()
     limits = get_limits_config()
@@ -114,11 +128,10 @@ async def _execute_js(
     except StructuredError as e:
         return e.to_dict()
 
-    pydoll_tab = tab_info._pydoll_tab
+    pydoll_tab = tab_info.pydoll_tab
     start = time.time()
 
     try:
-        import asyncio
         result = await asyncio.wait_for(
             pydoll_tab.execute_script(script, return_by_value=True),
             timeout=timeout + 2,
@@ -132,7 +145,7 @@ async def _execute_js(
             resource_state=ResourceState.DEGRADED,
             details={'timing_ms': round(duration_ms, 1)},
         ).to_dict()
-    except Exception as e:
+    except PydollException as e:
         duration_ms = (time.time() - start) * 1000
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,
@@ -145,28 +158,36 @@ async def _execute_js(
 
     try:
         raw_value = extract_script_value(result)
-        result_str = json.dumps(raw_value, ensure_ascii=False, default=str)
-    except Exception:
-        result_str = str(result)
+    except InvalidScriptResponseError as exc:
+        return StructuredError(
+            error_code=ErrorCode.EXECUTION_ERROR,
+            message=f'JS execution returned an invalid response: {exc}',
+            retryable=False,
+        ).to_dict()
+    result_str = json.dumps(raw_value, ensure_ascii=False)
 
     truncated = len(result_str.encode('utf-8')) > limits.max_js_result
     if truncated:
-        result_bytes = result_str.encode('utf-8')[:limits.max_js_result]
+        result_bytes = result_str.encode('utf-8')[: limits.max_js_result]
         result_str = result_bytes.decode('utf-8', errors='replace')
 
     script_hash = hashlib.sha256(script.encode()).hexdigest()[:16]
 
-    logger.log_operation(OperationLog(
-        client_id=client_id, tab_id=tab_id,
-        tool='js_evaluate_readonly' if read_only else 'js_evaluate',
-        status='success', duration_ms=duration_ms,
-        extra={
-            'script_hash': script_hash,
-            'result_size': len(result_str.encode('utf-8')),
-            'truncated': truncated,
-            'read_only': read_only,
-        },
-    ))
+    logger.log_operation(
+        OperationLog(
+            client_id=client_id,
+            tab_id=tab_id,
+            tool='js_evaluate_readonly' if read_only else 'js_evaluate',
+            status='success',
+            duration_ms=duration_ms,
+            extra={
+                'script_hash': script_hash,
+                'result_size': len(result_str.encode('utf-8')),
+                'truncated': truncated,
+                'read_only': read_only,
+            },
+        )
+    )
 
     return {
         'success': True,

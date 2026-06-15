@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from pydoll_mcp_server.browser.locks import get_lock_manager
+from pydoll_mcp_server.browser.models import ProfileMode
 from pydoll_mcp_server.browser.profiles import get_profile_manager
-from pydoll_mcp_server.browser.pydoll_compat import get_tab_title, get_tab_url
+from pydoll_mcp_server.browser.pydoll_compat import (
+    create_chromium_options,
+    get_tab_title,
+    get_tab_url,
+    stop_browser,
+)
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
+from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.logging import get_logger
 from pydoll_mcp_server.security.proxy import validate_proxy
 
@@ -21,7 +27,7 @@ async def browser_launch(
     profile_id: str = '',
     proxy_server: str = '',
     proxy_bypass_list: str = '',
-) -> dict[str, Any]:
+) -> JsonObject:
     logger = get_logger()
     registry = get_registry()
     profile_mgr = get_profile_manager()
@@ -42,10 +48,7 @@ async def browser_launch(
                 message=f'Profile {profile_id} is locked by another client',
                 retryable=True,
                 resource_state=ResourceState.UNKNOWN,
-                recovery_hint=(
-                    'Wait for the other client to release the profile '
-                    'or use a different profile_id.'
-                ),
+                recovery_hint=('Wait for the other client to release the profile or use a different profile_id.'),
             ).to_dict()
     else:
         profile = profile_mgr.get_or_create_default(client_id)
@@ -60,9 +63,8 @@ async def browser_launch(
 
     try:
         from pydoll.browser import Chrome
-        from pydoll.browser.options import ChromiumOptions
 
-        options = ChromiumOptions()
+        options = create_chromium_options()
         options.add_argument(f'--user-data-dir={profile.path}')
         if proxy:
             options.add_argument(f'--proxy-server={proxy.launch_url}')
@@ -95,9 +97,7 @@ async def browser_launch(
             title=title,
         )
 
-        logger.info(
-            f'Browser launched: {browser_info.browser_id} for client {client_id}'
-        )
+        logger.info(f'Browser launched: {browser_info.browser_id} for client {client_id}')
         return {
             'success': True,
             'browser_id': browser_info.browser_id,
@@ -130,7 +130,7 @@ async def browser_launch(
         ).to_dict()
 
 
-async def browser_list(client_id: str) -> dict[str, Any]:
+async def browser_list(client_id: str) -> JsonObject:
     registry = get_registry()
     browsers = registry.list_browsers(client_id)
     return {
@@ -139,7 +139,7 @@ async def browser_list(client_id: str) -> dict[str, Any]:
     }
 
 
-async def proxy_get(client_id: str, browser_id: str) -> dict[str, Any]:
+async def proxy_get(client_id: str, browser_id: str) -> JsonObject:
     try:
         browser = get_registry().get_browser(client_id, browser_id)
     except StructuredError as exc:
@@ -158,9 +158,10 @@ async def proxy_get(client_id: str, browser_id: str) -> dict[str, Any]:
 async def browser_close(
     client_id: str,
     browser_id: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
     logger = get_logger()
+    profile_mgr = get_profile_manager()
 
     try:
         browser_info = registry.get_browser(client_id, browser_id)
@@ -168,20 +169,32 @@ async def browser_close(
         return e.to_dict()
 
     try:
-        pydoll_browser = browser_info._pydoll_browser
+        pydoll_browser = browser_info.pydoll_browser
         if pydoll_browser:
             try:
-                await asyncio.wait_for(pydoll_browser.stop(), timeout=15.0)
+                await asyncio.wait_for(stop_browser(pydoll_browser), timeout=15.0)
+                # Chrome may release profile files shortly after its process stops on Windows.
+                await asyncio.sleep(0.25)
             except asyncio.TimeoutError:
-                logger.warning(
-                    f'Browser {browser_id} stop timed out, cleaning up registry'
-                )
+                logger.warning(f'Browser {browser_id} stop timed out, cleaning up registry')
             except Exception as exc:
                 logger.error(f'Error stopping browser {browser_id}: {exc}')
 
         tabs_closed = list(browser_info.tabs.keys())
-        profile_id = browser_info.profile.profile_id if browser_info.profile else ''
-        registry.remove_browser(client_id, browser_id)
+        profile = browser_info.profile
+        profile_id = profile.profile_id if profile else ''
+        cleanup_errors: JsonArray = []
+        if profile:
+            if profile.mode == ProfileMode.TEMPORARY:
+                try:
+                    await asyncio.to_thread(profile_mgr.cleanup_temporary, profile.profile_id)
+                except OSError as exc:
+                    # Browser ownership must be released even when Windows delays profile file cleanup.
+                    profile_mgr.release(profile.profile_id)
+                    cleanup_errors.append({'resource': 'temporary_profile', 'error': str(exc)})
+            else:
+                profile_mgr.unlock(profile.profile_id)
+        registry.remove_browser(client_id, browser_id, cleanup_profile=False)
         lock_manager = get_lock_manager()
         lock_manager.clear_browser(browser_id)
         for tab_id in tabs_closed:
@@ -194,6 +207,8 @@ async def browser_close(
             'success': True,
             'browser_id': browser_id,
             'tabs_closed': len(tabs_closed),
+            'partial': bool(cleanup_errors),
+            'cleanup_errors': cleanup_errors,
         }
     except Exception as exc:
         return StructuredError(

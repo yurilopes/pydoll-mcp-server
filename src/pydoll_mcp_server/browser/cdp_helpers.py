@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import contextlib
-from typing import Any
+import json
 
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_value
+from pydoll_mcp_server.browser.script_utils import extract_script_object, extract_script_string
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
+from pydoll_mcp_server.json_types import JsonObject
 
 
 async def set_user_agent(
@@ -15,7 +15,7 @@ async def set_user_agent(
     tab_id: str = '',
     browser_id: str = '',
     user_agent: str = '',
-) -> dict[str, Any]:
+) -> JsonObject:
     if not tab_id and not browser_id:
         return StructuredError(
             error_code=ErrorCode.INVALID_INPUT,
@@ -28,15 +28,14 @@ async def set_user_agent(
     try:
         if tab_id:
             tab_info = registry.get_tab(client_id, tab_id)
-            pydoll_tab = tab_info._pydoll_tab
+            pydoll_tab = tab_info.pydoll_tab
             js = f"""
             Object.defineProperty(navigator, 'userAgent', {{
-                get: function() {{ return {__import__('json').dumps(user_agent)}; }},
+                get: function() {{ return {json.dumps(user_agent)}; }},
                 configurable: true
             }});
             """
-            with contextlib.suppress(Exception):
-                await pydoll_tab.execute_script(js, return_by_value=True)
+            await pydoll_tab.execute_script(js, return_by_value=True)
         elif browser_id:
             registry.get_pydoll_browser(client_id, browser_id)
             pass
@@ -58,12 +57,12 @@ async def set_user_agent(
 async def get_user_agent(
     client_id: str,
     tab_id: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
 
     try:
         tab_info = registry.get_tab(client_id, tab_id)
-        pydoll_tab = tab_info._pydoll_tab
+        pydoll_tab = tab_info.pydoll_tab
     except StructuredError as e:
         return e.to_dict()
 
@@ -72,11 +71,11 @@ async def get_user_agent(
             'return navigator.userAgent;',
             return_by_value=True,
         )
-        value = extract_script_value(result)
+        value = extract_script_string(result)
         return {
             'success': True,
             'tab_id': tab_id,
-            'user_agent': str(value or ''),
+            'user_agent': value,
             'source': 'navigator.userAgent',
         }
     except Exception as e:
@@ -93,7 +92,7 @@ async def set_viewport(
     width: int,
     height: int,
     scale: float = 1.0,
-) -> dict[str, Any]:
+) -> JsonObject:
     if width < 100 or width > 10000 or height < 100 or height > 10000:
         return StructuredError(
             error_code=ErrorCode.INVALID_INPUT,
@@ -105,7 +104,7 @@ async def set_viewport(
 
     try:
         tab_info = registry.get_tab(client_id, tab_id)
-        pydoll_tab = tab_info._pydoll_tab
+        pydoll_tab = tab_info.pydoll_tab
     except StructuredError as e:
         return e.to_dict()
 
@@ -117,7 +116,7 @@ async def set_viewport(
         return {{width: window.innerWidth, height: window.innerHeight}};
         """
         result = await pydoll_tab.execute_script(js, return_by_value=True)
-        value = extract_script_value(result) or {'width': width, 'height': height}
+        value = extract_script_object(result)
 
         return {
             'success': True,
@@ -134,12 +133,12 @@ async def set_viewport(
 async def get_viewport(
     client_id: str,
     tab_id: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
 
     try:
         tab_info = registry.get_tab(client_id, tab_id)
-        pydoll_tab = tab_info._pydoll_tab
+        pydoll_tab = tab_info.pydoll_tab
     except StructuredError as e:
         return e.to_dict()
 
@@ -152,7 +151,7 @@ async def get_viewport(
         };
         """
         result = await pydoll_tab.execute_script(js, return_by_value=True)
-        value = extract_script_value(result) or {}
+        value = extract_script_object(result)
         return {
             'success': True,
             'tab_id': tab_id,

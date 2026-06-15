@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import (
     get_element_attribute,
@@ -13,16 +11,17 @@ from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.config import get_config, get_limits_config, get_timeout_config
 from pydoll_mcp_server.dom.element_cache import get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
+from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.logging import get_logger
 from pydoll_mcp_server.security.paths import validate_artifact_path
 from pydoll_mcp_server.security.policy import is_sensitive_field
 from pydoll_mcp_server.tools.element_resolver import (
-    _cache_element,
-    _read_element_value_via_js,
-    _resolve_element,
-    _safe_is_visible,
-    _safe_text,
-    _set_element_value_via_js,
+    cache_element,
+    read_element_value_via_js,
+    resolve_element,
+    safe_is_visible,
+    safe_text,
+    set_element_value_via_js,
 )
 
 
@@ -33,7 +32,7 @@ async def element_find(
     strategy: str = 'css',
     timeout: float | None = None,
     find_all: bool = False,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.wait_selector
     timeout = min(timeout, config.max_timeout)
@@ -45,12 +44,15 @@ async def element_find(
     except StructuredError as e:
         return e.to_dict()
 
-    pydoll_tab = tab_info._pydoll_tab
+    pydoll_tab = tab_info.pydoll_tab
 
     try:
         if strategy == 'css' or strategy == 'xpath':
             elements = await pydoll_tab.query(
-                selector, timeout=timeout, find_all=find_all, raise_exc=False,
+                selector,
+                timeout=max(0, int(timeout)),
+                find_all=find_all,
+                raise_exc=False,
             )
         else:
             return StructuredError(
@@ -75,31 +77,33 @@ async def element_find(
 
     if find_all and isinstance(elements, list):
         cache = get_element_cache()
-        results = []
+        results: list[JsonObject] = []
         for el in elements:
-            element_id = _cache_element(cache, tab_info, el)
-            results.append({
-                'element_id': element_id,
-                'tag': el.tag_name if hasattr(el, 'tag_name') else '',
-                'text': (await _safe_text(el))[:100],
-                'visible': await _safe_is_visible(el),
-            })
+            element_id = cache_element(cache, tab_info, el)
+            results.append(
+                {
+                    'element_id': element_id,
+                    'tag': el.tag_name,
+                    'text': (await safe_text(el))[:100],
+                    'visible': await safe_is_visible(el),
+                }
+            )
+        result_values: JsonArray = list(results)
         return {
             'success': True,
             'found': len(results),
-            'elements': results,
+            'elements': result_values,
         }
-    else:
-        el = elements[0] if isinstance(elements, list) else elements
-        cache = get_element_cache()
-        element_id = _cache_element(cache, tab_info, el)
-        return {
-            'success': True,
-            'element_id': element_id,
-            'tag': el.tag_name if hasattr(el, 'tag_name') else '',
-            'text': (await _safe_text(el))[:100],
-            'visible': await _safe_is_visible(el),
-        }
+    el = elements[0] if isinstance(elements, list) else elements
+    cache = get_element_cache()
+    element_id = cache_element(cache, tab_info, el)
+    return {
+        'success': True,
+        'element_id': element_id,
+        'tag': el.tag_name,
+        'text': (await safe_text(el))[:100],
+        'visible': await safe_is_visible(el),
+    }
 
 
 async def element_click(
@@ -107,7 +111,7 @@ async def element_click(
     tab_id: str,
     element_id: str,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.click
     timeout = min(timeout, config.max_timeout)
@@ -118,7 +122,7 @@ async def element_click(
     except StructuredError as e:
         return e.to_dict()
 
-    element = await _resolve_element(tab_info, element_id)
+    element = await resolve_element(tab_info, element_id)
     if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
@@ -129,12 +133,12 @@ async def element_click(
 
     try:
         async with tab_operation_lock(tab_id):
-            await element.scroll_into_view()
+            await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
             await element.click()
     except Exception:
         try:
             async with tab_operation_lock(tab_id):
-                await element.click_using_js()
+                await element.execute_script('this.click(); return true;', return_by_value=True)
         except Exception as e2:
             return StructuredError(
                 error_code=ErrorCode.EXECUTION_ERROR,
@@ -155,7 +159,7 @@ async def element_type(
     element_id: str,
     text: str,
     delay: float = 0.0,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
 
     try:
@@ -163,7 +167,7 @@ async def element_type(
     except StructuredError as e:
         return e.to_dict()
 
-    element = await _resolve_element(tab_info, element_id)
+    element = await resolve_element(tab_info, element_id)
     if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
@@ -173,7 +177,7 @@ async def element_type(
 
     try:
         async with tab_operation_lock(tab_id):
-            await element.scroll_into_view()
+            await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
             await element.type_text(text)
     except Exception as e:
         return StructuredError(
@@ -194,7 +198,7 @@ async def element_fill(
     tab_id: str,
     element_id: str,
     value: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
 
     try:
@@ -202,7 +206,7 @@ async def element_fill(
     except StructuredError as e:
         return e.to_dict()
 
-    element = await _resolve_element(tab_info, element_id)
+    element = await resolve_element(tab_info, element_id)
     if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
@@ -212,12 +216,14 @@ async def element_fill(
 
     try:
         async with tab_operation_lock(tab_id):
-            await element.scroll_into_view()
-            await element.clear()
+            await element.execute_script(
+                "this.scrollIntoView({block:'center'}); this.value=''; return true;",
+                return_by_value=True,
+            )
             await element.insert_text(value)
-            current_value = await _read_element_value_via_js(element)
+            current_value = await read_element_value_via_js(element)
             if current_value != value:
-                await _set_element_value_via_js(element, value)
+                await set_element_value_via_js(element, value)
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,
@@ -237,7 +243,7 @@ async def element_get_text(
     tab_id: str,
     element_id: str,
     max_chars: int = 5000,
-) -> dict[str, Any]:
+) -> JsonObject:
     limits = get_limits_config()
     max_chars = min(max_chars, limits.max_text_chars)
     registry = get_registry()
@@ -247,7 +253,7 @@ async def element_get_text(
     except StructuredError as e:
         return e.to_dict()
 
-    element = await _resolve_element(tab_info, element_id)
+    element = await resolve_element(tab_info, element_id)
     if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
@@ -256,8 +262,7 @@ async def element_get_text(
         ).to_dict()
 
     try:
-        raw_text = await get_element_text(element)
-        text = raw_text if isinstance(raw_text, str) else str(raw_text)
+        text = await get_element_text(element)
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,
@@ -283,7 +288,7 @@ async def element_get_attribute(
     tab_id: str,
     element_id: str,
     name: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
 
     try:
@@ -291,7 +296,7 @@ async def element_get_attribute(
     except StructuredError as e:
         return e.to_dict()
 
-    element = await _resolve_element(tab_info, element_id)
+    element = await resolve_element(tab_info, element_id)
     if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
@@ -323,7 +328,7 @@ async def element_screenshot(
     tab_id: str,
     element_id: str,
     path: str = '',
-) -> dict[str, Any]:
+) -> JsonObject:
     registry = get_registry()
     config = get_config()
 
@@ -332,7 +337,7 @@ async def element_screenshot(
     except StructuredError as e:
         return e.to_dict()
 
-    element = await _resolve_element(tab_info, element_id)
+    element = await resolve_element(tab_info, element_id)
     if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
@@ -356,9 +361,8 @@ async def element_screenshot(
             if safe_path:
                 await element.take_screenshot(path=safe_path, as_base64=False)
                 return {'success': True, 'path': safe_path}
-            else:
-                result = await element.take_screenshot(as_base64=True)
-                return {'success': True, 'data': result if isinstance(result, str) else ''}
+            result = await element.take_screenshot(as_base64=True)
+            return {'success': True, 'data': result if isinstance(result, str) else ''}
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,

@@ -2,126 +2,115 @@
 
 ## Contexto
 
-Este repositório planeja e implementará um MCP server em Python para a biblioteca Pydoll. O objetivo é criar uma alternativa ao Playwright MCP Server baseada em Pydoll, com foco em automação de navegador para agentes.
+Este repositório implementa um MCP server em Python para automação de navegador com
+Pydoll. O objetivo é oferecer uma API previsível e segura para agentes, preservando a
+natureza assíncrona da Pydoll e o isolamento entre clientes.
 
-O projeto ainda está em fase de planejamento inicial. Não implemente código antes de seguir os planos em ordem.
+## Regra de ouro
 
-## Caminhos importantes
+Mantenha a qualidade desde a primeira alteração. Não aceite atalhos, não adie limpeza e
+não presuma que um débito temporário será corrigido depois. Corrija a causa raiz enquanto
+o contexto ainda está disponível.
+
+Legibilidade humana, correção e segurança têm prioridade sobre concisão, velocidade de
+implementação e abstrações engenhosas.
+
+## Caminhos locais
 
 - Repositório do projeto: `C:\Users\Yuri\Documents\Git\pydoll-mcp-server`.
-- Repositório local da Pydoll: `C:\Users\Yuri\Documents\Git\pydoll`.
-- Documentação vendorizada da Pydoll: `references/pydoll-docs/`.
-- Planos detalhados: `plans/`.
-- Registros de progresso: `progress/`.
+- Repositório local da Pydoll, somente leitura: `C:\Users\Yuri\Documents\Git\pydoll`.
 - Python via Anaconda: `C:\Users\Yuri\anaconda3\python.exe`.
+- Documentação vendorizada da Pydoll: `references/pydoll-docs/`.
 
-## Regras do ambiente
+Estes caminhos são específicos deste ambiente. Não os copie para documentação pública.
 
-- Estamos no Windows em modo nativo.
+## Regras não negociáveis
+
 - Trate esta máquina com cuidado. Esta máquina é nossa casa.
-- Não execute comandos destrutivos sem necessidade.
-- Não apague arquivos sem solicitação explícita.
-- Não modifique arquivos fora deste repositório, exceto leitura do repositório local da Pydoll.
-- Antes de qualquer ação potencialmente destrutiva, registre a justificativa no plano ou progresso e escolha uma alternativa segura.
-- Nunca reverta alterações de outro agente ou do usuário sem pedido explícito.
-- Use UTF-8.
-- Não use em dash.
+- Não execute ações destrutivas sem necessidade e nunca reverta alterações de terceiros.
+- Preserve UTF-8 e não use em dash.
+- Não modifique o repositório `websocket_lambda`. Ele é somente referência de estilo.
+- Não copie segredos, credenciais ou padrões inseguros encontrados em outros projetos.
+- Não exponha `execute_cdp_cmd`, comandos do sistema operacional ou filesystem arbitrário.
+- Não enfraqueça Ruff, mypy, Pyright, o LSP ou testes para ocultar um problema.
+- Não use `Any`, `cast` ou `type: ignore` para silenciar tipagem. Quando uma biblioteca
+  externa exigir uma fronteira dinâmica, isole, justifique e normalize o valor imediatamente.
+- Não dobre o código principal para facilitar mocks ou fazer testes passarem.
+- Não adicione compatibilidade retroativa artificial para preservar contratos alpha incorretos.
 
-## Como começar trabalho
+## Engenharia e arquitetura
 
-1. Leia `PLAN.md`.
-2. Leia o plano detalhado atual em `plans/PLAN_XX.md`.
-3. Leia o último arquivo relevante em `progress/`, se existir.
-4. Consulte `QUESTIONS.md` para decisões e pendências.
-5. Consulte `references/pydoll-docs/` e, quando necessário, o código local em `C:\Users\Yuri\Documents\Git\pydoll`.
-6. Execute os planos em sequência estrita.
+- Prefira fluxo operacional direto, validação antecipada e nomes orientados ao domínio.
+- Respeite separação de responsabilidades, baixo acoplamento e dependências explícitas.
+- Não crie abstrações sem benefício concreto. Código legível vem antes de engenharia excessiva.
+- Erros internos devem ser específicos. Converta-os para erros MCP estruturados somente na
+  fronteira superior apropriada.
+- `except Exception` é aceitável somente dentro de funções registradas como tools MCP, após
+  exceções esperadas, para impedir a queda do servidor e converter a falha inesperada.
+- Helpers e serviços internos devem capturar `PydollException` ou exceções específicas.
+- Deep traversal deve reportar falhas parciais em `errors` com `partial=true`, nunca ignorá-las.
+- Fallbacks best-effort devem ser explícitos no nome, seguros e documentados.
 
-## Como registrar progresso
+## Tamanho dos arquivos
 
-Crie ou atualize um arquivo:
+- Meta: até 400 linhas físicas por arquivo Python.
+- Limite máximo: 450 linhas físicas.
+- Arquivos entre 401 e 450 linhas exigem justificativa curta na revisão ou progresso.
+- Arquivos acima de 450 linhas devem ser refatorados preservando coesão lógica.
+- Não fragmente lógica coesa apenas para reduzir a contagem.
 
-```text
-progress/YYYY-MM-DD_AGENT_PLAN_XX.md
-```
+## Comentários e logs
 
-Use conteúdo curto:
+Comentários no código devem ser em inglês, curtos e explicar somente:
 
-- plano atual;
-- tarefas concluídas;
-- arquivos alterados;
-- testes executados;
-- bloqueios;
-- próximo passo.
+- regra funcional ou de negócio;
+- boundary de segurança ou ownership;
+- motivo de lock ou decisão de concorrência;
+- risco de operação destrutiva;
+- motivo de recovery ou fallback best-effort seguro.
 
-Não seja excessivamente verboso. O objetivo é permitir retomada rápida por outro agente.
+Não narre código evidente. Logs devem registrar operações e transições relevantes sem
+expor tokens, cookies, storage, código JavaScript completo ou conteúdo sensível.
 
-## Como retomar trabalho interrompido
+## Async, concorrência e Pydoll
 
-- Leia o plano detalhado correspondente.
-- Leia o progresso mais recente.
-- Verifique `git status --short`.
-- Confirme quais critérios de aceite já foram atendidos.
-- Continue da primeira tarefa incompleta.
-- Se encontrar divergência entre plano e código real, registre em `progress/` e ajuste somente se for necessário para cumprir o plano.
+- Não bloqueie o event loop global.
+- Toda operação potencialmente longa deve ter timeout explícito.
+- A tool só retorna quando a ação termina, falha ou expira.
+- Use locks por tab, browser ou perfil para mutações que possam interferir.
+- Ações em recursos independentes devem continuar concorrentes.
+- Respeite as APIs assíncronas reais da Pydoll. Não altere propriedades assíncronas para
+  métodos apenas para satisfazer testes.
+- Trate frames, iframes, OOPIFs e shadow roots como parte central da arquitetura.
 
-## Python e ambiente
+## Testes
 
-Use o Python do Anaconda quando precisar executar comandos locais:
+- Testes representam contratos reais. Fakes devem adaptar-se ao código de produção.
+- Prefira fakes tipados pequenos a mocks genéricos e inspeção de source.
+- Cubra ownership, isolamento, UTF-8, frames, shadow roots, timeout, cancelamento,
+  recovery, redaction e segurança de paths.
+- Nunca adicione branch de produção exclusivo para testes.
+
+Antes de concluir, execute:
 
 ```powershell
-C:\Users\Yuri\anaconda3\python.exe --version
+C:\Users\Yuri\anaconda3\python.exe -m pytest -q
+C:\Users\Yuri\anaconda3\python.exe -m ruff check .
+C:\Users\Yuri\anaconda3\python.exe -m ruff format --check .
+C:\Users\Yuri\anaconda3\python.exe -m mypy --strict src tests
+C:\Users\Yuri\anaconda3\python.exe -m pyright --pythonpath C:\Users\Yuri\anaconda3\python.exe
+C:\Users\Yuri\anaconda3\python.exe -m pytest -m mcp_e2e -q
+C:\Users\Yuri\anaconda3\python.exe -m pytest -m browser_smoke -q
+C:\Users\Yuri\anaconda3\python.exe -m build
 ```
 
-Futuramente, o projeto deve ser portável para Windows, macOS e Unix. Não introduza dependências específicas de Windows sem motivo claro e sem fallback.
+## Como trabalhar e retomar
 
-## Async e Pydoll
+1. Leia este arquivo, `README.md`, o código relevante e o último progresso aplicável.
+2. Verifique `git status --short` e não reverta mudanças existentes.
+3. Consulte a Pydoll local ou vendorizada antes de supor uma capacidade.
+4. Faça alterações coesas e mantenha os gates verdes.
+5. Registre progresso curto em `progress/YYYY-MM-DD_AGENT_<TAREFA>.md` quando necessário.
 
-- A Pydoll é assíncrona por padrão.
-- Não bloqueie o event loop global.
-- Use `asyncio` com timeouts explícitos.
-- Tools MCP devem parecer síncronas para o cliente: retornar apenas quando a ação terminar, falhar ou expirar.
-- Ações longas em uma aba não devem bloquear abas independentes.
-- Use locks por recurso para operações mutantes em uma mesma aba, browser, perfil ou janela.
-
-## Frames, iframes e shadow root
-
-Trate frames, iframes, OOPIFs e shadow roots como parte central da arquitetura.
-
-- Pydoll permite interagir com iframes como `WebElement`.
-- A documentação local informa suporte a OOPIF e shadow roots inclusive closed via CDP.
-- XPath não atravessa shadow boundaries de forma geral.
-- Dentro de shadow roots, prefira CSS selector quando a Pydoll exigir.
-- Tools profundas devem retornar `frame_path`, `shadow_path`, selector hints, xpath hints, bounding box, estado visible/enabled/clickable e texto resumido.
-- Métodos rápidos devem ser compactos e baratos.
-- Métodos robustos devem ser explícitos, limitados e com timeout próprio.
-
-## Segurança
-
-- Não exponha `execute_cdp_cmd` livre.
-- Não crie tool para executar comandos do sistema operacional.
-- Não crie leitura ou escrita arbitrária de filesystem.
-- Cookies, storage, headers Authorization, tokens e valores de formulário são sensíveis.
-- Logs devem redigir segredos.
-- `js_evaluate` e `js_evaluate_readonly` são sensíveis e precisam de limites, timeout, auditoria resumida e redaction.
-- Uploads e downloads devem usar diretórios permitidos.
-- Modo seguro deve ser o padrão.
-
-## Testes futuros
-
-Quando a implementação começar:
-
-- Use fixtures HTML locais.
-- Cubra UTF-8 com caracteres acentuados, chinês, japonês e coreano.
-- Cubra iframes simples, nested iframes, OOPIF quando viável e shadow DOM aberto ou fechado.
-- Cubra timeout, cancelamento e recovery.
-- Cubra isolamento multi-cliente por `client_id`.
-- Cubra contrato MCP com cliente real ou MCP inspector quando aplicável.
-
-## Dúvidas
-
-Se uma decisão estiver ausente:
-
-1. Consulte `PLAN.md`, `QUESTIONS.md` e o plano atual.
-2. Verifique se a resposta está no código ou docs da Pydoll.
-3. Se continuar incerto, registre como `PENDENTE` em `QUESTIONS.md` e em `progress/`.
-4. Use a opção mais segura por padrão.
+Ao encontrar dúvida, investigue primeiro no código e na documentação. Use a opção mais
+segura quando a decisão continuar incerta e registre a limitação.

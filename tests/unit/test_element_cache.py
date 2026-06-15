@@ -55,10 +55,14 @@ class TestElementCache:
 
     def test_invalidate_tab(self) -> None:
         entry1 = ElementCacheEntry(
-            element_id='el_001', tab_id='tab_001', document_generation=1,
+            element_id='el_001',
+            tab_id='tab_001',
+            document_generation=1,
         )
         entry2 = ElementCacheEntry(
-            element_id='el_002', tab_id='tab_002', document_generation=1,
+            element_id='el_002',
+            tab_id='tab_002',
+            document_generation=1,
         )
         self.cache.store(entry1)
         self.cache.store(entry2)
@@ -69,29 +73,37 @@ class TestElementCache:
     def test_max_entries_eviction(self) -> None:
         cache = ElementCache(max_entries=3)
         for i in range(5):
-            cache.store(ElementCacheEntry(
-                element_id=f'el_{i}',
-                tab_id='tab_001',
-                document_generation=1,
-            ))
+            cache.store(
+                ElementCacheEntry(
+                    element_id=f'el_{i}',
+                    tab_id='tab_001',
+                    document_generation=1,
+                )
+            )
         assert cache.size == 3
 
     def test_clear(self) -> None:
         for i in range(5):
-            self.cache.store(ElementCacheEntry(
-                element_id=f'el_{i}',
-                tab_id='tab_001',
-                document_generation=1,
-            ))
+            self.cache.store(
+                ElementCacheEntry(
+                    element_id=f'el_{i}',
+                    tab_id='tab_001',
+                    document_generation=1,
+                )
+            )
         self.cache.clear()
         assert self.cache.size == 0
 
     def test_invalidate_document(self) -> None:
         entry1 = ElementCacheEntry(
-            element_id='el_001', tab_id='tab_001', document_generation=1,
+            element_id='el_001',
+            tab_id='tab_001',
+            document_generation=1,
         )
         entry2 = ElementCacheEntry(
-            element_id='el_002', tab_id='tab_001', document_generation=2,
+            element_id='el_002',
+            tab_id='tab_001',
+            document_generation=2,
         )
         self.cache.store(entry1)
         self.cache.store(entry2)

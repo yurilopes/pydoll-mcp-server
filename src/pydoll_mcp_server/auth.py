@@ -20,9 +20,7 @@ class BearerUser(SimpleUser):
 
 
 class BearerTokenBackend(AuthenticationBackend):
-    async def authenticate(
-        self, conn: HTTPConnection
-    ) -> tuple[AuthCredentials, BaseUser] | None:
+    async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, BaseUser] | None:
         if conn.url.path == '/health':
             return AuthCredentials([]), BearerUser('public')
 

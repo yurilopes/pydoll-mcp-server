@@ -6,7 +6,7 @@ This project offers a local alternative to the Playwright MCP Server, with its o
 
 ## Status
 
-Experimental alpha (v0.2.0a1). HTTP on `127.0.0.1` is the primary transport. `stdio` transport is available as an option (`--transport stdio`).
+Experimental alpha (v0.3.0a1). HTTP on `127.0.0.1` is the primary transport. `stdio` transport is available as an option (`--transport stdio`).
 
 Endpoints:
 - `/health` - Health check (no auth)
@@ -18,6 +18,9 @@ Endpoints:
 - Python `>=3.10`
 - Chrome or Chromium installed
 - Pydoll `>=2.23.0`
+
+Contributors must follow the quality gates and engineering conventions in
+[`docs/development.md`](docs/development.md).
 
 ## Installation
 
@@ -236,8 +239,12 @@ Core gates:
 ```powershell
 python -m pytest -q
 python -m ruff check .
-python -m mypy src
+python -m ruff format --check .
+python -m mypy --strict src tests
+python -m pyright
+python -m pytest -m mcp_e2e -q
 python -m pytest -m browser_smoke -q
+python -m build
 ```
 
 Useful test suites by area:

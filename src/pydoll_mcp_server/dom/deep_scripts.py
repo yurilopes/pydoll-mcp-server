@@ -344,5 +344,3 @@ DEEP_FIND_JS = """
     return result;
 })()
 """
-
-

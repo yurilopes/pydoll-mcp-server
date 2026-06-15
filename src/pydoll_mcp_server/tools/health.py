@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydoll_mcp_server.config import get_config
+from pydoll_mcp_server.json_types import JsonObject
 from pydoll_mcp_server.server_state import get_server_state
+from pydoll_mcp_server.version import get_version
 
 _server_state = get_server_state()
 
 
-def get_health_response(include_runtime: bool = False) -> dict[str, Any]:
+def get_health_response(include_runtime: bool = False) -> JsonObject:
     config = get_config()
-    result: dict[str, Any] = {
+    result: JsonObject = {
         'status': 'ok',
-        'version': '0.1.0',
+        'version': get_version(),
         'uptime_seconds': round(_server_state.uptime_seconds, 1),
         'auth_mode': 'token' if config.auth_enabled else 'none',
     }

@@ -1,14 +1,18 @@
 # Release Checklist
 
-## 0.2.0a1 - Experimental Alpha
+## 0.3.0a1 - Experimental Alpha
 
 ### Pre-release checks
-- [x] `pytest -q`: 200 passed
+- [x] `pytest -q`: 217 passed
 - [x] `ruff check .`: All checks passed
-- [x] `mypy src`: Success (52 source files)
+- [x] `ruff format --check .`: All files formatted
+- [x] `mypy --strict src tests`: Success
+- [x] `pyright` strict on `src` and `tests`: 0 errors
 - [x] `pytest -m browser_smoke -q`: 11 passed
+- [x] `pytest -m mcp_e2e -q`: real stdio browser workflow passed
 - [x] `sdist` and `wheel` built successfully
-- [x] Wheel installed in temporary venv and import verified
+- [x] Wheel installed in temporary venv, version verified, and `py.typed` confirmed
+- [x] No Python file exceeds the 400-line target
 - [x] `LICENSE` exists (MIT)
 - [x] `CHANGELOG.md` exists
 - [x] `docs/security.md` exists
@@ -21,13 +25,15 @@
 - [x] `/mcp` requires token
 - [x] `/sse` endpoint exists
 - [x] `stdio` transport available via `--transport stdio` (no token required)
-- [x] `stdio` probe passes: `'' | python -m pydoll_mcp_server.cli --transport stdio`
+- [x] MCP SDK stdio handshake and real tool listing pass with 93 tools
+- [x] MCP SDK stdio real browser workflow passes
 
 ### Version consistency
-- [x] `pyproject.toml`: `0.2.0a1`
-- [x] `health_check["version"]`: `0.2.0a1`
-- [x] `server_status["version"]`: `0.2.0a1`
-- [x] `/health` response: `version: 0.2.0a1`
+- [x] Hatchling derives package metadata from `src/pydoll_mcp_server/version.py`
+- [x] `health_check["version"]`: `0.3.0a1`
+- [x] `server_status["version"]`: `0.3.0a1`
+- [x] `/health` response: `version: 0.3.0a1`
+- [x] Installed wheel metadata: `0.3.0a1`, matching the source version
 
 ### Tool coverage
 - [x] Lifecycle: launch, list, close

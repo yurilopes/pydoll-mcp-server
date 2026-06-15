@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
 
+from pydoll_mcp_server.browser.pydoll_compat import set_input_files
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.config import get_config, get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
+from pydoll_mcp_server.json_types import JsonObject
 from pydoll_mcp_server.security.policy import PathAllowlist
+from pydoll_mcp_server.tools.element_resolver import resolve_element
 
 
 async def download_expect(
     client_id: str,
     tab_id: str,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     config = get_timeout_config()
     timeout = timeout or config.download
     timeout = min(timeout, config.max_timeout)
@@ -28,7 +30,7 @@ async def download_expect(
     except StructuredError as e:
         return e.to_dict()
 
-    pydoll_tab = tab_info._pydoll_tab
+    pydoll_tab = tab_info.pydoll_tab
     download_dir = server_config.downloads_dir / tab_info.client_id
     download_dir.mkdir(parents=True, exist_ok=True)
 
@@ -38,10 +40,10 @@ async def download_expect(
             timeout=timeout,
         ) as download:
             await download.wait_finished()
-            file_path = download.file_path if hasattr(download, 'file_path') else str(download_dir)
+            file_path = download.file_path or str(download_dir)
 
         file_size = 0
-        if os.path.isfile(file_path):
+        if file_path and os.path.isfile(file_path):
             file_size = os.path.getsize(file_path)
 
         return {
@@ -68,9 +70,7 @@ async def upload_files(
     tab_id: str,
     element_id: str,
     paths: list[str],
-) -> dict[str, Any]:
-    from pydoll_mcp_server.tools.element_resolver import _resolve_element
-
+) -> JsonObject:
     server_config = get_config()
     registry = get_registry()
 
@@ -98,7 +98,7 @@ async def upload_files(
     except StructuredError as e:
         return e.to_dict()
 
-    element = await _resolve_element(tab_info, element_id)
+    element = await resolve_element(tab_info, element_id)
     if element is None:
         return StructuredError(
             error_code=ErrorCode.STALE_ELEMENT,
@@ -107,7 +107,7 @@ async def upload_files(
         ).to_dict()
 
     try:
-        await element.set_input_files(paths)
+        await set_input_files(element, paths)
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,

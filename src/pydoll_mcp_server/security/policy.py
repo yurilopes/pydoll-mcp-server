@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+
+from pydoll_mcp_server.json_types import JsonArray, JsonObject
 
 SENSITIVE_FIELD_PATTERNS = [
     re.compile(r'password', re.IGNORECASE),
@@ -30,14 +31,14 @@ def is_sensitive_field(name: str) -> bool:
     return any(pattern.search(name) for pattern in SENSITIVE_FIELD_PATTERNS)
 
 
-def redact_dict(data: dict[str, Any], redact_all: bool = False) -> dict[str, Any]:
-    result: dict[str, Any] = {}
+def redact_dict(data: JsonObject, redact_all: bool = False) -> JsonObject:
+    result: JsonObject = {}
     for key, value in data.items():
         if redact_all or is_sensitive_field(key):
-            if isinstance(value, int | float):
-                result[key] = 0
-            elif isinstance(value, bool):
+            if isinstance(value, bool):
                 result[key] = False
+            elif isinstance(value, int | float):
+                result[key] = 0
             elif isinstance(value, dict):
                 result[key] = redact_dict(value, redact_all=True)
             elif isinstance(value, list):
@@ -47,13 +48,21 @@ def redact_dict(data: dict[str, Any], redact_all: bool = False) -> dict[str, Any
         elif isinstance(value, dict):
             result[key] = redact_dict(value, redact_all=redact_all)
         elif isinstance(value, list):
-            result[key] = [
-                redact_dict(item, redact_all=True) if isinstance(item, dict)
-                else '[REDACTED]' if redact_all else item
-                for item in value
-            ]
+            result[key] = _redact_array(value, redact_all)
         else:
             result[key] = value
+    return result
+
+
+def _redact_array(values: JsonArray, redact_all: bool) -> JsonArray:
+    result: JsonArray = []
+    for value in values:
+        if isinstance(value, dict):
+            result.append(redact_dict(value, redact_all=True))
+        elif redact_all:
+            result.append('[REDACTED]')
+        else:
+            result.append(value)
     return result
 
 
@@ -67,7 +76,7 @@ class PathAllowlist:
     def is_allowed(self, path: str) -> bool:
         try:
             resolved = Path(path).resolve(strict=False)
-        except Exception:
+        except OSError:
             return False
         for allowed in self._allowed:
             try:
@@ -86,8 +95,7 @@ class PathAllowlist:
             raise PermissionError(f'Write path not in allowlist: {path}')
 
     def validate_upload(self, paths: list[str]) -> list[str]:
-        denied = [p for p in paths if not self.is_allowed(p)]
-        return denied
+        return [p for p in paths if not self.is_allowed(p)]
 
 
 PROHIBITED_METHODS = [

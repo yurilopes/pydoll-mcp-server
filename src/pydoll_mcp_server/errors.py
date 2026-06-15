@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+
+from pydoll_mcp_server.json_types import JsonObject
 
 
 class ErrorCode(str, Enum):
@@ -37,7 +38,7 @@ class StructuredError(Exception):
         self,
         error_code: ErrorCode,
         message: str,
-        details: dict[str, Any] | None = None,
+        details: JsonObject | None = None,
         retryable: bool = False,
         resource_state: ResourceState = ResourceState.UNKNOWN,
         recovery_hint: str = '',
@@ -50,8 +51,8 @@ class StructuredError(Exception):
         self.resource_state = resource_state
         self.recovery_hint = recovery_hint
 
-    def to_dict(self) -> dict[str, Any]:
-        result: dict[str, Any] = {
+    def to_dict(self) -> JsonObject:
+        result: JsonObject = {
             'error_code': self.error_code.value,
             'message': self.message,
             'retryable': self.retryable,

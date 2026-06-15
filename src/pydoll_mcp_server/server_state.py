@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
 
 from pydoll_mcp_server.errors import StructuredError
+from pydoll_mcp_server.json_types import JsonObject
 
-SCHEMA_VERSION = '2026-06-14.v0.2'
+SCHEMA_VERSION = '2026-06-14.v0.3'
 _START_TIME = time.time()
 
 
@@ -39,7 +39,7 @@ class ServerState:
     def uptime_seconds(self) -> float:
         return time.time() - _START_TIME
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonObject:
         return {
             'uptime_seconds': round(self.uptime_seconds, 1),
             'tool_calls': dict(self._tool_counts),
@@ -61,6 +61,6 @@ def generate_request_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-def error_response(error: StructuredError) -> dict[str, Any]:
+def error_response(error: StructuredError) -> JsonObject:
     _SERVER_STATE.record_failure(error.error_code.value)
     return {'success': False, **error.to_dict()}

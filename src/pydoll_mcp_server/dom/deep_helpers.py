@@ -3,23 +3,27 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
+from pydoll.elements.web_element import WebElement
+
+from pydoll_mcp_server.browser.models import TabInfo
 from pydoll_mcp_server.browser.pydoll_compat import get_element_attribute, get_element_text
 from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
+from pydoll_mcp_server.dom.models import DeepRawElement
+from pydoll_mcp_server.json_types import JsonArray, JsonObject
 
 
-async def _raw_from_pydoll_element(
-    element: Any,
+async def raw_from_pydoll_element(
+    element: WebElement,
     frame_path: list[str],
     shadow_path: list[str],
-) -> dict[str, Any]:
-    tag = _safe_tag_name(element)
-    attrs = _element_attrs(element)
+) -> DeepRawElement:
+    tag = str(element.tag_name or '').lower()
+    attrs = element_attributes(element)
     selector = _selector_from_attrs(tag, attrs)
     text = await get_element_text(element)
     return {
-        'elementId': f'el_deep_{uuid.uuid4().hex[:12]}',
+        'element_id': f'el_deep_{uuid.uuid4().hex[:12]}',
         'tag': tag,
         'text': text[:200],
         'attrs': attrs,
@@ -31,23 +35,26 @@ async def _raw_from_pydoll_element(
         'clickable': tag in {'button', 'a', 'input', 'select', 'textarea', 'option'},
         'frame_path': list(frame_path),
         'shadow_path': list(shadow_path),
-        '_pydoll_element': element,
+        'pydoll_element': element,
     }
 
 
-def _safe_tag_name(element: Any) -> str:
-    try:
-        tag = element.tag_name if hasattr(element, 'tag_name') else ''
-        return str(tag or '').lower()
-    except Exception:
-        return ''
-
-
-def _element_attrs(element: Any) -> dict[str, str]:
+def element_attributes(element: WebElement) -> dict[str, str]:
     attrs: dict[str, str] = {}
     for name in (
-        'id', 'class', 'name', 'type', 'placeholder', 'href', 'src',
-        'alt', 'title', 'value', 'role', 'aria-label', 'data-testid',
+        'id',
+        'class',
+        'name',
+        'type',
+        'placeholder',
+        'href',
+        'src',
+        'alt',
+        'title',
+        'value',
+        'role',
+        'aria-label',
+        'data-testid',
     ):
         value = get_element_attribute(element, name)
         if value is not None:
@@ -75,7 +82,7 @@ def _xpath_from_attrs(tag: str, attrs: dict[str, str]) -> str:
     return ''
 
 
-def _ensure_list(value: Any) -> list[Any]:
+def ensure_web_elements(value: WebElement | list[WebElement] | None) -> list[WebElement]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -83,49 +90,47 @@ def _ensure_list(value: Any) -> list[Any]:
     return [value]
 
 
-def _cache_deep_nodes(tab_info: Any, raw_elements: list[Any]) -> list[dict[str, Any]]:
+def cache_deep_nodes(tab_info: TabInfo, raw_elements: list[DeepRawElement]) -> list[JsonObject]:
     cache = get_element_cache()
-    elements: list[dict[str, Any]] = []
+    elements: list[JsonObject] = []
     for raw in raw_elements:
-        if not isinstance(raw, dict):
-            continue
-        element_id = str(raw.get('elementId') or '')
+        element_id = raw['element_id']
         if not element_id:
             continue
-        frame_path = _list_of_strings(raw.get('frame_path'))
-        shadow_path = _list_of_strings(raw.get('shadow_path'))
+        frame_path = raw['frame_path']
+        shadow_path = raw['shadow_path']
         entry = ElementCacheEntry(
             element_id=element_id,
             tab_id=tab_info.tab_id,
             document_generation=tab_info.document_generation,
             frame_path=frame_path,
             shadow_path=shadow_path,
-            selector_hint=str(raw.get('selector_hint') or ''),
-            xpath_hint=str(raw.get('xpath_hint') or ''),
-            text_summary=str(raw.get('text') or '')[:100],
-            bounding_box=raw.get('bounding_box') or {},
-            tag_name=str(raw.get('tag') or ''),
-            _pydoll_element=raw.get('_pydoll_element'),
+            selector_hint=raw['selector_hint'],
+            xpath_hint=raw['xpath_hint'],
+            text_summary=raw['text'][:100],
+            bounding_box=raw['bounding_box'],
+            tag_name=raw['tag'],
+            pydoll_element=raw.get('pydoll_element'),
         )
         cache.store(entry)
-        elements.append({
-            'element_id': element_id,
-            'tag': entry.tag_name,
-            'text': entry.text_summary,
-            'attrs': raw.get('attrs') or {},
-            'selector_hint': entry.selector_hint,
-            'xpath_hint': entry.xpath_hint,
-            'frame_path': frame_path,
-            'shadow_path': shadow_path,
-            'bounding_box': entry.bounding_box,
-            'visible': bool(raw.get('visible', False)),
-            'enabled': bool(raw.get('enabled', True)),
-            'clickable': bool(raw.get('clickable', False)),
-        })
+        attrs: JsonObject = dict(raw['attrs'])
+        bounds: JsonObject = dict(entry.bounding_box)
+        frame_values: JsonArray = list(frame_path)
+        shadow_values: JsonArray = list(shadow_path)
+        elements.append(
+            {
+                'element_id': element_id,
+                'tag': entry.tag_name,
+                'text': entry.text_summary,
+                'attrs': attrs,
+                'selector_hint': entry.selector_hint,
+                'xpath_hint': entry.xpath_hint,
+                'frame_path': frame_values,
+                'shadow_path': shadow_values,
+                'bounding_box': bounds,
+                'visible': raw['visible'],
+                'enabled': raw['enabled'],
+                'clickable': raw['clickable'],
+            }
+        )
     return elements
-
-
-def _list_of_strings(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value]

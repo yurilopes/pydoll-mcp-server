@@ -6,7 +6,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+
+from pydoll_mcp_server.json_types import JsonObject
 
 SENSITIVE_PATTERNS: list[tuple[str, str]] = [
     (
@@ -31,6 +32,10 @@ def redact(value: str) -> str:
     return result
 
 
+def _empty_json_object() -> JsonObject:
+    return {}
+
+
 @dataclass
 class OperationLog:
     request_id: str = ''
@@ -43,22 +48,26 @@ class OperationLog:
     duration_ms: float = 0.0
     status: str = 'success'
     error_code: str = ''
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: JsonObject = field(default_factory=_empty_json_object)
 
     def to_json(self) -> str:
-        return json.dumps({
-            'request_id': self.request_id,
-            'client_id': self.client_id,
-            'session_id': self.session_id,
-            'browser_id': self.browser_id,
-            'tab_id': self.tab_id,
-            'tool': self.tool,
-            'operation': self.operation,
-            'duration_ms': round(self.duration_ms, 2),
-            'status': self.status,
-            'error_code': self.error_code,
-            **self.extra,
-        }, default=str, ensure_ascii=False)
+        return json.dumps(
+            {
+                'request_id': self.request_id,
+                'client_id': self.client_id,
+                'session_id': self.session_id,
+                'browser_id': self.browser_id,
+                'tab_id': self.tab_id,
+                'tool': self.tool,
+                'operation': self.operation,
+                'duration_ms': round(self.duration_ms, 2),
+                'status': self.status,
+                'error_code': self.error_code,
+                **self.extra,
+            },
+            default=str,
+            ensure_ascii=False,
+        )
 
 
 class PydollMCPLogger:
@@ -66,9 +75,7 @@ class PydollMCPLogger:
         self._logger = logging.getLogger('pydoll_mcp_server')
         if not self._logger.handlers:
             handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter(
-                '%(asctime)s [%(levelname)s] %(message)s'
-            ))
+            handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
             self._logger.addHandler(handler)
             self._logger.setLevel(logging.INFO)
 
@@ -78,16 +85,16 @@ class PydollMCPLogger:
     def log_operation(self, op: OperationLog) -> None:
         self._logger.info(redact(op.to_json()))
 
-    def error(self, msg: str, *args: Any) -> None:
+    def error(self, msg: str, *args: object) -> None:
         self._logger.error(redact(msg), *args)
 
-    def warning(self, msg: str, *args: Any) -> None:
+    def warning(self, msg: str, *args: object) -> None:
         self._logger.warning(redact(msg), *args)
 
-    def info(self, msg: str, *args: Any) -> None:
+    def info(self, msg: str, *args: object) -> None:
         self._logger.info(redact(msg), *args)
 
-    def debug(self, msg: str, *args: Any) -> None:
+    def debug(self, msg: str, *args: object) -> None:
         self._logger.debug(redact(msg), *args)
 
 

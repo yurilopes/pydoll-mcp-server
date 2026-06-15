@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from types import TracebackType
 
 
 class ResourceLock:
@@ -24,7 +24,12 @@ class ResourceLock:
     async def __aenter__(self) -> None:
         await self._lock.acquire()
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self._owner = ''
         self._lock.release()
 
@@ -65,14 +70,14 @@ def get_lock_manager() -> LockManager:
 
 
 @asynccontextmanager
-async def tab_operation_lock(tab_id: str) -> AsyncIterator[None]:
+async def tab_operation_lock(tab_id: str) -> AsyncGenerator[None, None]:
     lm = get_lock_manager()
     async with lm.tab_mutex(tab_id):
         yield
 
 
 @asynccontextmanager
-async def browser_operation_lock(browser_id: str) -> AsyncIterator[None]:
+async def browser_operation_lock(browser_id: str) -> AsyncGenerator[None, None]:
     lm = get_lock_manager()
     async with lm.browser_mutex(browser_id):
         yield

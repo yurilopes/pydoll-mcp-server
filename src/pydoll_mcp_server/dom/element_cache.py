@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any
+
+from pydoll.elements.web_element import WebElement
 
 
 @dataclass
@@ -12,15 +13,15 @@ class ElementCacheEntry:
     element_id: str
     tab_id: str
     document_generation: int
-    frame_path: list[str] = field(default_factory=list)
-    shadow_path: list[str] = field(default_factory=list)
+    frame_path: list[str] = field(default_factory=lambda: [])
+    shadow_path: list[str] = field(default_factory=lambda: [])
     selector_hint: str = ''
     xpath_hint: str = ''
     text_summary: str = ''
-    bounding_box: dict[str, float] = field(default_factory=dict)
+    bounding_box: dict[str, float] = field(default_factory=lambda: {})
     tag_name: str = ''
     cached_at: float = 0.0
-    _pydoll_element: Any = field(default=None, repr=False)
+    pydoll_element: WebElement | None = field(default=None, repr=False)
 
     @property
     def age_seconds(self) -> float:
@@ -68,17 +69,13 @@ class ElementCache:
         return entry
 
     def invalidate_tab(self, tab_id: str) -> None:
-        to_remove = [
-            eid for eid, e in self._entries.items()
-            if e.tab_id == tab_id
-        ]
+        to_remove = [eid for eid, e in self._entries.items() if e.tab_id == tab_id]
         for eid in to_remove:
             del self._entries[eid]
 
     def invalidate_document(self, tab_id: str, generation: int) -> None:
         to_remove = [
-            eid for eid, e in self._entries.items()
-            if e.tab_id == tab_id and e.document_generation != generation
+            eid for eid, e in self._entries.items() if e.tab_id == tab_id and e.document_generation != generation
         ]
         for eid in to_remove:
             del self._entries[eid]
