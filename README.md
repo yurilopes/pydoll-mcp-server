@@ -111,6 +111,7 @@ Navigation:
 - `page_forward`
 - `page_wait`
 - `page_wait_for_url`, `page_wait_for_function`
+- `page_wait_for_text`, `page_wait_text_gone`, `page_wait_for_selector`, `page_wait_for_network_idle`
 - `page_scroll`, `page_scroll_to`
 
 Observation:
@@ -118,6 +119,7 @@ Observation:
 - `page_get_text`
 - `page_get_tree`
 - `page_get_tree_deep`
+- `page_get_interactive_summary`
 - `page_screenshot`
 - `page_snapshot`, `page_diff`
 - `page_get_accessibility_tree`, `frame_list`, `frame_snapshot`
@@ -128,8 +130,10 @@ Elements:
 - `element_find`
 - `element_find_deep`
 - `element_click`
+- `element_click_by_text`, `element_click_center`, `mouse_click`
 - `element_type`
 - `element_fill`
+- `element_fill_and_verify`, `element_wait_value`
 - `element_get_text`
 - `element_get_attribute`
 - `element_screenshot`
@@ -137,6 +141,8 @@ Elements:
 - `element_select_option`, `element_check`, `element_uncheck`
 - `element_hover`, `element_scroll_into_view`, `keyboard_press`
 - semantic finders by role, text, label, placeholder, and test ID
+- `form_snapshot`, `form_errors`
+- `combobox_get_options`, `combobox_type_and_select`, `combobox_select_option`
 
 JavaScript and advanced helpers:
 
@@ -151,6 +157,7 @@ JavaScript and advanced helpers:
 - `download_expect`
 - `download_prepare`, `download_wait`, `download_list`, `download_get_info`
 - `upload_files`
+- `file_upload_state`, `artifact_get_paths`, `artifact_import`
 - `operation_cancel`
 
 Network inspection:
@@ -168,7 +175,11 @@ Console inspection:
 
 ## Agent-friendly model
 
-`page_get_tree` returns a compact, limited tree by default. Interactive nodes receive `element_id`, `selector_hint`, `xpath_hint`, `actionable`, and `resolution_confidence`. An agent can observe the tree and call `element_click` or `element_fill` directly with the `element_id`, without calling `element_find` first.
+`page_get_tree` returns a compact, limited tree by default. It prioritizes visible body content and hides `head`, `script`, `meta`, `style`, `link`, and invisible nodes unless `include_head=true` or `include_invisible=true` is set. Interactive nodes receive `element_id`, `selector_hint`, `xpath_hint`, `actionable`, and `resolution_confidence`. An agent can observe the tree and call `element_click` or `element_fill` directly with the `element_id`, without calling `element_find` first.
+
+`page_get_interactive_summary` is the recommended first observation for modern frontend apps. It returns visible controls with roles, names, labels, nearby section context, bounding boxes, selector hints, enabled/editable state, and cached `element_id` values.
+
+For React-like forms and custom controls, prefer `element_fill`, `element_fill_and_verify`, `combobox_type_and_select`, `element_click_by_text`, and condition waits before using custom JavaScript. `js_evaluate` and `js_evaluate_readonly` return structured JSON values directly in `value`; clients should not parse `value` as a JSON string.
 
 `page_get_tree_deep` is the recommended option when the page uses iframes or shadow DOM. It is more expensive, has its own timeout, and returns:
 

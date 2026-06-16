@@ -2,10 +2,22 @@
 
 ## 0.3.0a1 (Unreleased)
 
+### Added
+- Added `page_get_interactive_summary` for visible controls with labels, section context, bounds, selector hints, and cached element IDs
+- Added semantic click and mouse tools: `element_click_by_text`, `element_click_center`, and `mouse_click`
+- Added framework-safe form tools: `element_fill_and_verify`, `element_wait_value`, `form_snapshot`, and `form_errors`
+- Added combobox helpers for autocomplete controls: `combobox_get_options`, `combobox_type_and_select`, and `combobox_select_option`
+- Added condition waits for text, text disappearance, selectors, and network idle
+- Added artifact helpers and upload inspection: `artifact_get_paths`, `artifact_import`, and `file_upload_state`
+- Added `docs/agent-recipes.md` with practical agent workflows for modern frontend pages
+
 ### Changed
 - Established strict agent engineering rules and portable development guidance
 - Made mypy strict, Pyright strict, Ruff formatting, and a 450-line hard limit required gates
 - Removed silent Pydoll compatibility fallbacks and made malformed script responses fail explicitly
+- Changed `page_get_tree` to hide head metadata and invisible nodes by default, with explicit opt-in flags
+- Changed `element_fill` to use native property setters and framework-compatible events with verification by default
+- Changed `js_evaluate_readonly` and `js_evaluate` to return structured JSON values directly instead of JSON serialized inside strings
 - Renamed internal Pydoll runtime handles to make their boundary role explicit
 - Added validated recursive JSON boundaries and explicit MCP input schemas
 - Made mypy strict and Pyright strict pass across both production code and tests

@@ -44,13 +44,28 @@ from pydoll_mcp_server.tools.elements import (
     element_screenshot,
     element_type,
 )
-from pydoll_mcp_server.tools.files import download_expect, upload_files
+from pydoll_mcp_server.tools.files import (
+    artifact_get_paths,
+    artifact_import,
+    download_expect,
+    file_upload_state,
+    upload_files,
+)
 from pydoll_mcp_server.tools.files_advanced import (
     download_get_info,
     download_list,
     download_prepare,
     download_wait,
     page_print_pdf,
+)
+from pydoll_mcp_server.tools.form_controls import (
+    combobox_get_options,
+    combobox_select_option,
+    combobox_type_and_select,
+    element_fill_and_verify,
+    element_wait_value,
+    form_errors,
+    form_snapshot,
 )
 from pydoll_mcp_server.tools.inspection import (
     console_disable,
@@ -74,6 +89,8 @@ from pydoll_mcp_server.tools.page_advanced import (
     page_scroll_to,
     page_snapshot,
 )
+from pydoll_mcp_server.tools.page_summary import page_get_interactive_summary
+from pydoll_mcp_server.tools.semantic_actions import element_click_by_text, element_click_center, mouse_click
 from pydoll_mcp_server.tools.storage import cookies_get, cookies_set, storage_get, storage_set
 from pydoll_mcp_server.tools.tab_advanced import (
     dialog_handle,
@@ -92,7 +109,11 @@ from pydoll_mcp_server.tools.waits import (
     network_wait_for_response,
     operation_cancel,
     page_wait_for_function,
+    page_wait_for_network_idle,
+    page_wait_for_selector,
+    page_wait_for_text,
     page_wait_for_url,
+    page_wait_text_gone,
 )
 
 Tool = Callable[..., object]
@@ -122,8 +143,11 @@ TOOLS: tuple[Tool, ...] = (
     element_find,
     element_find_deep,
     element_click,
+    element_click_by_text,
+    element_click_center,
     element_type,
     element_fill,
+    element_fill_and_verify,
     element_get_text,
     element_get_attribute,
     element_screenshot,
@@ -139,6 +163,9 @@ TOOLS: tuple[Tool, ...] = (
     storage_set,
     download_expect,
     upload_files,
+    file_upload_state,
+    artifact_get_paths,
+    artifact_import,
     network_enable,
     network_disable,
     network_list,
@@ -172,11 +199,17 @@ TOOLS: tuple[Tool, ...] = (
     page_snapshot,
     page_diff,
     page_get_accessibility_tree,
+    page_get_interactive_summary,
     frame_list,
     frame_snapshot,
     page_wait_for_url,
     page_wait_for_function,
+    page_wait_for_text,
+    page_wait_text_gone,
+    page_wait_for_selector,
+    page_wait_for_network_idle,
     element_wait_for_state,
+    element_wait_value,
     network_wait_for_request,
     network_wait_for_response,
     operation_cancel,
@@ -191,6 +224,12 @@ TOOLS: tuple[Tool, ...] = (
     download_list,
     download_get_info,
     page_print_pdf,
+    mouse_click,
+    form_snapshot,
+    form_errors,
+    combobox_get_options,
+    combobox_type_and_select,
+    combobox_select_option,
 )
 
 

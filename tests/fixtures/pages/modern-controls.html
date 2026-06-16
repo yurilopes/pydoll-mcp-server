@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Modern Controls Fixture</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    section { margin-bottom: 24px; }
+    .card { border: 1px solid #999; padding: 12px; display: inline-flex; gap: 8px; }
+    .choice { padding: 8px 12px; }
+    .selected { border: 2px solid #1769aa; }
+    .hidden { display: none; }
+    [role="listbox"] { border: 1px solid #777; width: 260px; background: white; }
+    [role="option"] { padding: 6px 8px; cursor: pointer; }
+    [role="option"]:hover { background: #e8f1fb; }
+    .error { color: #a30000; }
+  </style>
+  <script>
+    window.__unusedHeadScript = true;
+  </script>
+</head>
+<body>
+  <h1>Profile onboarding</h1>
+
+  <section aria-label="Work preference">
+    <h2>Work preference</h2>
+    <div id="mode-card" class="card" role="group" aria-label="Work mode options">
+      <button id="full-time" class="choice" type="button">Full-time positions</button>
+      <button id="freelance" class="choice" type="button">Freelance</button>
+    </div>
+    <p id="mode-state">Selected mode: none</p>
+  </section>
+
+  <section aria-label="Profile form">
+    <h2>Profile</h2>
+    <label for="controlled-title">Professional title</label>
+    <input id="controlled-title" name="title" placeholder="Title" required>
+    <p id="title-state">Title state: empty</p>
+    <p id="title-error" class="error hidden">This field is required</p>
+
+    <label for="skill-combo">Primary skill</label>
+    <input id="skill-combo" role="combobox" aria-controls="skill-list" aria-expanded="false" autocomplete="off">
+    <p id="skill-state">Selected skill: none</p>
+
+    <label for="resume">Resume</label>
+    <input id="resume" type="file">
+    <p id="resume-state">No file selected</p>
+
+    <button id="save" type="button">Save</button>
+    <p id="save-state">Not saved</p>
+  </section>
+
+  <div id="portal-root"></div>
+
+  <script>
+    const fullTime = document.getElementById('full-time');
+    const freelance = document.getElementById('freelance');
+    const modeState = document.getElementById('mode-state');
+    const title = document.getElementById('controlled-title');
+    const titleState = document.getElementById('title-state');
+    const titleError = document.getElementById('title-error');
+    const combo = document.getElementById('skill-combo');
+    const skillState = document.getElementById('skill-state');
+    const portalRoot = document.getElementById('portal-root');
+    const resume = document.getElementById('resume');
+    const resumeState = document.getElementById('resume-state');
+    const save = document.getElementById('save');
+    const saveState = document.getElementById('save-state');
+    const skills = ['Artificial Intelligence', 'Amazon AWS AI/ML', 'Python', 'Data Engineering'];
+
+    function setMode(button, label) {
+      fullTime.classList.remove('selected');
+      freelance.classList.remove('selected');
+      button.classList.add('selected');
+      modeState.textContent = 'Selected mode: ' + label;
+    }
+
+    fullTime.addEventListener('click', () => setMode(fullTime, 'Full-time positions'));
+    freelance.addEventListener('click', () => setMode(freelance, 'Freelance'));
+
+    title.addEventListener('input', () => {
+      titleState.textContent = 'Title state: ' + (title.value || 'empty');
+      titleError.classList.add('hidden');
+    });
+    title.addEventListener('change', () => {
+      title.dataset.changed = 'true';
+    });
+    title.addEventListener('blur', () => {
+      title.dataset.blurred = 'true';
+    });
+
+    function renderOptions(query) {
+      const matches = skills.filter((skill) => skill.toLowerCase().includes(query.toLowerCase()));
+      combo.setAttribute('aria-expanded', 'true');
+      portalRoot.innerHTML = '<div id="skill-list" role="listbox"></div>';
+      const list = document.getElementById('skill-list');
+      for (const skill of matches) {
+        const option = document.createElement('div');
+        option.setAttribute('role', 'option');
+        option.textContent = skill;
+        option.addEventListener('mousedown', (event) => event.preventDefault());
+        option.addEventListener('click', () => {
+          combo.value = skill;
+          combo.setAttribute('aria-expanded', 'false');
+          portalRoot.innerHTML = '';
+          skillState.textContent = 'Selected skill: ' + skill;
+        });
+        list.appendChild(option);
+      }
+    }
+
+    combo.addEventListener('input', () => renderOptions(combo.value));
+    combo.addEventListener('focus', () => renderOptions(combo.value));
+
+    resume.addEventListener('change', () => {
+      const file = resume.files && resume.files[0];
+      resumeState.textContent = file ? 'Attached file: ' + file.name : 'No file selected';
+    });
+
+    save.addEventListener('click', () => {
+      if (!title.value.trim()) {
+        titleError.classList.remove('hidden');
+        saveState.textContent = 'Not saved';
+        return;
+      }
+      saveState.textContent = 'You have updated your profile';
+    });
+  </script>
+</body>
+</html>

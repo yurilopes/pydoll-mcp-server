@@ -11,10 +11,14 @@ import time
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_value
+from pydoll_mcp_server.browser.script_utils import (
+    InvalidScriptResponseError,
+    extract_script_response,
+    extract_script_value,
+)
 from pydoll_mcp_server.config import get_limits_config, get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, JsonValue, get_string
 from pydoll_mcp_server.logging import OperationLog, get_logger
 
 BLOCKED_PATTERNS = [
@@ -157,6 +161,7 @@ async def _execute_js(
     duration_ms = (time.time() - start) * 1000
 
     try:
+        response_info = extract_script_response(result)
         raw_value = extract_script_value(result)
     except InvalidScriptResponseError as exc:
         return StructuredError(
@@ -164,14 +169,22 @@ async def _execute_js(
             message=f'JS execution returned an invalid response: {exc}',
             retryable=False,
         ).to_dict()
-    result_str = json.dumps(raw_value, ensure_ascii=False)
 
-    truncated = len(result_str.encode('utf-8')) > limits.max_js_result
-    if truncated:
-        result_bytes = result_str.encode('utf-8')[: limits.max_js_result]
-        result_str = result_bytes.decode('utf-8', errors='replace')
+    result_str = json.dumps(raw_value, ensure_ascii=False)
+    result_size = len(result_str.encode('utf-8'))
+    returned_value: JsonValue = raw_value
+    truncated = result_size > limits.max_js_result
+    if truncated and isinstance(raw_value, str):
+        result_bytes = raw_value.encode('utf-8')[: limits.max_js_result]
+        returned_value = result_bytes.decode('utf-8', errors='replace')
+        result_str = json.dumps(returned_value, ensure_ascii=False)
+        result_size = len(result_str.encode('utf-8'))
+    elif truncated:
+        returned_value = None
 
     script_hash = hashlib.sha256(script.encode()).hexdigest()[:16]
+    value_type = _value_type(raw_value, response_info)
+    diagnostic = _diagnostic(raw_value, response_info, truncated)
 
     logger.log_operation(
         OperationLog(
@@ -182,7 +195,7 @@ async def _execute_js(
             duration_ms=duration_ms,
             extra={
                 'script_hash': script_hash,
-                'result_size': len(result_str.encode('utf-8')),
+                'result_size': result_size,
                 'truncated': truncated,
                 'read_only': read_only,
             },
@@ -191,12 +204,50 @@ async def _execute_js(
 
     return {
         'success': True,
-        'value': result_str,
+        'value': returned_value,
+        'value_type': value_type,
         'truncated': truncated,
+        'result_size_bytes': result_size,
+        'script_hash': script_hash,
         'timing_ms': round(duration_ms, 1),
+        'diagnostic': diagnostic,
         'audit': {
             'script_hash': script_hash,
             'duration_ms': round(duration_ms, 1),
-            'result_size_bytes': len(result_str.encode('utf-8')),
+            'result_size_bytes': result_size,
         },
     }
+
+
+def _value_type(value: JsonValue, response: JsonObject) -> str:
+    runtime_type = get_string(response, 'type', '')
+    subtype = get_string(response, 'subtype', '')
+    if runtime_type == 'undefined':
+        return 'undefined'
+    if value is None:
+        return 'null'
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, int | float):
+        return 'number'
+    if isinstance(value, str):
+        return 'string'
+    if isinstance(value, list):
+        return 'array'
+    if subtype == 'null':
+        return 'null'
+    return 'object'
+
+
+def _diagnostic(value: JsonValue, response: JsonObject, truncated: bool) -> JsonObject:
+    diagnostic: JsonObject = {
+        'runtime_type': get_string(response, 'type', ''),
+    }
+    subtype = get_string(response, 'subtype', '')
+    if subtype:
+        diagnostic['runtime_subtype'] = subtype
+    if value is None and 'value' not in response:
+        diagnostic['empty_result'] = True
+    if truncated:
+        diagnostic['truncated_reason'] = 'result exceeded max_js_result bytes'
+    return diagnostic

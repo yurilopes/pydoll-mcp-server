@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+from pathlib import Path
+
+from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.pydoll_compat import set_input_files
 from pydoll_mcp_server.browser.registry import get_registry
+from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
 from pydoll_mcp_server.config import get_config, get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonObject
+from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.security.policy import PathAllowlist
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 
@@ -71,19 +76,9 @@ async def upload_files(
     element_id: str,
     paths: list[str],
 ) -> JsonObject:
-    server_config = get_config()
     registry = get_registry()
 
-    allowed_dirs = [
-        str(server_config.artifacts_dir),
-        str(server_config.downloads_dir),
-        str(server_config.tmp_dir),
-    ]
-    extra_allowed = os.environ.get('PYDOLL_MCP_UPLOAD_ALLOWLIST', '')
-    if extra_allowed:
-        allowed_dirs.extend(extra_allowed.split(os.pathsep))
-
-    allowlist = PathAllowlist(allowed_dirs)
+    allowlist = _upload_allowlist()
     for p in paths:
         if not allowlist.is_allowed(p):
             return StructuredError(
@@ -115,7 +110,116 @@ async def upload_files(
             retryable=True,
         ).to_dict()
 
+    accepted: JsonArray = [_file_info(Path(path)) for path in paths]
+    state = await file_upload_state(client_id, tab_id, element_id)
+
     return {
         'success': True,
         'count': len(paths),
+        'accepted': accepted,
+        'state': state if state.get('success') else {},
     }
+
+
+async def file_upload_state(client_id: str, tab_id: str, element_id: str) -> JsonObject:
+    try:
+        tab_info = get_registry().get_tab(client_id, tab_id)
+    except StructuredError as exc:
+        return exc.to_dict()
+    element = await resolve_element(tab_info, element_id)
+    if element is None:
+        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
+    try:
+        result = await element.execute_script(
+            """
+            const files = [...(this.files || [])].map((file) => ({
+                name: file.name, size: file.size, type: file.type || ''
+            }));
+            let nearby = '';
+            let cursor = this.nextElementSibling;
+            for (let i = 0; cursor && i < 3; i++, cursor = cursor.nextElementSibling) {
+                nearby += ' ' + (cursor.innerText || cursor.textContent || '');
+            }
+            return {files, count: files.length, nearby_text: nearby.trim()};
+            """,
+            return_by_value=True,
+        )
+        state = extract_script_object(result)
+        return {'success': True, 'element_id': element_id, **state}
+    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
+        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Upload state failed: {exc}', retryable=True).to_dict()
+
+
+async def artifact_get_paths(client_id: str = 'anonymous') -> JsonObject:
+    config = get_config()
+    config.ensure_directories()
+    client_artifacts = config.artifacts_dir / client_id
+    client_downloads = config.downloads_dir / client_id
+    client_tmp = config.tmp_dir / client_id
+    for directory in (client_artifacts, client_downloads, client_tmp):
+        directory.mkdir(parents=True, exist_ok=True)
+    return {
+        'success': True,
+        'artifacts_dir': str(config.artifacts_dir),
+        'downloads_dir': str(config.downloads_dir),
+        'tmp_dir': str(config.tmp_dir),
+        'client_artifacts_dir': str(client_artifacts),
+        'client_downloads_dir': str(client_downloads),
+        'client_tmp_dir': str(client_tmp),
+    }
+
+
+async def artifact_import(
+    client_id: str,
+    source_path: str,
+    filename: str = '',
+    max_size_bytes: int = 50 * 1024 * 1024,
+) -> JsonObject:
+    config = get_config()
+    allowlist = _upload_allowlist()
+    source = Path(source_path)
+    try:
+        resolved = source.resolve(strict=True)
+    except OSError as exc:
+        return StructuredError(ErrorCode.RESOURCE_NOT_FOUND, f'Import source not found: {exc}').to_dict()
+    if not resolved.is_file():
+        return StructuredError(ErrorCode.INVALID_INPUT, 'Import source must be a file.').to_dict()
+    if not allowlist.is_allowed(str(resolved)):
+        return StructuredError(
+            ErrorCode.PERMISSION_DENIED,
+            f'Import source not in allowed directories: {source_path}',
+            recovery_hint='Use artifacts, downloads, tmp, or PYDOLL_MCP_IMPORT_ALLOWLIST.',
+        ).to_dict()
+    size = resolved.stat().st_size
+    if size > max_size_bytes:
+        return StructuredError(ErrorCode.INVALID_INPUT, f'File is too large: {size} bytes').to_dict()
+    target_name = _safe_filename(filename or resolved.name)
+    if not target_name:
+        return StructuredError(ErrorCode.INVALID_INPUT, 'Imported filename is empty.').to_dict()
+    target_dir = config.artifacts_dir / client_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = (target_dir / target_name).resolve(strict=False)
+    try:
+        target.relative_to(target_dir.resolve(strict=False))
+    except ValueError:
+        return StructuredError(ErrorCode.PERMISSION_DENIED, 'Imported filename escapes artifacts directory.').to_dict()
+    shutil.copy2(resolved, target)
+    return {'success': True, 'path': str(target), 'file': _file_info(target)}
+
+
+def _upload_allowlist() -> PathAllowlist:
+    config = get_config()
+    allowed_dirs = [str(config.artifacts_dir), str(config.downloads_dir), str(config.tmp_dir)]
+    for env_name in ('PYDOLL_MCP_UPLOAD_ALLOWLIST', 'PYDOLL_MCP_IMPORT_ALLOWLIST'):
+        extra_allowed = os.environ.get(env_name, '')
+        if extra_allowed:
+            allowed_dirs.extend(extra_allowed.split(os.pathsep))
+    return PathAllowlist(allowed_dirs)
+
+
+def _file_info(path: Path) -> JsonObject:
+    return {'name': path.name, 'path': str(path), 'size': path.stat().st_size if path.exists() else 0}
+
+
+def _safe_filename(filename: str) -> str:
+    return Path(filename).name.replace('\x00', '')

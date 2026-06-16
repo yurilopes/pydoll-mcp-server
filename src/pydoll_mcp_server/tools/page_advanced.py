@@ -20,6 +20,7 @@ from pydoll_mcp_server.dom.tree import build_page_tree, page_get_text
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_string, require_json_object
 from pydoll_mcp_server.server_state import SCHEMA_VERSION
+from pydoll_mcp_server.tools.page_summary import page_get_interactive_summary
 
 
 async def page_scroll(client_id: str, tab_id: str, delta_x: int = 0, delta_y: int = 500) -> JsonObject:
@@ -104,6 +105,29 @@ async def page_get_accessibility_tree(
 ) -> JsonObject:
     limits = get_limits_config()
     max_nodes = min(max_nodes, limits.max_deep_nodes)
+    if interesting_only:
+        summary = await page_get_interactive_summary(client_id, tab_id, max_items=max_nodes)
+        if summary.get('success'):
+            nodes: JsonArray = []
+            for item_value in get_array(summary, 'items', []):
+                item = require_json_object(item_value, 'interactive item')
+                nodes.append(
+                    {
+                        'role': get_string(item, 'role', 'generic') or 'generic',
+                        'name': get_string(item, 'name', ''),
+                        'disabled': not bool(item.get('enabled', True)),
+                        'checked': item.get('checked'),
+                        'actionable': True,
+                        'bounds': item.get('bounds', {}),
+                        'element_id': item.get('element_id', ''),
+                    }
+                )
+            return {
+                'success': True,
+                'nodes': nodes,
+                'count': len(nodes),
+                'partial': bool(summary.get('partial', False)),
+            }
     try:
         tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
     except StructuredError as exc:

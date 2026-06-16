@@ -17,12 +17,11 @@ from pydoll_mcp_server.security.paths import validate_artifact_path
 from pydoll_mcp_server.security.policy import is_sensitive_field
 from pydoll_mcp_server.tools.element_resolver import (
     cache_element,
-    read_element_value_via_js,
     resolve_element,
     safe_is_visible,
     safe_text,
-    set_element_value_via_js,
 )
+from pydoll_mcp_server.tools.form_controls import fill_element_framework_safe
 
 
 async def element_find(
@@ -198,44 +197,9 @@ async def element_fill(
     tab_id: str,
     element_id: str,
     value: str,
+    verify: bool = True,
 ) -> JsonObject:
-    registry = get_registry()
-
-    try:
-        tab_info = registry.get_tab(client_id, tab_id)
-    except StructuredError as e:
-        return e.to_dict()
-
-    element = await resolve_element(tab_info, element_id)
-    if element is None:
-        return StructuredError(
-            error_code=ErrorCode.STALE_ELEMENT,
-            message=f'Element {element_id} is stale',
-            retryable=False,
-        ).to_dict()
-
-    try:
-        async with tab_operation_lock(tab_id):
-            await element.execute_script(
-                "this.scrollIntoView({block:'center'}); this.value=''; return true;",
-                return_by_value=True,
-            )
-            await element.insert_text(value)
-            current_value = await read_element_value_via_js(element)
-            if current_value != value:
-                await set_element_value_via_js(element, value)
-    except Exception as e:
-        return StructuredError(
-            error_code=ErrorCode.EXECUTION_ERROR,
-            message=f'Fill failed: {e}',
-            retryable=True,
-        ).to_dict()
-
-    return {
-        'success': True,
-        'element_id': element_id,
-        'value_length': len(value),
-    }
+    return await fill_element_framework_safe(client_id, tab_id, element_id, value, verify=verify)
 
 
 async def element_get_text(

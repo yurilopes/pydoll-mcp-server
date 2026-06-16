@@ -127,7 +127,7 @@ async def test_real_stdio_agent_browser_workflow(tmp_path: Path) -> None:
                     'script': "return document.getElementById('result').textContent;",
                 },
             )
-            assert json.loads(get_string(click_state, 'value')) == 'clicked'
+            assert get_string(click_state, 'value') == 'clicked'
 
             await call_tool(
                 session,
@@ -152,7 +152,7 @@ async def test_real_stdio_agent_browser_workflow(tmp_path: Path) -> None:
                     'script': "return document.getElementById('input-text').value;",
                 },
             )
-            assert json.loads(get_string(input_state, 'value')) == UTF8_TEXT
+            assert get_string(input_state, 'value') == UTF8_TEXT
 
             for fixture, expected_path_key in (
                 ('iframe-parent.html', 'frame_path'),

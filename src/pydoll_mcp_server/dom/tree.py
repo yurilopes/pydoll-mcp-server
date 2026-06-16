@@ -13,10 +13,23 @@ from pydoll_mcp_server.security.paths import validate_artifact_path
 
 TREE_BUILDER_JS = """
 (() => {
+    const includeInvisible = %INCLUDE_INVISIBLE%;
+    const includeHead = %INCLUDE_HEAD%;
+    const blockedHeadTags = new Set(['head', 'script', 'style', 'meta', 'link', 'noscript', 'template']);
+    function isVisibleElement(node, tag) {
+        if (tag === 'html' || tag === 'body') return true;
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0
+            && style.display !== 'none'
+            && style.visibility !== 'hidden';
+    }
     function collect(node, depth, maxDepth, maxNodes, collected) {
         if (depth > maxDepth || collected.count >= maxNodes) return;
+        const tag = node.tagName ? node.tagName.toLowerCase() : '#text';
+        if (!includeHead && blockedHeadTags.has(tag)) return;
         const info = {
-            tag: node.tagName ? node.tagName.toLowerCase() : '#text',
+            tag: tag,
             text: '',
             attrs: {},
             bounds: null,
@@ -41,12 +54,11 @@ TREE_BUILDER_JS = """
             info.bounds = {x: Math.round(rect.x), y: Math.round(rect.y),
                            width: Math.round(rect.width), height: Math.round(rect.height)};
             try {
-                info.visible = rect.width > 0 && rect.height > 0;
-                const style = window.getComputedStyle(node);
-                info.visible = info.visible && style.display !== 'none' && style.visibility !== 'hidden';
+                info.visible = isVisibleElement(node, info.tag);
             } catch(e) {
                 info.visible = false;
             }
+            if (!includeInvisible && !info.visible) return;
             if (node.shadowRoot) {
                 info.hasShadowRoot = true;
                 info.shadowMode = node.shadowRoot.mode || 'open';
@@ -76,9 +88,9 @@ TREE_BUILDER_JS = """
         return info;
     }
     const result = {nodes: [], rootId: null, count: 0};
-    const root = document.documentElement;
+    const root = includeHead ? document.documentElement : (document.body || document.documentElement);
     if (root) {
-        collect(root, 0, %d, %d, result);
+        collect(root, 0, %MAX_DEPTH%, %MAX_NODES%, result);
         result.rootId = result.nodes.length > 0 ? result.nodes[0].elementId : null;
     }
     return result;
@@ -92,6 +104,8 @@ async def build_page_tree(
     max_depth: int = 6,
     max_nodes: int = 300,
     cache_elements: bool = True,
+    include_invisible: bool = False,
+    include_head: bool = False,
 ) -> JsonObject:
     registry = get_registry()
     limits = get_limits_config()
@@ -107,7 +121,12 @@ async def build_page_tree(
     pydoll_tab = tab_info.pydoll_tab
 
     try:
-        js = TREE_BUILDER_JS.replace('%d', str(max_depth), 1).replace('%d', str(max_nodes), 1)
+        js = (
+            TREE_BUILDER_JS.replace('%MAX_DEPTH%', str(max_depth))
+            .replace('%MAX_NODES%', str(max_nodes))
+            .replace('%INCLUDE_INVISIBLE%', str(include_invisible).lower())
+            .replace('%INCLUDE_HEAD%', str(include_head).lower())
+        )
         result = await pydoll_tab.execute_script(js, return_by_value=True)
         raw_value = extract_script_value(result)
         if isinstance(raw_value, str):

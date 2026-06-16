@@ -72,6 +72,80 @@ async def page_wait_for_function(
     return await _run(client_id, operation_id, probe())
 
 
+async def page_wait_for_text(
+    client_id: str,
+    tab_id: str,
+    text: str,
+    exact: bool = False,
+    timeout: float | None = None,
+    poll_interval: float = 0.1,
+    operation_id: str = '',
+) -> JsonObject:
+    return await _text_wait(client_id, tab_id, text, exact, False, timeout, poll_interval, operation_id)
+
+
+async def page_wait_text_gone(
+    client_id: str,
+    tab_id: str,
+    text: str,
+    exact: bool = False,
+    timeout: float | None = None,
+    poll_interval: float = 0.1,
+    operation_id: str = '',
+) -> JsonObject:
+    return await _text_wait(client_id, tab_id, text, exact, True, timeout, poll_interval, operation_id)
+
+
+async def page_wait_for_selector(
+    client_id: str,
+    tab_id: str,
+    selector: str,
+    strategy: str = 'css',
+    visible: bool = True,
+    timeout: float | None = None,
+    poll_interval: float = 0.1,
+    operation_id: str = '',
+) -> JsonObject:
+    async def probe() -> JsonObject:
+        tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
+
+        async def evaluate() -> bool:
+            script = _selector_script(selector, strategy, visible)
+            return bool(extract_script_value(await tab.execute_script(script, return_by_value=True)))
+
+        return await _poll(evaluate, timeout, poll_interval, f'selector {selector}')
+
+    return await _run(client_id, operation_id, probe())
+
+
+async def page_wait_for_network_idle(
+    client_id: str,
+    tab_id: str,
+    idle_ms: int = 500,
+    timeout: float | None = None,
+    poll_interval: float = 0.1,
+    operation_id: str = '',
+) -> JsonObject:
+    async def probe() -> JsonObject:
+        last_count = -1
+        stable_since = 0.0
+
+        async def evaluate() -> bool:
+            nonlocal last_count, stable_since
+            result = await network_list(client_id, tab_id, limit=1000)
+            count = len(get_array(result, 'events', []))
+            now = asyncio.get_running_loop().time()
+            if count != last_count:
+                last_count = count
+                stable_since = now
+                return False
+            return (now - stable_since) * 1000 >= max(0, idle_ms)
+
+        return await _poll(evaluate, timeout, poll_interval, 'network idle')
+
+    return await _run(client_id, operation_id, probe())
+
+
 async def element_wait_for_state(
     client_id: str,
     tab_id: str,
@@ -147,6 +221,35 @@ async def _network_wait(
     return await _run(client_id, operation_id, probe())
 
 
+async def _text_wait(
+    client_id: str,
+    tab_id: str,
+    text: str,
+    exact: bool,
+    gone: bool,
+    timeout: float | None,
+    poll_interval: float,
+    operation_id: str,
+) -> JsonObject:
+    async def probe() -> JsonObject:
+        tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
+
+        async def evaluate() -> bool:
+            escaped = text.replace('\\', '\\\\').replace("'", "\\'")
+            script = (
+                "const body=(document.body?document.body.innerText:document.documentElement.innerText)||'';"
+                f"const text='{escaped}';"
+                f'const found={str(exact).lower()} ? body.trim()===text : body.includes(text);'
+                f'return {str(gone).lower()} ? !found : found;'
+            )
+            return bool(extract_script_value(await tab.execute_script(script, return_by_value=True)))
+
+        label = f'text {text}' if not gone else f'text gone {text}'
+        return await _poll(evaluate, timeout, poll_interval, label)
+
+    return await _run(client_id, operation_id, probe())
+
+
 async def _poll(
     check: Callable[[], Awaitable[bool]],
     timeout: float | None,
@@ -184,9 +287,29 @@ async def _url_match(url_awaitable: Awaitable[str], pattern: str, match: str) ->
     url = await url_awaitable
     if match == 'exact':
         return url == pattern
+    if match == 'contains':
+        return pattern in url
     if match == 'regex':
         return re.search(pattern, url) is not None
     return bool(fnmatch(url, pattern))
 
 
 __all__ = ['operation_cancel']
+
+
+def _selector_script(selector: str, strategy: str, visible: bool) -> str:
+    escaped = selector.replace('\\', '\\\\').replace("'", "\\'")
+    if strategy == 'xpath':
+        lookup = (
+            f"document.evaluate('{escaped}',document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue"
+        )
+    else:
+        lookup = f"document.querySelector('{escaped}')"
+    return f"""
+    const el = {lookup};
+    if (!el) return false;
+    if (!{str(visible).lower()}) return true;
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    """

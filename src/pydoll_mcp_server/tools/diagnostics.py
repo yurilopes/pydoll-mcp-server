@@ -41,8 +41,11 @@ def server_status(client_id: str = 'anonymous', include_clients: bool = False) -
         'capabilities': {
             'transports': ['http', 'sse', 'stdio'],
             'browser': ['launch', 'close', 'list', 'attach'],
-            'page': ['navigation', 'tree', 'deep_tree', 'screenshot', 'snapshot', 'pdf'],
-            'elements': ['find', 'find_deep', 'semantic_find', 'interact', 'state'],
+            'page': ['navigation', 'tree', 'deep_tree', 'interactive_summary', 'screenshot', 'snapshot', 'pdf'],
+            'elements': ['find', 'find_deep', 'semantic_find', 'click_by_text', 'mouse_click', 'interact', 'state'],
+            'forms': ['framework_safe_fill', 'combobox', 'form_snapshot', 'form_errors'],
+            'waits': ['url', 'function', 'text', 'selector', 'network_idle', 'element_value'],
+            'artifacts': ['upload', 'upload_state', 'artifact_paths', 'artifact_import'],
             'diagnostics': ['health', 'status', 'diagnostics_snapshot', 'trace'],
             'inspection': ['network', 'console'],
             'security': ['auth', 'redaction', 'path_allowlist', 'no_free_cdp'],

@@ -142,5 +142,11 @@ def test_tool_catalog_contains_new_agent_friendly_tools() -> None:
         'page_print_pdf',
         'tab_health_check',
         'tab_recreate',
+        'page_get_interactive_summary',
+        'element_click_by_text',
+        'element_fill_and_verify',
+        'combobox_type_and_select',
+        'form_snapshot',
+        'artifact_import',
     }
     assert expected <= names

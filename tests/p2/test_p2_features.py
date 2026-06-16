@@ -58,7 +58,7 @@ class TestCapabilities:
 
             result = server_status(client_id='test-p2')
             assert 'schema_version' in result
-            assert string_at(result, 'schema_version') == '2026-06-14.v0.3'
+            assert string_at(result, 'schema_version') == '2026-06-16.v0.4'
 
     def test_capabilities_includes_transports(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
@@ -175,7 +175,7 @@ class TestDiagnosticsSnapshot:
                 return await diagnostics_snapshot('test-p2')
 
             result = asyncio.run(_run())
-            assert result.get('schema_version') == '2026-06-14.v0.3'
+        assert result.get('schema_version') == '2026-06-16.v0.4'
 
 
 class TestTraceIntegration:

@@ -3,13 +3,13 @@
 ## 0.3.0a1 - Experimental Alpha
 
 ### Pre-release checks
-- [x] `pytest -q`: 217 passed
+- [x] `pytest -q --basetemp=.tmp\pytest-plan13-full`: 221 passed
 - [x] `ruff check .`: All checks passed
 - [x] `ruff format --check .`: All files formatted
 - [x] `mypy --strict src tests`: Success
 - [x] `pyright` strict on `src` and `tests`: 0 errors
-- [x] `pytest -m browser_smoke -q`: 11 passed
-- [x] `pytest -m mcp_e2e -q`: real stdio browser workflow passed
+- [x] `pytest -m browser_smoke -q`: 12 passed
+- [x] `pytest -m mcp_e2e -q --basetemp=.tmp\pytest-plan13-e2e`: real stdio browser workflow passed
 - [x] `sdist` and `wheel` built successfully
 - [x] Wheel installed in temporary venv, version verified, and `py.typed` confirmed
 - [x] No Python file exceeds the 400-line target
@@ -18,6 +18,10 @@
 - [x] `docs/security.md` exists
 - [x] README updated for P2 state
 
+Note: the default configured basetemp `.tmp/pytest` is currently blocked by
+Windows `WinError 5` in this workspace. The same suites pass with isolated
+basetemp directories.
+
 ### Transport validation
 - [x] HTTP local on 127.0.0.1 works
 - [x] Bearer token required by default
@@ -25,7 +29,7 @@
 - [x] `/mcp` requires token
 - [x] `/sse` endpoint exists
 - [x] `stdio` transport available via `--transport stdio` (no token required)
-- [x] MCP SDK stdio handshake and real tool listing pass with 93 tools
+- [x] MCP SDK stdio handshake and real tool listing pass with 111 tools
 - [x] MCP SDK stdio real browser workflow passes
 
 ### Version consistency
