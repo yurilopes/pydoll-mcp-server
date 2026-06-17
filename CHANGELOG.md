@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0b1 (Unreleased)
+
+### Added
+- Added `page_get_active_surface` for modal/dialog/form/viewport observation with fields, controls, progress, errors, and evidence
+- Added `element_find_by_text_candidates` for ranked text matching with ambiguity detection and filterable candidates
+- Added `element_resolve_again` for safe re-resolution of stale cached element handles
+- Added `form_fill_fields` for intent-driven form filling by label, placeholder, selector, role, and name
+- Added `page_click_primary_action` for primary button detection with step progression tracking
+- Added `artifact_prepare_upload` for agent-friendly upload file preparation with allowlist security
+- Added `submission_wait_for_confirmation` for polling-based confirmation with structured status
+- Added `AMBIGUOUS_ELEMENT` error code for cases where multiple candidates are too close to act safely
+
+### Changed
+- Changed `page_screenshot` and `element_screenshot` to save artifact files by default (`return_base64=false`)
+- Changed `element_click_by_text` to accept filter parameters and ambiguity threshold
+- Changed `element_click` to accept effect observation parameters
+- Changed `server_status.capabilities` to include active surfaces, form flow, upload preparation, effect-aware clicks, and confirmation waits
+
 ## 0.3.0a1 (Unreleased)
 
 ### Added

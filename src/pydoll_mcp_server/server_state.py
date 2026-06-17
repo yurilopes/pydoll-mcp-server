@@ -8,7 +8,7 @@ import uuid
 from pydoll_mcp_server.errors import StructuredError
 from pydoll_mcp_server.json_types import JsonObject
 
-SCHEMA_VERSION = '2026-06-16.v0.4'
+SCHEMA_VERSION = '2026-06-17.v0.5'
 _START_TIME = time.time()
 
 

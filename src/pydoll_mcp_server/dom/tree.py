@@ -301,7 +301,7 @@ async def page_screenshot(
     tab_id: str,
     fmt: str = 'png',
     full_page: bool = False,
-    as_base64: bool = True,
+    as_base64: bool = False,
     path: str = '',
 ) -> JsonObject:
     registry = get_registry()
@@ -325,6 +325,14 @@ async def page_screenshot(
                 recovery_hint='Use a relative path (stored in artifacts dir) or a path in an allowed directory.',
             ).to_dict()
 
+    if not safe_path and not as_base64:
+        import uuid
+
+        ext = fmt if fmt in ('png', 'jpeg', 'jpg') else 'png'
+        screenshots_dir = config.artifacts_dir / client_id
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+        safe_path = str(screenshots_dir / f'screenshot_{uuid.uuid4().hex[:12]}.{ext}')
+
     try:
         if safe_path:
             await pydoll_tab.take_screenshot(
@@ -332,10 +340,22 @@ async def page_screenshot(
                 beyond_viewport=full_page,
                 as_base64=False,
             )
+            file_size = 0
+            try:
+                from pathlib import Path
+
+                file_size = Path(safe_path).stat().st_size
+            except OSError:
+                pass
             return {
                 'success': True,
                 'path': safe_path,
+                'mime_type': f'image/{fmt}',
                 'format': fmt,
+                'size': file_size,
+                'return_base64': False,
+                'data': '',
+                'evidence': {},
             }
         result = await pydoll_tab.take_screenshot(
             beyond_viewport=full_page,
@@ -345,7 +365,8 @@ async def page_screenshot(
             'success': True,
             'data': result if isinstance(result, str) else '',
             'format': fmt,
-            'as_base64': True,
+            'return_base64': True,
+            'evidence': {},
         }
     except Exception as e:
         return StructuredError(

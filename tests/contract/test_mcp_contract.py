@@ -286,6 +286,13 @@ class TestMCPTools:
             'artifact_get_paths',
             'artifact_import',
             'mouse_click',
+            'page_get_active_surface',
+            'element_find_by_text_candidates',
+            'element_resolve_again',
+            'form_fill_fields',
+            'page_click_primary_action',
+            'artifact_prepare_upload',
+            'submission_wait_for_confirmation',
         }
         assert expected_p0.issubset(tool_names)
 

@@ -232,3 +232,18 @@ Date: 2026-06-12. Source: Pydoll v2.23.0, commit `59330abf`.
 - Storage get/set: Marked HYPOTHESIS. Pydoll has `StorageCommands` but no high-level API. Use CDP `Storage` domain through delimited helpers.
 - Console list: Marked HYPOTHESIS. Pydoll has `enable_runtime_events()` which may capture `Runtime.consoleAPICalled`. Validate before exposing.
 - Network list: Verified via `get_network_logs()`. Expose with redaction of sensitive headers.
+
+## PLAN_14 Capabilities Used (Agent Form Flow V2)
+
+Date: 2026-06-17. All capabilities verified in Pydoll v2.23.0.
+
+| Capability | Pydoll API | MCP Impact |
+|------------|-----------|------------|
+| Execute script (tab) | `Tab.execute_script(script, return_by_value=True)` | All JS-based surface/ranking/fill tools |
+| Click | `WebElement.click()` | `element_click`, `page_click_primary_action` |
+| Mouse click | `Tab.mouse.click(x, y, button)` | `click_strategy=center_mouse` |
+| Set input files | `WebElement.set_input_files(files)` | `upload_files`, `artifact_prepare_upload` |
+| Page screenshot | `Tab.take_screenshot(beyond_viewport, as_base64, path)` | `page_screenshot` (artifact-first) |
+| Element screenshot | `WebElement.take_screenshot(as_base64, path)` | `element_screenshot` (artifact-first) |
+| Get tab URL | `Tab.current_url` or CDP | `get_tab_url()` for URL change detection |
+| Find elements | `Tab.query(css, find_all, raise_exc)` | `element_resolve_again` |

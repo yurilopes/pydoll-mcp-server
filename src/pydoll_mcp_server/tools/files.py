@@ -75,10 +75,24 @@ async def upload_files(
     tab_id: str,
     element_id: str,
     paths: list[str],
+    expect_filename_visible: bool = False,
+    verify_timeout: float | None = None,
 ) -> JsonObject:
+    if expect_filename_visible or verify_timeout is not None:
+        from pydoll_mcp_server.tools.upload_prep import upload_files_enhanced
+
+        return await upload_files_enhanced(
+            client_id=client_id,
+            tab_id=tab_id,
+            element_id=element_id,
+            paths=paths,
+            expect_filename_visible=expect_filename_visible,
+            verify_timeout=verify_timeout,
+        )
+
     registry = get_registry()
 
-    allowlist = _upload_allowlist()
+    allowlist = upload_allowlist()
     for p in paths:
         if not allowlist.is_allowed(p):
             return StructuredError(
@@ -110,7 +124,7 @@ async def upload_files(
             retryable=True,
         ).to_dict()
 
-    accepted: JsonArray = [_file_info(Path(path)) for path in paths]
+    accepted: JsonArray = [file_info(Path(path)) for path in paths]
     state = await file_upload_state(client_id, tab_id, element_id)
 
     return {
@@ -176,7 +190,7 @@ async def artifact_import(
     max_size_bytes: int = 50 * 1024 * 1024,
 ) -> JsonObject:
     config = get_config()
-    allowlist = _upload_allowlist()
+    allowlist = upload_allowlist()
     source = Path(source_path)
     try:
         resolved = source.resolve(strict=True)
@@ -204,10 +218,10 @@ async def artifact_import(
     except ValueError:
         return StructuredError(ErrorCode.PERMISSION_DENIED, 'Imported filename escapes artifacts directory.').to_dict()
     shutil.copy2(resolved, target)
-    return {'success': True, 'path': str(target), 'file': _file_info(target)}
+    return {'success': True, 'path': str(target), 'file': file_info(target)}
 
 
-def _upload_allowlist() -> PathAllowlist:
+def upload_allowlist() -> PathAllowlist:
     config = get_config()
     allowed_dirs = [str(config.artifacts_dir), str(config.downloads_dir), str(config.tmp_dir)]
     for env_name in ('PYDOLL_MCP_UPLOAD_ALLOWLIST', 'PYDOLL_MCP_IMPORT_ALLOWLIST'):
@@ -217,7 +231,7 @@ def _upload_allowlist() -> PathAllowlist:
     return PathAllowlist(allowed_dirs)
 
 
-def _file_info(path: Path) -> JsonObject:
+def file_info(path: Path) -> JsonObject:
     return {'name': path.name, 'path': str(path), 'size': path.stat().st_size if path.exists() else 0}
 
 

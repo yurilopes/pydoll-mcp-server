@@ -120,6 +120,7 @@ Observation:
 - `page_get_tree`
 - `page_get_tree_deep`
 - `page_get_interactive_summary`
+- `page_get_active_surface`
 - `page_screenshot`
 - `page_snapshot`, `page_diff`
 - `page_get_accessibility_tree`, `frame_list`, `frame_snapshot`
@@ -131,6 +132,8 @@ Elements:
 - `element_find_deep`
 - `element_click`
 - `element_click_by_text`, `element_click_center`, `mouse_click`
+- `element_find_by_text_candidates`
+- `element_resolve_again`
 - `element_type`
 - `element_fill`
 - `element_fill_and_verify`, `element_wait_value`
@@ -173,11 +176,15 @@ Console inspection:
 
 - `console_enable`, `console_disable`, `console_list`
 
-## Agent-friendly model
+Agent-friendly model
 
 `page_get_tree` returns a compact, limited tree by default. It prioritizes visible body content and hides `head`, `script`, `meta`, `style`, `link`, and invisible nodes unless `include_head=true` or `include_invisible=true` is set. Interactive nodes receive `element_id`, `selector_hint`, `xpath_hint`, `actionable`, and `resolution_confidence`. An agent can observe the tree and call `element_click` or `element_fill` directly with the `element_id`, without calling `element_find` first.
 
 `page_get_interactive_summary` is the recommended first observation for modern frontend apps. It returns visible controls with roles, names, labels, nearby section context, bounding boxes, selector hints, enabled/editable state, and cached `element_id` values.
+
+`page_get_active_surface` detects the current modal, dialog, form, or main content surface. It returns fields, controls, primary and secondary actions, progress indicators, visible validation errors, pending required fields, and structured evidence. Scope `auto` prefers visible modals and dialogs over page content.
+
+For multi-step form flows, use `form_fill_fields` to fill fields by intent (label, placeholder, selector matching) and `page_click_primary_action` to advance steps. `element_find_by_text_candidates` resolves duplicate visible text before clicking. `element_resolve_again` recovers stale element handles after page re-renders. `submission_wait_for_confirmation` polls for post-submit outcomes.
 
 For React-like forms and custom controls, prefer `element_fill`, `element_fill_and_verify`, `combobox_type_and_select`, `element_click_by_text`, and condition waits before using custom JavaScript. `js_evaluate` and `js_evaluate_readonly` return structured JSON values directly in `value`; clients should not parse `value` as a JSON string.
 

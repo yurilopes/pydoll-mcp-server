@@ -114,9 +114,45 @@ class TestElementScreenshotSecurity:
                     'test-client',
                     'tab-test',
                     'el-test',
+                    return_base64=True,
                 )
 
             result = asyncio.run(run())
 
             assert result.get('success') is True
             assert result.get('data') == 'base64data'
+
+    def test_saves_file_by_default(self) -> None:
+        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
+            from pydoll_mcp_server.tools.elements import element_screenshot
+
+        mock_element = MagicMock()
+        mock_element.take_screenshot = AsyncMock(return_value=None)
+
+        with (
+            patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
+            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
+            patch(
+                'pydoll_mcp_server.tools.elements.resolve_element',
+                return_value=mock_element,
+            ),
+        ):
+            mock_tab_info = MagicMock()
+            mock_tab_info.tab_id = 'tab-test'
+            mock_tab_info.document_generation = 1
+            mock_registry.return_value.get_tab.return_value = mock_tab_info
+
+            import asyncio
+
+            async def run() -> JsonObject:
+                return await element_screenshot(
+                    'test-client',
+                    'tab-test',
+                    'el-test',
+                )
+
+            result = asyncio.run(run())
+
+            assert result.get('success') is True
+            assert result.get('return_base64') is False
+            assert result.get('path', '') != ''

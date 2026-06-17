@@ -110,7 +110,32 @@ async def element_click(
     tab_id: str,
     element_id: str,
     timeout: float | None = None,
+    click_strategy: str = 'native',
+    expect_dialog: bool = False,
+    expect_url_change: bool = False,
+    expect_text: str = '',
+    expect_selector: str = '',
+    expect_network_idle: bool = False,
+    effect_timeout: float | None = None,
 ) -> JsonObject:
+    has_effect = any((expect_dialog, expect_url_change, expect_text, expect_selector, expect_network_idle))
+    if has_effect or click_strategy != 'native':
+        from pydoll_mcp_server.tools.click_effects import element_click_enhanced
+
+        return await element_click_enhanced(
+            client_id=client_id,
+            tab_id=tab_id,
+            element_id=element_id,
+            timeout=timeout,
+            click_strategy=click_strategy,
+            expect_dialog=expect_dialog,
+            expect_url_change=expect_url_change,
+            expect_text=expect_text,
+            expect_selector=expect_selector,
+            expect_network_idle=expect_network_idle,
+            effect_timeout=effect_timeout,
+        )
+
     config = get_timeout_config()
     timeout = timeout or config.click
     timeout = min(timeout, config.max_timeout)
@@ -292,6 +317,7 @@ async def element_screenshot(
     tab_id: str,
     element_id: str,
     path: str = '',
+    return_base64: bool = False,
 ) -> JsonObject:
     registry = get_registry()
     config = get_config()
@@ -320,13 +346,40 @@ async def element_screenshot(
                 recovery_hint='Use a relative path (stored in artifacts dir) or a path in an allowed directory.',
             ).to_dict()
 
+    if not safe_path and not return_base64:
+        import uuid
+
+        screenshots_dir = config.artifacts_dir / client_id
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+        safe_path = str(screenshots_dir / f'screenshot_{uuid.uuid4().hex[:12]}.png')
+
     try:
         async with tab_operation_lock(tab_id):
             if safe_path:
                 await element.take_screenshot(path=safe_path, as_base64=False)
-                return {'success': True, 'path': safe_path}
+                file_size = 0
+                try:
+                    from pathlib import Path
+
+                    file_size = Path(safe_path).stat().st_size
+                except OSError:
+                    pass
+                return {
+                    'success': True,
+                    'path': safe_path,
+                    'mime_type': 'image/png',
+                    'return_base64': False,
+                    'data': '',
+                    'size': file_size,
+                    'evidence': {},
+                }
             result = await element.take_screenshot(as_base64=True)
-            return {'success': True, 'data': result if isinstance(result, str) else ''}
+            return {
+                'success': True,
+                'data': result if isinstance(result, str) else '',
+                'return_base64': True,
+                'evidence': {},
+            }
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,

@@ -79,23 +79,124 @@ Prefer condition waits over fixed sleeps:
 
 ## Upload a file safely
 
-Use `artifact_get_paths` to discover runtime directories. If a source file is
-outside allowed upload directories, use `artifact_import` only when the source is
-inside an explicit import allowlist.
+Use `artifact_prepare_upload` to copy a file into the controlled artifacts
+directory before uploading:
 
-Then call:
+```json
+{
+  "client_id": "agent",
+  "source_path": "path/to/resume.pdf"
+}
+```
+
+The response includes the ready-to-use artifact path. Then find the file input
+and call `upload_files`:
 
 ```json
 {
   "client_id": "agent",
   "tab_id": "tab",
   "element_id": "el_file",
-  "paths": ["C:\\Users\\Yuri\\AppData\\Local\\pydoll-mcp-server\\artifacts\\agent\\resume.pdf"]
+  "paths": ["artifacts/agent/resume.pdf"],
+  "expect_filename_visible": true
 }
 ```
 
-Check `file_upload_state` or nearby page text after upload if the page moves the
-file state out of the native input.
+Check `file_upload_state` or `visible_in_page` after upload if the page moves
+file state out of the native input. Use `artifact_import` for lower-level file
+copies from allowed directories.
+
+## Complete a multi-step form flow
+
+Use the high-level form flow tools to navigate multi-step applications without
+custom JavaScript:
+
+1. Observe the active surface after the form appears:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "scope": "auto"
+}
+```
+
+Call `page_get_active_surface`. The response includes fields, controls,
+primary and secondary actions, progress indicator, visible errors, and
+pending required fields.
+
+2. Fill fields by intent with `form_fill_fields`:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "fields": [
+    {"label_contains": "Full Name", "value": "John Doe"},
+    {"label_contains": "Email", "value": "john@example.com"},
+    {"label_contains": "Phone", "value": "+1 555-0000"}
+  ],
+  "validate": true
+}
+```
+
+Each field can match by `label_contains`, `question_contains`, `selector`,
+`role`, `name`, `placeholder_contains`, or `within_element_id`. The tool
+reports filled, unfilled, ambiguous fields, and validation errors.
+
+3. Advance steps with `page_click_primary_action`:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "expected_progress_change": true
+}
+```
+
+Returns the clicked button, progress before/after, surfaced errors, and
+pending required fields.
+
+4. Resolve duplicate action text with `element_find_by_text_candidates`:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "text": "Apply",
+  "prefer_modal": true
+}
+```
+
+Returns ranked candidates with scores, element IDs, and an `ambiguous`
+flag. Use filters (`role`, `tag`, `nearest_heading`) to narrow matches.
+
+5. Wait for submission confirmation with `submission_wait_for_confirmation`:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "success_text_any": ["submitted", "received"],
+  "expect_modal_gone": true
+}
+```
+
+Returns `confirmed`, `submitted_uncertain`, `blocked`, or `failed` with
+structured evidence.
+
+6. Recover stale elements after re-render with `element_resolve_again`:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "element_id": "el_stale",
+  "selector_hint": "#primary-action"
+}
+```
+
+Returns the new `element_id` when a single safe candidate is found.
 
 ## Evaluate JavaScript only when needed
 

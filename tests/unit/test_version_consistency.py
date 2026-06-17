@@ -10,7 +10,7 @@ from pydoll_mcp_server.version import __version__, get_version
 
 
 def test_source_and_health_responses_share_one_version(monkeypatch: MonkeyPatch) -> None:
-    expected = '0.3.0a1'
+    expected = get_version()
     monkeypatch.setenv('PYDOLL_MCP_ALLOW_NO_AUTH', 'true')
     get_config.cache_clear()
 
@@ -21,3 +21,10 @@ def test_source_and_health_responses_share_one_version(monkeypatch: MonkeyPatch)
     assert health_check()['version'] == expected
     assert server_status()['version'] == expected
     get_config.cache_clear()
+
+
+def test_release_classifier_is_beta() -> None:
+    version = get_version()
+    assert '0.4' in version, f'Expected 0.4.x but got {version}'
+    assert 'b1' in version, f'Expected beta 1 but got {version}'
+    assert 'a' not in version, f'Should not contain alpha suffix: {version}'

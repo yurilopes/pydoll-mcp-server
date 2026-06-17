@@ -40,8 +40,14 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
 ## Uploads and Downloads
 
 - **Upload**: only paths inside `artifacts_dir`, `downloads_dir`, or `tmp_dir`.
+- **Upload preparation**: `artifact_prepare_upload` copies allowed files into the
+  controlled client artifact directory before upload. It rejects sources outside
+  runtime directories and explicit allowlists, returns exact allowed directories
+  on denial, and sanitizes filenames.
 - **Download**: files stored in `downloads_dir/{client_id}/`.
-- **Screenshots**: base64 by default. Path writing validated against allowed directories.
+- **Screenshots**: saved to artifact files by default (`return_base64=false`).
+  Base64 is returned only with explicit opt-in. Path writing validated against
+  allowed directories.
 - Path traversal (`../escape.png`) is blocked via `Path.resolve()` + `relative_to()`.
 
 ## Profiles

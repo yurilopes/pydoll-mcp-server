@@ -10,7 +10,9 @@ from pydoll_mcp_server.browser.cdp_helpers import get_user_agent, get_viewport, 
 from pydoll_mcp_server.dom.deep_traversal import element_find_deep, page_get_tree_deep
 from pydoll_mcp_server.dom.tree import build_page_tree, page_get_text, page_screenshot
 from pydoll_mcp_server.security.proxy import proxy_validate
+from pydoll_mcp_server.tools.active_surface import page_get_active_surface
 from pydoll_mcp_server.tools.browser import browser_close, browser_launch, browser_list, proxy_get
+from pydoll_mcp_server.tools.click_effects import element_resolve_again
 from pydoll_mcp_server.tools.diagnostics import (
     browser_attach,
     diagnostics_snapshot,
@@ -67,6 +69,7 @@ from pydoll_mcp_server.tools.form_controls import (
     form_errors,
     form_snapshot,
 )
+from pydoll_mcp_server.tools.form_fill import form_fill_fields
 from pydoll_mcp_server.tools.inspection import (
     console_disable,
     console_enable,
@@ -90,8 +93,10 @@ from pydoll_mcp_server.tools.page_advanced import (
     page_snapshot,
 )
 from pydoll_mcp_server.tools.page_summary import page_get_interactive_summary
+from pydoll_mcp_server.tools.primary_action import page_click_primary_action
 from pydoll_mcp_server.tools.semantic_actions import element_click_by_text, element_click_center, mouse_click
 from pydoll_mcp_server.tools.storage import cookies_get, cookies_set, storage_get, storage_set
+from pydoll_mcp_server.tools.submission import submission_wait_for_confirmation
 from pydoll_mcp_server.tools.tab_advanced import (
     dialog_handle,
     dialog_list,
@@ -103,6 +108,8 @@ from pydoll_mcp_server.tools.tab_advanced import (
     tab_recreate,
 )
 from pydoll_mcp_server.tools.tabs import tab_activate, tab_close, tab_list, tab_recover
+from pydoll_mcp_server.tools.text_ranking import element_find_by_text_candidates
+from pydoll_mcp_server.tools.upload_prep import artifact_prepare_upload
 from pydoll_mcp_server.tools.waits import (
     element_wait_for_state,
     network_wait_for_request,
@@ -230,6 +237,13 @@ TOOLS: tuple[Tool, ...] = (
     combobox_get_options,
     combobox_type_and_select,
     combobox_select_option,
+    page_get_active_surface,
+    element_find_by_text_candidates,
+    element_resolve_again,
+    form_fill_fields,
+    page_click_primary_action,
+    artifact_prepare_upload,
+    submission_wait_for_confirmation,
 )
 
 

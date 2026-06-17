@@ -58,7 +58,7 @@ class TestCapabilities:
 
             result = server_status(client_id='test-p2')
             assert 'schema_version' in result
-            assert string_at(result, 'schema_version') == '2026-06-16.v0.4'
+            assert string_at(result, 'schema_version') == '2026-06-17.v0.5'
 
     def test_capabilities_includes_transports(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
@@ -89,13 +89,13 @@ class TestCapabilities:
             caps = object_at(result, 'capabilities')
             assert 'diagnostics' in caps
 
-    def test_version_is_alpha(self) -> None:
+    def test_version_is_beta(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import server_status
 
             result = server_status(client_id='test-p2')
             assert 'version' in result
-            assert string_at(result, 'version') in {'0.1.0a1', '0.2.0a1', '0.3.0a1'}
+            assert string_at(result, 'version') == '0.4.0b1'
 
 
 class TestConsoleUnsupported:
@@ -175,7 +175,7 @@ class TestDiagnosticsSnapshot:
                 return await diagnostics_snapshot('test-p2')
 
             result = asyncio.run(_run())
-        assert result.get('schema_version') == '2026-06-16.v0.4'
+        assert result.get('schema_version') == '2026-06-17.v0.5'
 
 
 class TestTraceIntegration:
