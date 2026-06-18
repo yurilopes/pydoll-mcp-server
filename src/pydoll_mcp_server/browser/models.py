@@ -95,6 +95,7 @@ class BrowserInfo:
     health: ResourceHealth = ResourceHealth.HEALTHY
     headless: bool = False
     proxy_server: str = ''
+    proxy_launch_url: str = field(default='', repr=False)
     proxy_scheme: str = ''
     proxy_has_credentials: bool = False
     proxy_bypass_list: str = ''

@@ -7,6 +7,7 @@ import re
 from collections.abc import Awaitable, Callable
 from fnmatch import fnmatch
 
+from pydoll_mcp_server.browser.inspection import get_inspection_manager
 from pydoll_mcp_server.browser.operations import get_operation_manager, operation_cancel
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
@@ -23,8 +24,8 @@ from pydoll_mcp_server.json_types import (
     require_json_object,
 )
 from pydoll_mcp_server.tools.element_advanced import element_get_state
-from pydoll_mcp_server.tools.inspection import network_list
 from pydoll_mcp_server.tools.javascript import scan_script
+from pydoll_mcp_server.tools.network import network_list
 
 
 async def page_wait_for_url(
@@ -172,10 +173,21 @@ async def network_wait_for_request(
     tab_id: str,
     url_pattern: str = '*',
     method: str = '',
+    resource_type: str = '',
+    has_post_data: bool | None = None,
     timeout: float | None = None,
     operation_id: str = '',
 ) -> JsonObject:
-    return await _network_wait(client_id, tab_id, url_pattern, method, timeout, operation_id)
+    return await _network_wait(
+        client_id,
+        tab_id,
+        url_pattern,
+        method,
+        timeout,
+        operation_id,
+        resource_type=resource_type,
+        has_post_data=has_post_data,
+    )
 
 
 async def network_wait_for_response(
@@ -183,10 +195,11 @@ async def network_wait_for_response(
     tab_id: str,
     url_pattern: str = '*',
     status: int = 0,
+    request_id: str = '',
     timeout: float | None = None,
     operation_id: str = '',
 ) -> JsonObject:
-    return await _network_wait(client_id, tab_id, url_pattern, '', timeout, operation_id, status)
+    return await _network_wait(client_id, tab_id, url_pattern, '', timeout, operation_id, status, request_id=request_id)
 
 
 async def _network_wait(
@@ -197,18 +210,28 @@ async def _network_wait(
     timeout: float | None,
     operation_id: str,
     status: int = 0,
+    request_id: str = '',
+    resource_type: str = '',
+    has_post_data: bool | None = None,
 ) -> JsonObject:
     async def probe() -> JsonObject:
         found: JsonObject = {}
+        get_registry().get_tab(client_id, tab_id)
+        state = get_inspection_manager().get(tab_id)
+        initial_ids = set(state.requests)
 
         async def evaluate() -> bool:
             result = await network_list(client_id, tab_id, limit=1000)
             for event_value in get_array(result, 'events', []):
                 event = require_json_object(event_value, 'network event')
                 if (
-                    fnmatch(get_string(event, 'url', ''), pattern)
+                    (bool(request_id) or get_string(event, 'request_id') not in initial_ids)
+                    and fnmatch(get_string(event, 'url', ''), pattern)
                     and (not method or get_string(event, 'method', '') == method)
                     and (not status or get_int(event, 'status', 0) == status)
+                    and (not request_id or get_string(event, 'request_id') == request_id)
+                    and (not resource_type or get_string(event, 'resource_type') == resource_type)
+                    and (has_post_data is None or event.get('has_post_data') is has_post_data)
                 ):
                     found.update(event)
                     return True

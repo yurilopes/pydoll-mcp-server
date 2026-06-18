@@ -246,6 +246,8 @@ class TestMCPTools:
             'browser_launch',
             'browser_list',
             'browser_close',
+            'http_request',
+            'network_replay_request',
             'tab_list',
             'tab_activate',
             'tab_close',

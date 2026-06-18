@@ -155,6 +155,7 @@ async def browser_launch(
             profile=profile,
             headless=headless,
             proxy_server=proxy.sanitized_url if proxy else '',
+            proxy_launch_url=proxy.launch_url if proxy else '',
             proxy_scheme=proxy.scheme if proxy else '',
             proxy_has_credentials=proxy.has_credentials if proxy else False,
             proxy_bypass_list=proxy.bypass_list if proxy else '',
@@ -271,6 +272,10 @@ async def browser_close(
             else:
                 profile_mgr.unlock(profile.profile_id)
         registry.remove_browser(client_id, browser_id, cleanup_profile=False)
+        from pydoll_mcp_server.browser.inspection import get_inspection_manager
+
+        for tab_id in tabs_closed:
+            get_inspection_manager().remove(tab_id)
         lock_manager = get_lock_manager()
         lock_manager.clear_browser(browser_id)
         for tab_id in tabs_closed:

@@ -72,18 +72,22 @@ from pydoll_mcp_server.tools.form_controls import (
     select_get_options,
 )
 from pydoll_mcp_server.tools.form_fill import form_fill_fields
+from pydoll_mcp_server.tools.http import http_request, network_replay_request
 from pydoll_mcp_server.tools.inspection import (
     console_disable,
     console_enable,
     console_list,
+)
+from pydoll_mcp_server.tools.javascript import js_evaluate, js_evaluate_readonly
+from pydoll_mcp_server.tools.network import (
     network_clear,
     network_disable,
     network_enable,
+    network_get_request,
     network_get_response,
     network_list,
     network_summary,
 )
-from pydoll_mcp_server.tools.javascript import js_evaluate, js_evaluate_readonly
 from pydoll_mcp_server.tools.page import page_back, page_forward, page_goto, page_reload, page_wait
 from pydoll_mcp_server.tools.page_advanced import (
     frame_list,
@@ -176,10 +180,13 @@ TOOLS: tuple[Tool, ...] = (
     file_upload_state,
     artifact_get_paths,
     artifact_import,
+    http_request,
     network_enable,
     network_disable,
     network_list,
     network_get_response,
+    network_get_request,
+    network_replay_request,
     console_enable,
     console_disable,
     console_list,

@@ -100,6 +100,9 @@ async def tab_close(
             except Exception as e:
                 logger.error(f'Error closing tab {tab_id}: {e}')
 
+            from pydoll_mcp_server.browser.inspection import get_inspection_manager
+
+            get_inspection_manager().remove(tab_id)
             registry.remove_tab(client_id, tab_id)
         return {
             'success': True,
@@ -165,6 +168,9 @@ async def tab_recover(
                     timeout=30.0,
                 )
                 tab_info.pydoll_tab = new_tab
+                from pydoll_mcp_server.browser.inspection import get_inspection_manager
+
+                get_inspection_manager().remove(tab_id)
                 tab_info.health = ResourceHealth.HEALTHY
                 tab_info.document_generation += 1
                 state.record_recovery()

@@ -2,11 +2,11 @@
 
 MCP server for browser automation built on the [Pydoll](https://github.com/autoscrape-labs/pydoll) library.
 
-This project offers a local alternative to the Playwright MCP Server, with its own agent-oriented API built on Pydoll. It does not copy the Playwright API. It provides a predictable layer for agents: observe pages, choose elements, act by `element_id`, navigate, capture screenshots, execute JavaScript with limits, and handle iframes and shadow DOM.
+This project offers a local alternative to the Playwright MCP Server, with its own agent-oriented API built on Pydoll. It does not copy the Playwright API. It provides a predictable layer for agents: observe pages, choose elements, act by `element_id`, navigate, capture screenshots, execute JavaScript with limits, handle iframes and shadow DOM, inspect complete HTTP requests, and call authenticated HTTP endpoints directly from the browser session.
 
 ## Status
 
-Experimental alpha (v0.3.0a1). HTTP on `127.0.0.1` is the primary transport. `stdio` transport is available as an option (`--transport stdio`).
+Beta preview (v0.4.0b1). HTTP on `127.0.0.1` is the primary transport. `stdio` transport is available as an option (`--transport stdio`).
 
 Endpoints:
 - `/health` - Health check (no auth)
@@ -158,7 +158,9 @@ JavaScript and advanced helpers:
 - `js_evaluate_readonly`
 - `js_evaluate`
 - `user_agent_set`
+- `user_agent_get`
 - `viewport_set`
+- `viewport_get`
 - `cookies_get`
 - `cookies_set`
 - `storage_get`
@@ -169,15 +171,98 @@ JavaScript and advanced helpers:
 - `file_upload_state`, `artifact_get_paths`, `artifact_import`, `artifact_prepare_upload`
 - `profile_list`, `profile_promote`
 - `operation_cancel`
+- `http_request`
 
 Network inspection:
 
 - `network_enable`
 - `network_disable`
 - `network_list`
+- `network_get_request`
+- `network_replay_request`
 - `network_get_response`
 - `network_summary`, `network_clear`
 - `network_wait_for_request`, `network_wait_for_response`
+
+`network_list` is a compact, sanitized index. `network_get_request` returns the raw
+request details captured by Chromium, including request headers and payload, without
+redaction. `network_get_response` retrieves the response body separately. Raw request
+data can contain credentials and personal data. Do not log it automatically, and call
+`network_clear` after analysis when retention is unnecessary.
+
+`http_request` performs a direct HTTP(S) request using the owning browser tab's current
+cookies, user agent, and supported HTTP(S) proxy. It is not subject to page CORS.
+Destinations are restricted to the tab hostname unless `allow_cross_origin=true`.
+`network_replay_request` replays a captured request through the same service and requires
+`confirm_side_effects=true` for POST, PUT, PATCH, and DELETE. Direct HTTP does not reproduce
+Chromium TLS fingerprinting, cache, service workers, or client certificates.
+
+### Authenticated direct HTTP
+
+`http_request` is the equivalent of a browser-associated API request context. It sends
+HTTP outside page JavaScript while sharing the owning tab's current cookies, user agent,
+and supported HTTP(S) proxy. Cookies received through `Set-Cookie` are synchronized back
+to the browser.
+
+Example JSON request:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab-123",
+  "method": "POST",
+  "url": "/api/profile",
+  "headers": {
+    "Accept": "application/json"
+  },
+  "json_value": {
+    "name": "Example"
+  },
+  "timeout": 30,
+  "max_response_bytes": 1048576
+}
+```
+
+Supported payload modes are mutually exclusive:
+
+- `json_value` for JSON;
+- `form_fields` for ordered URL-encoded fields, including duplicate names;
+- `body` for raw UTF-8 text;
+- `body_base64` for raw binary data.
+
+Relative URLs resolve against the current tab URL. Absolute URLs are restricted to the
+same hostname unless `allow_cross_origin=true`. Every redirect is validated before it is
+followed. Response bodies are returned as text when the content type is textual and as
+base64 otherwise. Truncation, original size when known, and returned size are explicit.
+
+### Capture and replay workflow
+
+A deterministic agent workflow is:
+
+1. Call `network_enable` and `network_clear`.
+2. Start `network_wait_for_request` with URL and method filters.
+3. Trigger the browser action that submits the request.
+4. Call `network_get_request` with the captured request ID.
+5. Call `network_get_response` to retrieve the browser response body.
+6. Optionally call `network_replay_request` to resend the captured request.
+7. Call `network_clear` when raw data is no longer needed.
+
+Replay uses the current browser cookies and preserves the captured method, URL, headers,
+and available payload. Headers controlled by the HTTP client, including `Host`, `Cookie`,
+and `Content-Length`, are recalculated and listed in `omitted_headers`. Mutating methods
+require explicit confirmation:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab-123",
+  "request_id": "request-456",
+  "confirm_side_effects": true
+}
+```
+
+Replay rejects incomplete multipart captures and ambiguous multiple binary entries instead
+of reconstructing data that Chromium did not provide.
 
 Console inspection:
 
@@ -221,7 +306,13 @@ The alpha covers simple iframes, same-origin nested iframes, and open shadow DOM
 - Cookies and storage are redacted by default on read.
 - Sensitive attributes such as tokens, passwords, and cookies are redacted.
 - Logs must redact bearer tokens, cookies, authorization headers, and sensitive fields.
-- Proxy credentials are never returned or stored in browser metadata.
+- Proxy credentials are never returned, logged, traced, or persisted. The effective proxy
+  URL is held only in internal in-memory browser state when needed for authenticated direct HTTP.
+- Raw network inspection, direct HTTP, and replay responses can contain credentials and
+  personal data. Consumers must not log these tool results automatically.
+- Direct HTTP is same-host by default, blocks credentials embedded in URLs, validates every
+  redirect, and requires explicit cross-origin opt-in.
+- Replaying POST, PUT, PATCH, or DELETE requires `confirm_side_effects=true`.
 
 `js_evaluate` is a sensitive tool:
 
@@ -306,7 +397,11 @@ python -m pytest tests/p2/ -q
 - Deep traversal is more expensive than `page_get_tree` and should be used explicitly.
 - Downloads depend on Pydoll's `expect_download` flow and must remain in the controlled runtime dir.
 - Uploads must only use paths allowed by the allowlist.
-- `operation_cancel` currently applies to waits that receive an explicit caller-provided `operation_id`.
+- `operation_cancel` applies to waits and direct HTTP operations that receive an explicit caller-provided `operation_id`.
+- Direct HTTP supports HTTP and HTTPS proxies. SOCKS proxy sessions return `UNSUPPORTED`
+  rather than bypassing the configured browser proxy.
+- Direct HTTP shares cookies, user agent, and supported proxy settings, but not Chromium's
+  TLS fingerprint, HTTP cache, service workers, CORS behavior, or client certificates.
 
 ## License
 

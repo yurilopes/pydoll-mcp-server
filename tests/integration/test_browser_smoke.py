@@ -139,6 +139,27 @@ async def test_browser_smoke_launch_navigate_interact() -> None:
 
 
 @pytest.mark.asyncio
+async def test_authenticated_direct_http_uses_browser_tab_context() -> None:
+    if importlib.util.find_spec('pydoll.browser') is None:
+        pytest.skip('Pydoll not available')
+
+    from pydoll_mcp_server.tools.http import http_request
+
+    browser, tab = await launch_and_goto_fixture('simple.html')
+    client_id = 'http-request-smoke'
+    try:
+        with patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}):
+            tab_info = await register_smoke_tab(browser, tab, client_id)
+        result = await http_request(client_id, tab_info.tab_id, 'GET', 'simple.html')
+        assert result['success'] is True
+        assert result['status'] == 200
+        assert result['base64_encoded'] is False
+        assert 'html' in str(result['body']).lower()
+    finally:
+        await stop_smoke_browser(browser)
+
+
+@pytest.mark.asyncio
 async def test_page_get_tree_returns_nodes() -> None:
     if importlib.util.find_spec('pydoll.browser') is None:
         pytest.skip('Pydoll not available')

@@ -250,3 +250,28 @@ Returns the new `element_id` when a single safe candidate is found.
 
 Do not parse `value` as a JSON string. Use manual JavaScript only for diagnostics
 that the first-class tools cannot provide.
+
+## Inspect a submitted HTTP request
+
+1. Call `network_enable`, then `network_clear`.
+2. Start `network_wait_for_request` with the expected URL and method before triggering
+   the form submission.
+3. Use the returned request ID with `network_get_request` to inspect the original
+   headers and payload.
+4. Use the same ID with `network_get_response` after the response arrives.
+5. Call `network_clear` when the analysis is complete.
+
+`network_list` is only a compact sanitized index. `network_get_request` is raw and may
+contain credentials or personal data, so its response must not be logged automatically.
+For multipart requests, Chromium may omit file bytes from `Network.getRequestPostData`;
+the tool preserves available data and reports this limitation instead of reconstructing it.
+
+## Call an authenticated HTTP endpoint directly
+
+Use `http_request` when the endpoint should share the browser's cookies but does not need
+to run through page JavaScript or CORS. Relative URLs and same-host absolute URLs are
+allowed by default. Set `allow_cross_origin=true` only for a deliberate external target.
+
+Use `network_replay_request` to resend a captured request. POST, PUT, PATCH, and DELETE
+require `confirm_side_effects=true`. Replay rejects incomplete multipart captures instead
+of presenting reconstructed data as the original request.

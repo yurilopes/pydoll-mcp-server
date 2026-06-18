@@ -164,6 +164,10 @@ Date: 2026-06-12. Source: Pydoll v2.23.0, commit `59330abf`.
 |------------|-----------|--------|--------|------------|------|
 | Network events | `Tab.enable_network_events()` | `tab.py` | VERIFIED | `network_list` | PLAN_08 |
 | Network logs | `Tab.get_network_logs()` | `tab.py` | VERIFIED | `network_list` | PLAN_08 |
+| Raw request events | `Network.requestWillBeSent` and related callbacks | `events.py` | VERIFIED | `network_get_request` | REQUEST_INSPECTION |
+| Request post data | `NetworkCommands.get_request_post_data()` | `network_commands.py` | VERIFIED | `network_get_request` fallback | REQUEST_INSPECTION |
+| Authenticated direct HTTP | Browser cookies plus `aiohttp` | MCP service | IMPLEMENTED | `http_request` | HTTP_REQUEST |
+| Captured request replay | Per-tab request capture plus direct HTTP | MCP service | IMPLEMENTED | `network_replay_request` | HTTP_REQUEST |
 | Response body | `Tab.get_network_response_body()` | `tab.py` | VERIFIED | Network detail | PLAN_08 |
 | Fetch interception | `Tab.enable_fetch_events()` | `tab.py` | VERIFIED | Network control | PLAN_08 |
 

@@ -72,6 +72,19 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
 ## Network and Console Inspection
 
 - Network events are opt-in per tab via `network_enable`.
+- `network_get_request` is deliberately raw and can return cookies, authorization
+  headers, tokens, form values, and personal data. Its result is never copied into
+  server logs or traces.
+- Raw request captures remain in bounded per-tab memory only. `network_clear`,
+  `network_disable`, tab close, browser close, and tab recreation remove them.
+- `network_list` and network waits return compact sanitized summaries. Consumers must
+  not log `network_get_request` results automatically.
+- `http_request` and `network_replay_request` return raw headers and bodies. Their content
+  is excluded from logs and traces, but callers must treat the tool result as sensitive.
+- Direct HTTP is same-host by default. Cross-origin requests require an explicit opt-in,
+  embedded URL credentials are blocked, and every redirect is validated before following.
+- Replay of POST, PUT, PATCH, or DELETE requires `confirm_side_effects=true` because it may
+  duplicate an external side effect.
 - Network response bodies are size-limited and redacted by default.
 - Console inspection uses bounded, redacted Chromium Runtime events and returns `UNSUPPORTED` when unavailable.
 - Proxy URLs are validated before browser launch. Responses and browser metadata never expose proxy credentials.

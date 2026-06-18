@@ -11,10 +11,12 @@ from typing import TypeGuard
 from pydoll.browser.chromium.base import Browser
 from pydoll.browser.options import ChromiumOptions
 from pydoll.browser.tab import Tab
+from pydoll.commands.network_commands import NetworkCommands
 from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.script_utils import extract_script_bool
+from pydoll_mcp_server.json_types import get_object, get_string, require_json_object
 
 
 def _is_object_awaitable(value: object) -> TypeGuard[Awaitable[object]]:
@@ -135,6 +137,29 @@ async def register_runtime_callback(
     if not isinstance(result, int):
         raise TypeError('Pydoll event registration did not return a callback id')
     return result
+
+
+async def register_network_callback(
+    tab: Tab,
+    event_name: str,
+    callback: Callable[[object], Awaitable[None]],
+) -> int:
+    return await register_runtime_callback(tab, event_name, callback)
+
+
+async def remove_tab_callback(tab: Tab, callback_id: int) -> None:
+    await tab.remove_callback(callback_id)
+
+
+async def get_request_post_data(tab: Tab, request_id: str) -> str:
+    method: object = object.__getattribute__(tab, '_execute_command')
+    if not callable(method):
+        raise TypeError('Pydoll tab does not expose command execution')
+    pending: object = method(NetworkCommands.get_request_post_data(request_id))
+    if not _is_object_awaitable(pending):
+        raise TypeError('Pydoll command execution did not return an awaitable')
+    response = require_json_object(await asyncio.ensure_future(pending), 'getRequestPostData response')
+    return get_string(get_object(response, 'result', {}), 'postData')
 
 
 async def set_input_files(element: WebElement, paths: list[str]) -> None:
