@@ -60,6 +60,7 @@ from pydoll_mcp_server.tools.files_advanced import (
     download_wait,
     page_print_pdf,
 )
+from pydoll_mcp_server.tools.form_choice import form_select_choice
 from pydoll_mcp_server.tools.form_controls import (
     combobox_get_options,
     combobox_select_option,
@@ -68,6 +69,7 @@ from pydoll_mcp_server.tools.form_controls import (
     element_wait_value,
     form_errors,
     form_snapshot,
+    select_get_options,
 )
 from pydoll_mcp_server.tools.form_fill import form_fill_fields
 from pydoll_mcp_server.tools.inspection import (
@@ -94,6 +96,7 @@ from pydoll_mcp_server.tools.page_advanced import (
 )
 from pydoll_mcp_server.tools.page_summary import page_get_interactive_summary
 from pydoll_mcp_server.tools.primary_action import page_click_primary_action
+from pydoll_mcp_server.tools.profile_tools import profile_list, profile_promote
 from pydoll_mcp_server.tools.semantic_actions import element_click_by_text, element_click_center, mouse_click
 from pydoll_mcp_server.tools.storage import cookies_get, cookies_set, storage_get, storage_set
 from pydoll_mcp_server.tools.submission import submission_wait_for_confirmation
@@ -235,15 +238,19 @@ TOOLS: tuple[Tool, ...] = (
     form_snapshot,
     form_errors,
     combobox_get_options,
+    select_get_options,
     combobox_type_and_select,
     combobox_select_option,
     page_get_active_surface,
     element_find_by_text_candidates,
     element_resolve_again,
     form_fill_fields,
+    form_select_choice,
     page_click_primary_action,
     artifact_prepare_upload,
     submission_wait_for_confirmation,
+    profile_list,
+    profile_promote,
 )
 
 

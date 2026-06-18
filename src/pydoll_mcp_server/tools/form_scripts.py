@@ -81,6 +81,33 @@ def combobox_options_script(max_options: int) -> str:
     """
 
 
+def select_options_script(max_options: int) -> str:
+    return f"""
+    if (this.tagName !== 'SELECT') {{
+        return {{error: 'not_select', tag: this.tagName || ''}};
+    }}
+    const limit = {max(1, min(max_options, 200))};
+    const options = [...this.options];
+    const out = [];
+    for (const option of options) {{
+        out.push({{
+            text: (option.text || '').trim(),
+            value: option.value || '',
+            label: option.label || '',
+            selected: option.selected,
+            disabled: option.disabled
+        }});
+        if (out.length >= limit) break;
+    }}
+    return {{
+        options: out,
+        count: options.length,
+        partial: options.length > out.length,
+        hidden_or_collapsed_options_count: Math.max(0, options.length - out.length)
+    }};
+    """
+
+
 def form_snapshot_script(max_fields: int) -> str:
     return f"""
     const fields = [];

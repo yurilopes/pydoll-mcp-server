@@ -18,7 +18,12 @@ from pydoll_mcp_server.browser.script_utils import (
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_float, get_string, require_json_object
 from pydoll_mcp_server.tools.element_resolver import resolve_element
-from pydoll_mcp_server.tools.form_scripts import combobox_options_script, fill_script, form_snapshot_script
+from pydoll_mcp_server.tools.form_scripts import (
+    combobox_options_script,
+    fill_script,
+    form_snapshot_script,
+    select_options_script,
+)
 
 DEFAULT_EVENTS = ['input', 'change', 'blur']
 
@@ -144,6 +149,31 @@ async def combobox_get_options(client_id: str, tab_id: str, element_id: str, max
     if not result.get('success'):
         return result
     return result
+
+
+async def select_get_options(client_id: str, tab_id: str, element_id: str, max_options: int = 50) -> JsonObject:
+    safe_max_options = max(1, min(max_options, 200))
+    try:
+        tab_info = get_registry().get_tab(client_id, tab_id)
+    except StructuredError as exc:
+        return exc.to_dict()
+    element = await resolve_element(tab_info, element_id)
+    if element is None:
+        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
+    try:
+        result = await element.execute_script(select_options_script(safe_max_options), return_by_value=True)
+        data = extract_script_object(result)
+    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
+        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Select options failed: {exc}', retryable=True).to_dict()
+
+    error = get_string(data, 'error', '')
+    if error:
+        return StructuredError(
+            ErrorCode.INVALID_INPUT,
+            'Element is not a native select.',
+            details={'tag': get_string(data, 'tag', '')},
+        ).to_dict()
+    return {'success': True, **data}
 
 
 async def combobox_type_and_select(

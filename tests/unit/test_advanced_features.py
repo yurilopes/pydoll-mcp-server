@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from pydoll_mcp_server.browser.operations import OperationManager
 from pydoll_mcp_server.browser.snapshots import SnapshotManager
@@ -84,14 +84,27 @@ def test_element_state_redacts_password_value() -> None:
 
 def test_element_check_is_idempotent_scripted_mutation() -> None:
     async def run() -> None:
-        with patch(
-            'pydoll_mcp_server.tools.element_advanced._mutate',
-            AsyncMock(return_value={'success': True, 'checked': {'checked': True}}),
-        ) as mutate:
+        element = MagicMock()
+        with (
+            patch(
+                'pydoll_mcp_server.tools.element_advanced._get',
+                AsyncMock(return_value=element),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.element_advanced.set_choice_state',
+                AsyncMock(
+                    return_value={
+                        'checked': True,
+                        'verified': True,
+                        'strategy_used': 'already_selected',
+                    }
+                ),
+            ) as select,
+        ):
             result = await element_check('client', 'tab', 'element')
         assert result['success'] is True
-        assert mutate.await_args is not None
-        assert 'this.checked!==' in mutate.await_args.args[3]
+        assert result['verified'] is True
+        select.assert_awaited_once_with(element, True)
 
     asyncio.run(run())
 

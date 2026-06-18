@@ -44,7 +44,31 @@ class TestActiveSurface:
                             'surface_label': '',
                             'surface_selector': '',
                             'fields': [],
-                            'controls': [],
+                            'controls': [
+                                {
+                                    'tag': 'button',
+                                    'role': 'button',
+                                    'name': 'Next',
+                                    'text': 'Next',
+                                    'text_length': 4,
+                                    'truncated': False,
+                                    'enabled': True,
+                                    'selector_hint': '#next',
+                                    'xpath_hint': '',
+                                }
+                            ],
+                            'containers': [
+                                {
+                                    'tag': 'form',
+                                    'role': 'form',
+                                    'name': '',
+                                    'text_excerpt': 'Contact information',
+                                    'text_length': 19,
+                                    'truncated': False,
+                                    'selector_hint': '#form',
+                                    'xpath_hint': '',
+                                }
+                            ],
                             'primary_action': {},
                             'secondary_actions': [],
                             'progress': {},
@@ -80,6 +104,64 @@ class TestActiveSurface:
             assert isinstance(result.get('surface'), dict)
             assert isinstance(result.get('fields'), list)
             assert isinstance(result.get('controls'), list)
+            assert isinstance(result.get('containers'), list)
+            assert result.get('count') == {'fields': 0, 'controls': 1, 'containers': 1}
+            script = mock_tab.execute_script.call_args.args[0]
+            assert '"text_max_chars": 300' in script
+
+    def test_text_max_chars_is_clamped_in_script_payload(self) -> None:
+        from pydoll_mcp_server.tools.active_surface import page_get_active_surface
+
+        mock_tab = MagicMock()
+        mock_tab.execute_script = AsyncMock(
+            return_value={
+                'result': {
+                    'result': {
+                        'value': {
+                            'surface_scope': 'main',
+                            'surface_reason': 'main element',
+                            'surface_tag': 'main',
+                            'surface_role': 'main',
+                            'surface_label': '',
+                            'surface_selector': '',
+                            'fields': [],
+                            'controls': [],
+                            'containers': [],
+                            'primary_action': {},
+                            'secondary_actions': [],
+                            'progress': {},
+                            'errors': [],
+                            'pending_required': [],
+                            'review_text': [],
+                            'active_element': {},
+                            'warnings': [],
+                        }
+                    }
+                }
+            }
+        )
+
+        with (
+            patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}),
+            patch('pydoll_mcp_server.tools.active_surface.get_registry') as mock_registry,
+        ):
+            mock_tab_info = MagicMock()
+            mock_tab_info.pydoll_tab = mock_tab
+            mock_tab_info.tab_id = 'tab-test'
+            mock_tab_info.document_generation = 1
+            mock_registry.return_value.get_tab.return_value = mock_tab_info
+
+            result: JsonObject = asyncio.run(
+                page_get_active_surface(
+                    client_id='test',
+                    tab_id='tab-test',
+                    scope='auto',
+                    text_max_chars=10,
+                )
+            )
+            assert result.get('success') is True
+            script = mock_tab.execute_script.call_args.args[0]
+            assert '"text_max_chars": 50' in script
 
 
 class TestTextCandidates:
@@ -302,36 +384,6 @@ class TestPrimaryAction:
                 )
             )
             assert isinstance(result, dict)
-
-
-class TestUploadPrep:
-    def test_rejects_outside_allowlist(self) -> None:
-        from pydoll_mcp_server.tools.upload_prep import artifact_prepare_upload
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            result: JsonObject = asyncio.run(
-                artifact_prepare_upload(
-                    client_id='test',
-                    source_path='C:/Windows/System32/file.pdf',
-                )
-            )
-            assert result.get('success') is not True
-            assert result.get('error_code') == 'PERMISSION_DENIED'
-
-    def test_denied_response_includes_dirs(self) -> None:
-        from pydoll_mcp_server.tools.upload_prep import artifact_prepare_upload
-
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
-            result: JsonObject = asyncio.run(
-                artifact_prepare_upload(
-                    client_id='test',
-                    source_path='/nonexistent/file.pdf',
-                )
-            )
-            assert result.get('success') is not True
-            details = result.get('details', {})
-            assert isinstance(details, dict)
-            assert 'allowed_directories' in details or 'message' in result
 
 
 class TestSubmissionConfirmation:

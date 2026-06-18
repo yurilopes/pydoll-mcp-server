@@ -11,10 +11,11 @@ from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.config import get_config, get_limits_config, get_timeout_config
 from pydoll_mcp_server.dom.element_cache import get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_bool, get_object, get_string
 from pydoll_mcp_server.logging import get_logger
 from pydoll_mcp_server.security.paths import validate_artifact_path
 from pydoll_mcp_server.security.policy import is_sensitive_field
+from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import (
     cache_element,
     resolve_element,
@@ -157,6 +158,27 @@ async def element_click(
 
     try:
         async with tab_operation_lock(tab_id):
+            try:
+                choice_result = await set_choice_state(element, True)
+                choice_error = get_string(choice_result, 'error', '')
+                if not choice_error:
+                    return {
+                        'success': True,
+                        'element_id': element_id,
+                        'clicked': True,
+                        'checked': get_bool(choice_result, 'checked'),
+                        'verified': get_bool(choice_result, 'verified'),
+                        'strategy_used': get_string(choice_result, 'strategy_used'),
+                    }
+                if choice_error != 'not_checkable':
+                    return StructuredError(
+                        ErrorCode.EXECUTION_ERROR,
+                        f'Choice click failed: {choice_error}',
+                        retryable=True,
+                        details=get_object(choice_result, 'diagnostic', {}),
+                    ).to_dict()
+            except (TypeError, ValueError):
+                pass
             await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
             await element.click()
     except Exception:

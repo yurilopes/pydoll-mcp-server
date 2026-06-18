@@ -22,7 +22,8 @@ from pydoll_mcp_server.browser.script_utils import (
 from pydoll_mcp_server.config import get_timeout_config
 from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_string, require_json_object
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_bool, get_object, get_string, require_json_object
+from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 
 VALID_STRATEGIES = frozenset({'native', 'center_mouse', 'dispatch_pointer_sequence', 'trusted_fallback_if_safe'})
@@ -70,7 +71,21 @@ async def element_click_enhanced(
     strategy_used = click_strategy
     clicked = False
 
-    strategy_order = _strategy_order(click_strategy)
+    async with tab_operation_lock(tab_id):
+        choice_result = await set_choice_state(element, True)
+    choice_error = get_string(choice_result, 'error', '')
+    if not choice_error:
+        clicked = get_bool(choice_result, 'verified')
+        strategy_used = get_string(choice_result, 'strategy_used')
+    elif choice_error != 'not_checkable':
+        return StructuredError(
+            ErrorCode.EXECUTION_ERROR,
+            f'Choice click failed: {choice_error}',
+            retryable=True,
+            details=get_object(choice_result, 'diagnostic', {}),
+        ).to_dict()
+
+    strategy_order = [] if clicked else _strategy_order(click_strategy)
     last_error: str | None = None
 
     for strategy in strategy_order:

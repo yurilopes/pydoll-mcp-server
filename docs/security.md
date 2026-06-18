@@ -52,10 +52,22 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
 
 ## Profiles
 
+- Profile metadata is stored in `profiles/index.json` without exposing cookies,
+  tokens, localStorage, sessionStorage, passwords, proxy credentials, or
+  absolute filesystem paths.
 - Default persistent profile per `client_id`.
 - Profiles are locked exclusively to prevent concurrent Chrome access.
 - Temporary profiles are cleaned up on browser close.
 - Profile data stored in OS-specific app data, outside the repository.
+- `profile_list` returns only logical metadata: profile_id, mode, last_used_at,
+  display_name, path_kind, and optional site_hints (domain only).
+- `profile_promote` validates source is inside managed runtime directories,
+  sanitizes destination paths via `ClientIdentity`, and refuses overwrite by
+  default. Chrome lock files (`Singleton*`) are removed from promoted copies.
+- `session_intent="user_authenticated"` with `site_hint` prefers a single
+  matching persistent profile; when multiple match, returns `AMBIGUOUS_PROFILE`
+  structured error with safe options; when only temp matches exist, returns
+  structured recommendation to call `profile_promote`.
 
 ## Network and Console Inspection
 

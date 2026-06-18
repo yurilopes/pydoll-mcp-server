@@ -111,6 +111,9 @@ def _summary_script(max_items: int) -> str:
     function selectorHint(el) {{
         if (el.id) return '#' + CSS.escape(el.id);
         if (el.getAttribute('data-testid')) return '[data-testid="' + el.getAttribute('data-testid') + '"]';
+        if (el.name && el.value && ['radio','checkbox'].includes(el.type || ''))
+            return el.tagName.toLowerCase() + '[name="' + el.name.replace(/"/g, '\\\\"') +
+                '"][value="' + el.value.replace(/"/g, '\\\\"') + '"]';
         if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name.replace(/"/g, '\\\\"') + '"]';
         if (el.placeholder) {{
             return el.tagName.toLowerCase() + '[placeholder="' + el.placeholder.replace(/"/g, '\\\\"') + '"]';
@@ -119,6 +122,10 @@ def _summary_script(max_items: int) -> str:
     }}
     function xpathHint(el) {{
         if (el.id) return '//*[@id="' + el.id.replace(/"/g, '&quot;') + '"]';
+        if (el.name && el.value && ['radio','checkbox'].includes(el.type || ''))
+            return '//' + el.tagName.toLowerCase() + '[@name="' +
+                el.name.replace(/"/g, '&quot;') + '" and @value="' +
+                el.value.replace(/"/g, '&quot;') + '"]';
         if (el.name) return '//' + el.tagName.toLowerCase() + '[@name="' + el.name.replace(/"/g, '&quot;') + '"]';
         return '';
     }}

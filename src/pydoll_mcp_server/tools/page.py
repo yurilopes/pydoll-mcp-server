@@ -68,6 +68,7 @@ async def page_goto(
             final_url = await get_tab_url(pydoll_tab) or normalized_url
             tab_info.url = final_url
             tab_info.title = await get_tab_title(pydoll_tab)
+            _update_profile_visited(client_id, tab_info.browser_id, final_url)
 
         duration_ms = (time.time() - start) * 1000
         logger.log_operation(
@@ -318,3 +319,17 @@ async def page_wait(
             message=f'Wait timed out after {timeout}s',
             retryable=True,
         ).to_dict()
+
+
+def _update_profile_visited(client_id: str, browser_id: str, url: str) -> None:
+    try:
+        from pydoll_mcp_server.browser.profile_index import get_profile_index
+    except ImportError:
+        return
+    try:
+        registry = get_registry()
+        browser_info = registry.get_browser(client_id, browser_id)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return
+    if browser_info and browser_info.profile:
+        get_profile_index().update_visited(browser_info.profile.profile_id, url)

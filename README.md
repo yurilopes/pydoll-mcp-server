@@ -40,13 +40,19 @@ Set a token before starting:
 
 ```powershell
 # Windows (PowerShell)
-$env:PYDOLL_MCP_AUTH_TOKEN = "your-secret-token"
+$env:PYDOLL_MCP_AUTH_TOKEN = python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 ```bash
 # Linux / macOS
-export PYDOLL_MCP_AUTH_TOKEN="your-secret-token"
+export PYDOLL_MCP_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 ```
+
+These commands use Python instead of shell or .NET cryptography APIs, so token
+generation behaves consistently across Windows PowerShell 5.1, PowerShell 7,
+Linux, and macOS. Keep the generated value available when configuring MCP client
+headers. Generate a new token whenever the server is restarted with a new client
+configuration.
 
 Start the server (HTTP, the default):
 
@@ -85,7 +91,7 @@ Health and diagnostics:
 
 Lifecycle:
 
-- `browser_launch`
+- `browser_launch` (supports `session_intent="user_authenticated"` + `site_hint`)
 - `browser_list`
 - `browser_close`
 - `browser_attach`
@@ -145,7 +151,7 @@ Elements:
 - `element_hover`, `element_scroll_into_view`, `keyboard_press`
 - semantic finders by role, text, label, placeholder, and test ID
 - `form_snapshot`, `form_errors`
-- `combobox_get_options`, `combobox_type_and_select`, `combobox_select_option`
+- `combobox_get_options`, `select_get_options`, `combobox_type_and_select`, `combobox_select_option`
 
 JavaScript and advanced helpers:
 
@@ -160,7 +166,8 @@ JavaScript and advanced helpers:
 - `download_expect`
 - `download_prepare`, `download_wait`, `download_list`, `download_get_info`
 - `upload_files`
-- `file_upload_state`, `artifact_get_paths`, `artifact_import`
+- `file_upload_state`, `artifact_get_paths`, `artifact_import`, `artifact_prepare_upload`
+- `profile_list`, `profile_promote`
 - `operation_cancel`
 
 Network inspection:
@@ -182,7 +189,11 @@ Agent-friendly model
 
 `page_get_interactive_summary` is the recommended first observation for modern frontend apps. It returns visible controls with roles, names, labels, nearby section context, bounding boxes, selector hints, enabled/editable state, and cached `element_id` values.
 
-`page_get_active_surface` detects the current modal, dialog, form, or main content surface. It returns fields, controls, primary and secondary actions, progress indicators, visible validation errors, pending required fields, and structured evidence. Scope `auto` prefers visible modals and dialogs over page content.
+`page_get_active_surface` detects the current modal, dialog, form, or main content surface. It returns fields, compact actionable controls, structural containers, primary and secondary actions, progress indicators, visible validation errors, pending required fields, and structured evidence. Scope `auto` prefers visible modals and dialogs over page content. Large select option lists are summarized with counts; use `select_get_options` or `combobox_get_options` when an agent needs the option list.
+
+Radio and checkbox questions are represented as `radio_group` or `checkbox_group` fields. Each option includes its own `element_id`, label, checked state, and disabled state. A required group appears once in `pending_required` while no option is selected. Dismissal actions such as Close and Cancel are never selected as `primary_action`.
+
+Use `form_select_choice(field_label, option_label)` for radio and checkbox questions. It restricts matching to the identified question, uses associated labels when needed, and returns success only after verifying the selected state.
 
 For multi-step form flows, use `form_fill_fields` to fill fields by intent (label, placeholder, selector matching) and `page_click_primary_action` to advance steps. `element_find_by_text_candidates` resolves duplicate visible text before clicking. `element_resolve_again` recovers stale element handles after page re-renders. `submission_wait_for_confirmation` polls for post-submit outcomes.
 
@@ -234,11 +245,21 @@ Runtime data is stored outside the repository by default:
 
 Expected subdirectories:
 
-- `profiles/`
+- `profiles/` (contains `index.json` with safe profile metadata)
 - `tmp/`
 - `downloads/`
 - `artifacts/`
 - `logs/`
+
+## Session continuity
+
+Persistent browser profiles preserve cookies, localStorage, and login state
+across launches. Use `session_intent="user_authenticated"` with `site_hint` in
+`browser_launch` to pick up an existing profile matching a domain.
+`profile_list` discovers available profiles and `profile_promote` promotes a
+preserved temporary profile to persistent. Profiles are indexed safely in
+`profiles/index.json` without exposing cookies, tokens, storage values, or
+absolute paths.
 
 ## Vendored Pydoll documentation
 

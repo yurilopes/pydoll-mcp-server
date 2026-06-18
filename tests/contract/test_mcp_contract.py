@@ -280,6 +280,7 @@ class TestMCPTools:
             'form_snapshot',
             'form_errors',
             'combobox_get_options',
+            'select_get_options',
             'combobox_type_and_select',
             'combobox_select_option',
             'file_upload_state',
@@ -290,9 +291,12 @@ class TestMCPTools:
             'element_find_by_text_candidates',
             'element_resolve_again',
             'form_fill_fields',
+            'form_select_choice',
             'page_click_primary_action',
             'artifact_prepare_upload',
             'submission_wait_for_confirmation',
+            'profile_list',
+            'profile_promote',
         }
         assert expected_p0.issubset(tool_names)
 

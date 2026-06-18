@@ -223,7 +223,8 @@ class TestBehavioralLocks:
 
         assert result['success'] is True
         assert lock_probe.events == [('enter', 'tab-1'), ('exit', 'tab-1')]
-        assert element.calls == ["this.scrollIntoView({block:'center'}); return true;", 'click']
+        assert 'const nativeChoice' in element.calls[0]
+        assert element.calls[1:] == ["this.scrollIntoView({block:'center'}); return true;", 'click']
 
     @pytest.mark.asyncio
     async def test_storage_set_operation_occurs_inside_tab_lock(self, monkeypatch: MonkeyPatch) -> None:

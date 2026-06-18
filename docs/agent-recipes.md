@@ -6,6 +6,21 @@ model.
 
 ## Open and inspect a page
 
+For a persistent session where the user expects continuity:
+
+```json
+{
+  "client_id": "agent",
+  "session_intent": "user_authenticated",
+  "site_hint": "linkedin.com"
+}
+```
+
+This reuses an existing matching profile so login state is preserved across
+launches. Use `profile_list` to discover available profiles.
+
+For disposable browsing where state should not persist:
+
 1. `browser_launch(client_id, headless=false, profile_mode="temporary")`
 2. `page_goto(client_id, tab_id, url)`
 3. `page_get_text(client_id, tab_id)`
@@ -66,6 +81,18 @@ The fill path uses native property setters and dispatches `input`, `change`, and
 The tool handles `aria-controls`, `role=listbox`, `role=option`, and portaled
 option containers.
 
+For native `select` elements with long option lists, keep the active surface
+compact and call `select_get_options` only when the options are needed:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "element_id": "el_country",
+  "max_options": 50
+}
+```
+
 ## Wait for state instead of sleeping
 
 Prefer condition waits over fixed sleeps:
@@ -121,9 +148,20 @@ custom JavaScript:
 }
 ```
 
-Call `page_get_active_surface`. The response includes fields, controls,
-primary and secondary actions, progress indicator, visible errors, and
-pending required fields.
+Call `page_get_active_surface`. The response includes fields, compact
+actionable controls, containers, primary and secondary actions, progress
+indicator, visible errors, and pending required fields. Treat `fields` as the
+source of truth for inputs and selects; option lists stay behind
+`select_get_options` or `combobox_get_options`.
+
+Radio and checkbox questions appear as grouped fields with an `options` list.
+Act on the chosen option's `element_id`; required groups remain in
+`pending_required` until selected. `primary_action` excludes modal dismissal
+actions such as Close and Cancel.
+
+Prefer `form_select_choice(field_label, option_label)` when selecting a radio
+or checkbox answer. The tool confines matching to the question group and
+verifies the checked state before reporting success.
 
 2. Fill fields by intent with `form_fill_fields`:
 
@@ -212,4 +250,3 @@ Returns the new `element_id` when a single safe candidate is found.
 
 Do not parse `value` as a JSON string. Use manual JavaScript only for diagnostics
 that the first-class tools cannot provide.
-

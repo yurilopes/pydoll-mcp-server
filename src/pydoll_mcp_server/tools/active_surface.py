@@ -25,6 +25,7 @@ async def page_get_active_surface(
     max_fields: int = 100,
     max_controls: int = 120,
     include_values: bool = False,
+    text_max_chars: int = 300,
 ) -> JsonObject:
     if scope not in VALID_SCOPES:
         return StructuredError(
@@ -33,6 +34,7 @@ async def page_get_active_surface(
 
     safe_max_fields = max(1, min(max_fields, 500))
     safe_max_controls = max(1, min(max_controls, 500))
+    safe_text_max_chars = max(50, min(text_max_chars, 2000))
 
     try:
         tab_info = get_registry().get_tab(client_id, tab_id)
@@ -45,6 +47,7 @@ async def page_get_active_surface(
             'max_fields': safe_max_fields,
             'max_controls': safe_max_controls,
             'include_values': include_values,
+            'text_max_chars': safe_text_max_chars,
         }
     )
 
@@ -72,7 +75,7 @@ def _build_response(
     max_fields: int,
     max_controls: int,
 ) -> JsonObject:
-    surface_fields = _deserialize_fields(
+    surface_fields = deserialize_surface_fields(
         get_array(data, 'fields', []),
         client_id,
         tab_id,
@@ -80,6 +83,12 @@ def _build_response(
     )
     surface_controls = _deserialize_controls(
         get_array(data, 'controls', []),
+        client_id,
+        tab_id,
+        generation,
+    )
+    surface_containers = _deserialize_controls(
+        get_array(data, 'containers', []),
         client_id,
         tab_id,
         generation,
@@ -125,6 +134,7 @@ def _build_response(
         },
         'fields': surface_fields,
         'controls': surface_controls,
+        'containers': surface_containers,
         'primary_action': primary,
         'secondary_actions': secondary,
         'progress': get_object(data, 'progress', {}),
@@ -132,7 +142,11 @@ def _build_response(
         'pending_required': get_array(data, 'pending_required', []),
         'review_text': get_array(data, 'review_text', []),
         'active_element': get_object(data, 'active_element', {}),
-        'count': {'fields': len(surface_fields), 'controls': len(surface_controls)},
+        'count': {
+            'fields': len(surface_fields),
+            'controls': len(surface_controls),
+            'containers': len(surface_containers),
+        },
         'partial': len(surface_fields) >= max_fields or len(surface_controls) >= max_controls,
         'warnings': get_array(data, 'warnings', []),
         'evidence': evidence,
@@ -140,7 +154,7 @@ def _build_response(
     return result
 
 
-def _deserialize_fields(
+def deserialize_surface_fields(
     raw_fields: JsonArray,
     client_id: str,
     tab_id: str,
@@ -149,7 +163,17 @@ def _deserialize_fields(
     out: JsonArray = []
     for item in raw_fields:
         field = require_json_object(item, 'surface field')
-        field['element_id'] = _cache_field_entry(client_id, tab_id, generation, field)
+        raw_options = get_array(field, 'options', [])
+        if raw_options:
+            options: JsonArray = []
+            for raw_option in raw_options:
+                option = require_json_object(raw_option, 'surface field option')
+                option['element_id'] = _cache_field_entry(client_id, tab_id, generation, option)
+                options.append(option)
+            field['options'] = options
+            field['element_id'] = ''
+        else:
+            field['element_id'] = _cache_field_entry(client_id, tab_id, generation, field)
         out.append(field)
     return out
 

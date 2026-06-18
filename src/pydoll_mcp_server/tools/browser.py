@@ -6,6 +6,7 @@ import asyncio
 
 from pydoll_mcp_server.browser.locks import get_lock_manager
 from pydoll_mcp_server.browser.models import ProfileMode
+from pydoll_mcp_server.browser.profile_index import get_profile_index
 from pydoll_mcp_server.browser.profiles import get_profile_manager
 from pydoll_mcp_server.browser.pydoll_compat import (
     create_chromium_options,
@@ -27,19 +28,89 @@ async def browser_launch(
     profile_id: str = '',
     proxy_server: str = '',
     proxy_bypass_list: str = '',
+    session_intent: str = '',
+    site_hint: str = '',
 ) -> JsonObject:
     logger = get_logger()
     registry = get_registry()
     profile_mgr = get_profile_manager()
+    profile_index = get_profile_index()
+    warnings: list[dict[str, object]] = []
+    matched_profile_id_for_reuse: str = ''
+    matched_client_for_reuse: str = ''
     proxy = None
+
     if proxy_server:
         try:
             proxy = validate_proxy(proxy_server, proxy_bypass_list)
         except StructuredError as exc:
             return exc.to_dict()
 
+    if session_intent == 'user_authenticated' and site_hint:
+        matched = profile_index.find_matching(client_id, site_hint, mode_filter='persistent')
+        if len(matched) == 1:
+            matched_profile_id_for_reuse = matched[0].profile_id
+            matched_client_for_reuse = matched[0].owner_client_id
+        elif len(matched) > 1:
+            persistent_profile_ids: JsonArray = [m.profile_id for m in matched[:5]]
+            persistent_details: JsonObject = {
+                'hint': 'profile_list',
+                'site_hint': site_hint,
+                'count': len(matched),
+                'candidate_profile_ids': persistent_profile_ids,
+            }
+            return StructuredError(
+                ErrorCode.AMBIGUOUS_PROFILE,
+                f'Multiple authenticated profiles match site_hint "{site_hint}". '
+                'Use profile_list to inspect candidates, then pass an explicit profile_id.',
+                details=persistent_details,
+                retryable=True,
+            ).to_dict()
+        else:
+            temp_matches = profile_index.find_matching(client_id, site_hint, mode_filter='temporary')
+            if temp_matches:
+                temporary_profile_ids: JsonArray = [m.profile_id for m in temp_matches[:3]]
+                temporary_details: JsonObject = {
+                    'recommended_action': 'profile_promote',
+                    'candidate_profile_ids': temporary_profile_ids,
+                    'site_hint': site_hint,
+                }
+                return StructuredError(
+                    ErrorCode.AMBIGUOUS_PROFILE,
+                    f'Temporary profile(s) exist for {site_hint} but are not persistent. '
+                    'Call profile_promote to promote one, then retry with the resulting profile_id.',
+                    details=temporary_details,
+                    retryable=True,
+                    recovery_hint='Choose a candidate profile_id and call profile_promote to make it persistent.',
+                ).to_dict()
+            warnings.append(
+                {
+                    'code': 'NO_AUTH_PROFILE',
+                    'message': f'No authenticated profile found for {site_hint}. '
+                    'A new persistent profile will be used. Login may be required.',
+                }
+            )
+
+    if profile_mode == 'temporary' and site_hint and session_intent == 'user_authenticated':
+        warnings.append(
+            {
+                'code': 'TEMPORARY_PROFILE_FOR_AUTH_SITE',
+                'message': f'Temporary profile used for authenticated site {site_hint}. Login state will be lost.',
+            }
+        )
+
     if profile_mode == 'temporary':
         profile = profile_mgr.create_temporary(client_id)
+    elif matched_profile_id_for_reuse:
+        profile = profile_mgr.reuse_existing(matched_profile_id_for_reuse, matched_client_for_reuse)
+        if not profile_mgr.lock(profile.profile_id, matched_client_for_reuse):
+            return StructuredError(
+                error_code=ErrorCode.RESOURCE_LOCKED,
+                message=f'Profile {profile.profile_id} is locked by another client',
+                retryable=True,
+                resource_state=ResourceState.UNKNOWN,
+                recovery_hint=('Wait for the other client to release the profile or use a different profile_id.'),
+            ).to_dict()
     elif profile_id:
         profile = profile_mgr.create_named(client_id, profile_id)
         if not profile_mgr.lock(profile.profile_id, client_id):
@@ -98,7 +169,7 @@ async def browser_launch(
         )
 
         logger.info(f'Browser launched: {browser_info.browser_id} for client {client_id}')
-        return {
+        result: JsonObject = {
             'success': True,
             'browser_id': browser_info.browser_id,
             'tab_id': tab_info.tab_id,
@@ -109,6 +180,11 @@ async def browser_launch(
             'proxy_scheme': proxy.scheme if proxy else '',
             'proxy_has_credentials': proxy.has_credentials if proxy else False,
         }
+        if warnings:
+            result['warnings'] = [
+                {'code': str(w.get('code', '')), 'message': str(w.get('message', ''))} for w in warnings
+            ]
+        return result
     except asyncio.TimeoutError:
         profile_mgr.unlock(profile.profile_id)
         return StructuredError(

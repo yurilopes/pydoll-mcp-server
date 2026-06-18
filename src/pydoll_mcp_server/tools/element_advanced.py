@@ -16,8 +16,9 @@ from pydoll_mcp_server.browser.script_utils import (
     extract_script_value,
 )
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonObject, get_string
+from pydoll_mcp_server.json_types import JsonObject, get_bool, get_object, get_string
 from pydoll_mcp_server.security.policy import is_sensitive_field
+from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.elements import element_find
 
@@ -161,11 +162,33 @@ async def keyboard_press(
 
 
 async def _set_checked(client_id: str, tab_id: str, element_id: str, checked: bool) -> JsonObject:
-    script = f"""if(!['checkbox','radio'].includes(this.type))return {{error:'not_checkable'}};
-    if(this.checked!=={str(checked).lower()}){{this.checked={str(checked).lower()};
-    this.dispatchEvent(new Event('input',{{bubbles:true}}));this.dispatchEvent(new Event('change',{{bubbles:true}}));}}
-    return {{checked:this.checked}};"""
-    return await _mutate(client_id, tab_id, element_id, script, 'checked')
+    element = await _get(client_id, tab_id, element_id)
+    if isinstance(element, dict):
+        return element
+    try:
+        async with tab_operation_lock(tab_id):
+            result = await set_choice_state(element, checked)
+        error = get_string(result, 'error', '')
+        if error:
+            message = (
+                'Radio options cannot be unchecked; select another option instead.'
+                if error == 'radio_cannot_be_unchecked'
+                else f'Choice interaction failed: {error}'
+            )
+            return StructuredError(
+                ErrorCode.INVALID_INPUT,
+                message,
+                details=get_object(result, 'diagnostic', {}),
+            ).to_dict()
+        return {
+            'success': True,
+            'element_id': element_id,
+            'checked': get_bool(result, 'checked'),
+            'verified': get_bool(result, 'verified'),
+            'strategy_used': get_string(result, 'strategy_used'),
+        }
+    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
+        return StructuredError(ErrorCode.EXECUTION_ERROR, f'checked failed: {exc}', retryable=True).to_dict()
 
 
 async def _get(client_id: str, tab_id: str, element_id: str) -> WebElement | JsonObject:

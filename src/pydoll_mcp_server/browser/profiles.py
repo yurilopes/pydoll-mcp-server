@@ -8,6 +8,7 @@ import time
 
 from pydoll_mcp_server.auth import ClientIdentity
 from pydoll_mcp_server.browser.models import ProfileInfo, ProfileMode, generate_id
+from pydoll_mcp_server.browser.profile_index import create_entry, get_profile_index
 from pydoll_mcp_server.config import get_config
 
 
@@ -36,6 +37,7 @@ class ProfileManager:
         )
         profile_dir.mkdir(parents=True, exist_ok=True)
         self._profiles[profile_id] = info
+        get_profile_index().upsert(profile_id, create_entry(client_id, info))
         return info
 
     def create_temporary(self, client_id: str) -> ProfileInfo:
@@ -51,6 +53,7 @@ class ProfileManager:
             path=tmp_dir,
         )
         self._profiles[profile_id] = info
+        get_profile_index().upsert(profile_id, create_entry(client_id, info))
         return info
 
     def create_named(self, client_id: str, profile_name: str) -> ProfileInfo:
@@ -68,6 +71,27 @@ class ProfileManager:
         )
         profile_dir.mkdir(parents=True, exist_ok=True)
         self._profiles[profile_id] = info
+        get_profile_index().upsert(profile_id, create_entry(client_id, info))
+        return info
+
+    def reuse_existing(self, matched_profile_id: str, matched_client_id: str) -> ProfileInfo:
+        config = get_config()
+        safe_client = ClientIdentity(matched_client_id).safe
+        prefix = f'prof_{safe_client}_'
+        safe_name = matched_profile_id.removeprefix(prefix)
+        if not safe_name or safe_name == matched_profile_id:
+            safe_name = matched_profile_id.replace('prof_', '', 1)
+        profile_dir = config.profiles_dir / safe_client / safe_name
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        if matched_profile_id in self._profiles:
+            return self._profiles[matched_profile_id]
+        info = ProfileInfo(
+            profile_id=matched_profile_id,
+            client_id=matched_client_id,
+            mode=ProfileMode.PERSISTENT,
+            path=str(profile_dir),
+        )
+        self._profiles[matched_profile_id] = info
         return info
 
     def lock(self, profile_id: str, owner: str) -> bool:

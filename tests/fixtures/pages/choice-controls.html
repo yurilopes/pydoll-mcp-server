@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Choice Controls</title>
+  <style>
+    input[type="radio"] { position: absolute; width: 1px; height: 1px; pointer-events: none; }
+    label { display: block; padding: 8px; }
+  </style>
+</head>
+<body>
+  <div role="dialog" aria-label="Easy Apply">
+    <fieldset>
+      <legend>How many years of experience do you have developing PowerBI solutions?</legend>
+      <label><input type="radio" name="powerbi" value="1">1</label>
+      <label><input type="radio" name="powerbi" value="2">2</label>
+      <label><input type="radio" name="powerbi" value="5-plus">5 or more</label>
+    </fieldset>
+  </div>
+</body>
+</html>

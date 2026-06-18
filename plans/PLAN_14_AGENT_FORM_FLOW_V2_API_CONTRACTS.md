@@ -91,7 +91,7 @@ When `include_values=true`:
 Tool:
 
 ```text
-page_get_active_surface(client_id, tab_id, scope="auto", max_fields=100, max_controls=120, include_values=false)
+page_get_active_surface(client_id, tab_id, scope="auto", max_fields=100, max_controls=120, include_values=false, text_max_chars=300)
 ```
 
 Parameters:
@@ -101,6 +101,8 @@ Parameters:
 - `max_fields`: clamp to 1 through 500.
 - `max_controls`: clamp to 1 through 500.
 - `include_values`: follows the shared value exposure rules.
+- `text_max_chars`: clamp to 50 through 2000. Applies to compact UI text
+  excerpts in controls, containers, progress, errors, and review text.
 
 Success response:
 
@@ -117,6 +119,7 @@ Success response:
   },
   "fields": [],
   "controls": [],
+  "containers": [],
   "primary_action": {},
   "secondary_actions": [],
   "progress": {"text": "Step 2 of 4", "current": 2, "total": 4},
@@ -124,7 +127,7 @@ Success response:
   "pending_required": [],
   "review_text": [],
   "active_element": {},
-  "count": {"fields": 0, "controls": 0},
+  "count": {"fields": 0, "controls": 0, "containers": 0},
   "partial": false,
   "warnings": [],
   "evidence": {}
@@ -140,6 +143,13 @@ Selection rules:
 - `viewport` includes visible controls intersecting the viewport.
 - `active_element_context` includes the active element, its closest form,
   modal, fieldset, section, or labelled group.
+- `fields` is the source of truth for inputs, selects, textareas, radios,
+  checkboxes, and comboboxes.
+- `controls` contains compact actionable controls only. Do not include large
+  regions just because they are focusable.
+- `containers` contains compact structural region excerpts.
+- Native select option lists are summarized with counts. Use
+  `select_get_options` to retrieve options.
 
 ## Text Candidate Contract
 
@@ -512,4 +522,3 @@ Success response:
 
 Base64 is returned only when `return_base64=true`. It remains size-limited and
 should be used for debugging only.
-
