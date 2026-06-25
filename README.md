@@ -183,12 +183,19 @@ Network inspection:
 - `network_get_response`
 - `network_summary`, `network_clear`
 - `network_wait_for_request`, `network_wait_for_response`
+- `websocket_list`
+- `websocket_get`
+- `websocket_frames_list`
 
 `network_list` is a compact, sanitized index. `network_get_request` returns the raw
 request details captured by Chromium, including request headers and payload, without
-redaction. `network_get_response` retrieves the response body separately. Raw request
-data can contain credentials and personal data. Do not log it automatically, and call
-`network_clear` after analysis when retention is unnecessary.
+redaction. `network_get_response` retrieves the response body separately.
+`websocket_list`, `websocket_get`, and `websocket_frames_list` expose Chromium
+`Network.webSocket*` events as first-class captures, including handshakes, sent frames,
+received frames, frame errors, close events, payload truncation metadata, and optional
+raw output. Raw request and WebSocket data can contain credentials and personal data.
+Do not log it automatically, and call `network_clear` after analysis when retention is
+unnecessary.
 
 `http_request` performs a direct HTTP(S) request using the owning browser tab's current
 cookies, user agent, and supported HTTP(S) proxy. It is not subject to page CORS.

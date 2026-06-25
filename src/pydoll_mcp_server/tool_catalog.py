@@ -129,6 +129,7 @@ from pydoll_mcp_server.tools.waits import (
     page_wait_for_url,
     page_wait_text_gone,
 )
+from pydoll_mcp_server.tools.websocket import websocket_frames_list, websocket_get, websocket_list
 
 Tool = Callable[..., object]
 
@@ -186,6 +187,9 @@ TOOLS: tuple[Tool, ...] = (
     network_list,
     network_get_response,
     network_get_request,
+    websocket_list,
+    websocket_get,
+    websocket_frames_list,
     network_replay_request,
     console_enable,
     console_disable,

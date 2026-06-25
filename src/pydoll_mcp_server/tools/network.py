@@ -34,6 +34,7 @@ from pydoll_mcp_server.json_types import (
     normalize_json_value,
     require_json_object,
 )
+from pydoll_mcp_server.tools.websocket import WEBSOCKET_NETWORK_EVENTS, capture_websocket_event
 
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _URL_REDACT = re.compile(r'([?&])(token|key|secret|auth|password|api_key|apikey)=[^&\s]*', re.I)
@@ -129,6 +130,12 @@ async def network_enable(client_id: str, tab_id: str, max_events: int = 1000) ->
                 await capture_network_event(current, event)
 
             state.network_callback_ids.append(await register_network_callback(tab, event_name, callback))
+        for event_name in WEBSOCKET_NETWORK_EVENTS:
+
+            async def websocket_callback(event: object, current: str = tab_id) -> None:
+                await capture_websocket_event(current, event)
+
+            state.network_callback_ids.append(await register_network_callback(tab, event_name, websocket_callback))
         state.network_enabled = True
         _trace_event(client_id, 'network_enable', 'success', tab_id)
         return {'success': True, 'tab_id': tab_id, 'network_enabled': True}
