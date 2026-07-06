@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,6 +12,15 @@ from pydoll_mcp_server.json_types import JsonObject
 from tests.typing_helpers import string_at
 
 pytestmark = [pytest.mark.unit]
+
+
+@pytest.fixture(autouse=True)
+def clear_config_cache_between_tests() -> Generator[None, None, None]:
+    from pydoll_mcp_server.config import get_config
+
+    get_config.cache_clear()
+    yield
+    get_config.cache_clear()
 
 
 class TestElementScreenshotSecurity:
@@ -25,9 +35,9 @@ class TestElementScreenshotSecurity:
 
         with (
             patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
-            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
+            patch('pydoll_mcp_server.tools.element_screenshot.get_registry') as mock_registry,
             patch(
-                'pydoll_mcp_server.tools.elements.resolve_element',
+                'pydoll_mcp_server.tools.element_screenshot.resolve_element',
                 return_value=mock_element,
             ),
         ):
@@ -62,9 +72,9 @@ class TestElementScreenshotSecurity:
 
         with (
             patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
-            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
+            patch('pydoll_mcp_server.tools.element_screenshot.get_registry') as mock_registry,
             patch(
-                'pydoll_mcp_server.tools.elements.resolve_element',
+                'pydoll_mcp_server.tools.element_screenshot.resolve_element',
                 return_value=mock_element,
             ),
         ):
@@ -96,9 +106,9 @@ class TestElementScreenshotSecurity:
 
         with (
             patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
-            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
+            patch('pydoll_mcp_server.tools.element_screenshot.get_registry') as mock_registry,
             patch(
-                'pydoll_mcp_server.tools.elements.resolve_element',
+                'pydoll_mcp_server.tools.element_screenshot.resolve_element',
                 return_value=mock_element,
             ),
         ):
@@ -131,9 +141,9 @@ class TestElementScreenshotSecurity:
 
         with (
             patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
-            patch('pydoll_mcp_server.tools.elements.get_registry') as mock_registry,
+            patch('pydoll_mcp_server.tools.element_screenshot.get_registry') as mock_registry,
             patch(
-                'pydoll_mcp_server.tools.elements.resolve_element',
+                'pydoll_mcp_server.tools.element_screenshot.resolve_element',
                 return_value=mock_element,
             ),
         ):

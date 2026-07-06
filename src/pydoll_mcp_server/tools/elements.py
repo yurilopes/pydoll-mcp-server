@@ -8,12 +8,11 @@ from pydoll_mcp_server.browser.pydoll_compat import (
     get_element_text,
 )
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.config import get_config, get_limits_config, get_timeout_config
+from pydoll_mcp_server.config import get_limits_config, get_timeout_config
 from pydoll_mcp_server.dom.element_cache import get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_bool, get_object, get_string
 from pydoll_mcp_server.logging import get_logger
-from pydoll_mcp_server.security.paths import validate_artifact_path
 from pydoll_mcp_server.security.policy import is_sensitive_field
 from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import (
@@ -22,6 +21,7 @@ from pydoll_mcp_server.tools.element_resolver import (
     safe_is_visible,
     safe_text,
 )
+from pydoll_mcp_server.tools.element_screenshot import element_screenshot as element_screenshot
 from pydoll_mcp_server.tools.form_controls import fill_element_framework_safe
 
 
@@ -332,79 +332,3 @@ async def element_get_attribute(
         'exists': value is not None,
         'redacted': redacted,
     }
-
-
-async def element_screenshot(
-    client_id: str,
-    tab_id: str,
-    element_id: str,
-    path: str = '',
-    return_base64: bool = False,
-) -> JsonObject:
-    registry = get_registry()
-    config = get_config()
-
-    try:
-        tab_info = registry.get_tab(client_id, tab_id)
-    except StructuredError as e:
-        return e.to_dict()
-
-    element = await resolve_element(tab_info, element_id)
-    if element is None:
-        return StructuredError(
-            error_code=ErrorCode.STALE_ELEMENT,
-            message=f'Element {element_id} is stale',
-            retryable=False,
-        ).to_dict()
-
-    safe_path: str | None = None
-    if path:
-        safe_path = validate_artifact_path(path, config)
-        if safe_path is None:
-            return StructuredError(
-                error_code=ErrorCode.PERMISSION_DENIED,
-                message=f'Screenshot path not allowed: {path}',
-                retryable=False,
-                recovery_hint='Use a relative path (stored in artifacts dir) or a path in an allowed directory.',
-            ).to_dict()
-
-    if not safe_path and not return_base64:
-        import uuid
-
-        screenshots_dir = config.artifacts_dir / client_id
-        screenshots_dir.mkdir(parents=True, exist_ok=True)
-        safe_path = str(screenshots_dir / f'screenshot_{uuid.uuid4().hex[:12]}.png')
-
-    try:
-        async with tab_operation_lock(tab_id):
-            if safe_path:
-                await element.take_screenshot(path=safe_path, as_base64=False)
-                file_size = 0
-                try:
-                    from pathlib import Path
-
-                    file_size = Path(safe_path).stat().st_size
-                except OSError:
-                    pass
-                return {
-                    'success': True,
-                    'path': safe_path,
-                    'mime_type': 'image/png',
-                    'return_base64': False,
-                    'data': '',
-                    'size': file_size,
-                    'evidence': {},
-                }
-            result = await element.take_screenshot(as_base64=True)
-            return {
-                'success': True,
-                'data': result if isinstance(result, str) else '',
-                'return_base64': True,
-                'evidence': {},
-            }
-    except Exception as e:
-        return StructuredError(
-            error_code=ErrorCode.EXECUTION_ERROR,
-            message=f'Element screenshot failed: {e}',
-            retryable=True,
-        ).to_dict()

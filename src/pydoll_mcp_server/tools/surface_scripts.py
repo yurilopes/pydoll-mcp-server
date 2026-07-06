@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pydoll_mcp_server.tools.surface_group_scripts import GROUPED_FIELDS_SCRIPT
+from pydoll_mcp_server.tools.surface_selection_scripts import SURFACE_SELECTION_SCRIPT
 
 
 def surface_script(payload_json: str) -> str:
@@ -178,89 +179,7 @@ function findModalOverlay() {{
     }}
     return null;
 }}
-let surface = null;
-let surfaceScope = scope;
-let surfaceReason = '';
-let surfaceTag = '';
-let surfaceRole = '';
-let surfaceLabel = '';
-let surfaceSelector = '';
-
-if (scope === 'auto' || scope === 'modal' || scope === 'dialog') {{
-    const dialog = findTopmostDialog() || findModalOverlay();
-    if (dialog) {{
-        surface = dialog;
-        surfaceScope = dialog.getAttribute('aria-modal') === 'true' ? 'modal' : 'dialog';
-        surfaceReason = dialog.getAttribute('aria-modal') === 'true' ? 'topmost aria-modal dialog' : 'topmost visible dialog';
-        surfaceTag = dialog.tagName.toLowerCase();
-        surfaceRole = dialog.getAttribute('role') || 'dialog';
-        surfaceLabel = dialog.getAttribute('aria-label') || '';
-        surfaceSelector = selectorHint(dialog);
-    }} else if (scope !== 'auto') {{
-        return {{ surface_scope: scope, surface_reason: 'no visible ' + scope + ' found', fields: [], controls: [], errors: [], warnings: ['No visible ' + scope + ' element found.'] }};
-    }}
-}}
-if (!surface && (scope === 'auto' || scope === 'form')) {{
-    const forms = [...document.querySelectorAll('form')].filter(visible);
-    if (forms.length) {{
-        surface = forms[0];
-        surfaceScope = 'form';
-        surfaceReason = 'first visible form';
-        surfaceTag = 'form';
-        surfaceRole = 'form';
-        surfaceLabel = forms[0].getAttribute('aria-label') || '';
-        surfaceSelector = selectorHint(forms[0]);
-    }} else if (scope !== 'auto') {{
-        return {{ surface_scope: scope, surface_reason: 'no visible form found', fields: [], controls: [], errors: [], warnings: ['No visible form element found.'] }};
-    }}
-}}
-if (!surface && (scope === 'auto' || scope === 'main')) {{
-    const main = document.querySelector('main, [role="main"]');
-    if (main && visible(main)) {{
-        surface = main;
-        surfaceScope = 'main';
-        surfaceReason = 'main element';
-        surfaceTag = main.tagName.toLowerCase();
-        surfaceRole = 'main';
-        surfaceLabel = '';
-        surfaceSelector = selectorHint(main);
-    }} else if (scope !== 'auto') {{
-        return {{ surface_scope: scope, surface_reason: 'no visible main element found', fields: [], controls: [], errors: [], warnings: ['No visible main element found.'] }};
-    }}
-}}
-if (!surface && scope === 'auto') {{
-    surface = document.body;
-    surfaceScope = 'viewport';
-    surfaceReason = 'body fallback';
-    surfaceTag = 'body';
-    surfaceRole = '';
-    surfaceLabel = '';
-    surfaceSelector = '';
-}}
-if (!surface && scope === 'viewport') {{
-    surface = document.body;
-    surfaceScope = 'viewport';
-    surfaceReason = 'viewport scope';
-    surfaceTag = 'body';
-    surfaceRole = '';
-    surfaceLabel = '';
-    surfaceSelector = '';
-}}
-if (!surface && scope === 'active_element_context') {{
-    let active = document.activeElement;
-    if (active) {{
-        surface = active.closest('form, [role="dialog"], fieldset, section, article') || document.body;
-        surfaceScope = 'active_element_context';
-        surfaceReason = 'active element context';
-        surfaceTag = surface.tagName.toLowerCase();
-        surfaceRole = surface.getAttribute('role') || '';
-        surfaceLabel = surface.getAttribute('aria-label') || '';
-        surfaceSelector = selectorHint(surface);
-    }}
-}}
-if (!surface) {{
-    return {{ surface_scope: scope, surface_reason: 'unable to determine surface', fields: [], controls: [], errors: [], warnings: ['Unable to determine active surface for scope: ' + scope] }};
-}}
+{SURFACE_SELECTION_SCRIPT}
 {GROUPED_FIELDS_SCRIPT}
 function collectControls() {{
     const controls = [];

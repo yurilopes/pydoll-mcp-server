@@ -10,11 +10,13 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from typing import Protocol
 from unittest.mock import patch
 
 import pytest
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.testclient import TestClient
+from starlette.types import ASGIApp
 
 from pydoll_mcp_server.json_types import JsonObject, require_json_object
 
@@ -37,6 +39,29 @@ def _route_has_path(route: BaseRoute, path: str) -> bool:
     return isinstance(route, Route | Mount) and route.path == path
 
 
+class _TestResponse(Protocol):
+    @property
+    def status_code(self) -> int: ...
+
+    def json(self) -> object: ...
+
+
+class _TestHttpClient(Protocol):
+    def get(self, url: str) -> _TestResponse: ...
+
+    def post(
+        self,
+        url: str,
+        *,
+        json: JsonObject | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> _TestResponse: ...
+
+
+def _test_client(app: ASGIApp) -> _TestHttpClient:
+    return TestClient(app)
+
+
 class TestAppTransport:
     def test_create_app_with_token(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
@@ -50,10 +75,10 @@ class TestAppTransport:
             from pydoll_mcp_server.server import create_app
 
             app = create_app()
-            client = TestClient(app)
+            client = _test_client(app)
             response = client.get('/health')
             assert response.status_code == 200
-            data = response.json()
+            data = require_json_object(response.json(), 'health response')
             assert data['status'] == 'ok'
             assert 'version' in data
 
@@ -62,7 +87,7 @@ class TestAppTransport:
             from pydoll_mcp_server.server import create_app
 
             app = create_app()
-            client = TestClient(app)
+            client = _test_client(app)
             response = client.get('/health')
             data = response.json()
             assert 'token' not in str(data).lower()
@@ -72,7 +97,7 @@ class TestAppTransport:
             from pydoll_mcp_server.server import create_app
 
             app = create_app()
-            client = TestClient(app)
+            client = _test_client(app)
             response = client.post('/mcp', json={})
             assert response.status_code == 401
 
@@ -95,7 +120,7 @@ class TestAppTransport:
             from pydoll_mcp_server.server import create_app
 
             app = create_app()
-            client = TestClient(app)
+            client = _test_client(app)
             response = client.post(
                 '/mcp/',
                 json={},

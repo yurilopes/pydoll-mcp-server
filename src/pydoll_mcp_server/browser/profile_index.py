@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from pydoll_mcp_server.browser.models import ProfileInfo, ProfileMode
 from pydoll_mcp_server.config import get_config
+from pydoll_mcp_server.json_types import JsonObject, normalize_json_value
 
 
 @dataclass
@@ -27,7 +28,7 @@ class ProfileIndexEntry:
     path_kind: str = 'managed_persistent'
     is_locked: bool = False
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JsonObject:
         return {
             'profile_id': self.profile_id,
             'owner_client_id': self.owner_client_id,
@@ -45,7 +46,7 @@ class ProfileIndexEntry:
     def from_dict(data: object) -> ProfileIndexEntry:
         if not _is_dict_obj(data):
             return ProfileIndexEntry(profile_id='', owner_client_id='', mode='', created_at=0.0)
-        d: dict[str, object] = {str(k): v for k, v in data.items()}
+        d: JsonObject = {str(k): normalize_json_value(v) for k, v in data.items()}
         return ProfileIndexEntry(
             profile_id=str(d.get('profile_id', '')),
             owner_client_id=str(d.get('owner_client_id', '')),

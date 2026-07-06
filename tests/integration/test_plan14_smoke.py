@@ -51,7 +51,7 @@ async def test_multi_step_form_flow_without_js_evaluate() -> None:
         from pydoll_mcp_server.tools.browser import browser_close, browser_launch
         from pydoll_mcp_server.tools.elements import element_click, element_find
         from pydoll_mcp_server.tools.files import upload_files
-        from pydoll_mcp_server.tools.form_fill import form_fill_fields
+        from pydoll_mcp_server.tools.form_fill import FormFillField, form_fill_fields
         from pydoll_mcp_server.tools.page import page_goto
         from pydoll_mcp_server.tools.primary_action import page_click_primary_action
         from pydoll_mcp_server.tools.submission import submission_wait_for_confirmation
@@ -89,7 +89,7 @@ async def test_multi_step_form_flow_without_js_evaluate() -> None:
             )
             assert surface.get('success') is True
 
-            contact_fields: list[dict[str, object]] = [
+            contact_fields: list[FormFillField] = [
                 {'label_contains': 'Full Name', 'value': 'John Doe'},
                 {'label_contains': 'Email', 'value': 'john@example.com'},
                 {'label_contains': 'Phone', 'value': '+1 555-0000'},

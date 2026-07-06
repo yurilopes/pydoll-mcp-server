@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TypedDict
 
 from pydoll_mcp_server.browser.locks import get_lock_manager
 from pydoll_mcp_server.browser.models import ProfileMode
@@ -21,6 +22,11 @@ from pydoll_mcp_server.logging import get_logger
 from pydoll_mcp_server.security.proxy import validate_proxy
 
 
+class BrowserLaunchWarning(TypedDict):
+    code: str
+    message: str
+
+
 async def browser_launch(
     client_id: str,
     headless: bool = False,
@@ -35,7 +41,7 @@ async def browser_launch(
     registry = get_registry()
     profile_mgr = get_profile_manager()
     profile_index = get_profile_index()
-    warnings: list[dict[str, object]] = []
+    warnings: list[BrowserLaunchWarning] = []
     matched_profile_id_for_reuse: str = ''
     matched_client_for_reuse: str = ''
     proxy = None
@@ -182,9 +188,7 @@ async def browser_launch(
             'proxy_has_credentials': proxy.has_credentials if proxy else False,
         }
         if warnings:
-            result['warnings'] = [
-                {'code': str(w.get('code', '')), 'message': str(w.get('message', ''))} for w in warnings
-            ]
+            result['warnings'] = [_warning_to_json(warning) for warning in warnings]
         return result
     except asyncio.TimeoutError:
         profile_mgr.unlock(profile.profile_id)
@@ -205,6 +209,10 @@ async def browser_launch(
             retryable=True,
             details={'error': message},
         ).to_dict()
+
+
+def _warning_to_json(warning: BrowserLaunchWarning) -> JsonObject:
+    return {'code': warning['code'], 'message': warning['message']}
 
 
 async def browser_list(client_id: str) -> JsonObject:

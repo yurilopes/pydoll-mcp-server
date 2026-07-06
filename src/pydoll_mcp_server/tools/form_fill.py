@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import TypedDict
 
 from pydoll.exceptions import PydollException
 
@@ -11,13 +12,25 @@ from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, normalize_json_value
+
+
+class FormFillField(TypedDict, total=False):
+    label_contains: str
+    question_contains: str
+    placeholder_contains: str
+    selector: str
+    role: str
+    name: str
+    value: str | int | float | bool | None
+    checked: bool
+    option_text: str
 
 
 async def form_fill_fields(
     client_id: str,
     tab_id: str,
-    fields: list[dict[str, object]],
+    fields: list[FormFillField],
     scope: str = 'auto',
     validate: bool = True,
     include_values: bool = False,
@@ -28,7 +41,7 @@ async def form_fill_fields(
         return exc.to_dict()
 
     try:
-        normalized_fields: list[dict[str, object]] = [{str(k): v for k, v in field.items()} for field in fields]
+        normalized_fields = [_field_to_json(field) for field in fields]
     except (TypeError, ValueError, AttributeError) as exc:
         return StructuredError(
             ErrorCode.INVALID_INPUT,
@@ -96,6 +109,10 @@ async def form_fill_fields(
         'warnings': list(warnings),
         'evidence': evidence,
     }
+
+
+def _field_to_json(field: FormFillField) -> JsonObject:
+    return {str(key): normalize_json_value(value, f'fields.{key}') for key, value in field.items()}
 
 
 def _fill_script(payload_json: str) -> str:

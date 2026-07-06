@@ -12,7 +12,6 @@ from pydoll_mcp_server.dom.tree import build_page_tree, page_get_text, page_scre
 from pydoll_mcp_server.security.proxy import proxy_validate
 from pydoll_mcp_server.tools.active_surface import page_get_active_surface
 from pydoll_mcp_server.tools.browser import browser_close, browser_launch, browser_list, proxy_get
-from pydoll_mcp_server.tools.click_effects import element_resolve_again
 from pydoll_mcp_server.tools.diagnostics import (
     browser_attach,
     diagnostics_snapshot,
@@ -37,6 +36,7 @@ from pydoll_mcp_server.tools.element_advanced import (
     element_uncheck,
     keyboard_press,
 )
+from pydoll_mcp_server.tools.element_reresolution import element_resolve_again
 from pydoll_mcp_server.tools.elements import (
     element_click,
     element_fill,
