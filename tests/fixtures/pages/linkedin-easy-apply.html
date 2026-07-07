@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>LinkedIn Easy Apply Fixture</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .modal { border: 1px solid #ccc; padding: 20px; width: 760px; }
+    .hidden { display: none; }
+    .toast { position: fixed; right: 20px; bottom: 20px; border: 1px solid #999; padding: 8px; }
+    input[type="radio"] { width: 0; height: 0; opacity: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <aside class="jobs-search-results-list">
+      <ul>
+        <li class="jobs-search-results__list-item" data-job-id="111">
+          <a href="https://www.linkedin.com/jobs/view/111/">Senior Full Stack Developer</a>
+          <p>TSR Consulting</p>
+          <p>Estados Unidos (Remoto)</p>
+          <p>Candidatura simplificada</p>
+        </li>
+        <li class="jobs-search-results__list-item" data-job-id="222">
+          <a href="https://www.linkedin.com/jobs/view/222/">AI Automation Engineer</a>
+          <p>Example AI</p>
+          <p>Brazil (Remote)</p>
+          <p>Continuar</p>
+        </li>
+        <li class="jobs-search-results__list-item" data-job-id="333">
+          <a href="https://www.linkedin.com/jobs/view/333/">Closed Developer Role</a>
+          <p>Closed Corp</p>
+          <p>Europe Remote</p>
+          <p>No longer accepting applications</p>
+        </li>
+      </ul>
+      <button aria-label="Next page">Next</button>
+    </aside>
+
+    <h1>Senior Full Stack Developer</h1>
+    <a class="company">TSR Consulting</a>
+    <p>Estados Unidos (Remoto) · Contrato</p>
+    <button aria-label="Usar a candidatura simplificada para esta vaga">Candidatura simplificada</button>
+    <button id="continue-button" class="hidden" aria-label="Continuar candidatura simplificada">Continuar</button>
+    <section class="description">
+      W2 Opening. Only GC Holders & US Citizen. React, Python, FastAPI, PostgreSQL.
+    </section>
+    <section id="application-status" class="hidden">
+      <p>Se candidatou agora</p>
+      <h2>Status da candidatura</h2>
+      <p>Candidatura enviada</p>
+      <p>agora</p>
+    </section>
+  </main>
+
+  <div id="easy-apply" class="modal hidden" role="dialog" aria-modal="true">
+    <h2>Candidate-se à empresa TSR Consulting</h2>
+    <div id="step-contact">
+      <p>1 de 4 páginas</p>
+      <h3>Contact info</h3>
+      <label>Email address*
+        <select required>
+          <option selected>yuh.lopes@gmail.com</option>
+        </select>
+      </label>
+      <label>Código do país*
+        <select required>
+          <option value="ad">Andorra (+376)</option>
+          <option value="br" selected>Brasil (+55)</option>
+          <option value="us">Estados Unidos (+1)</option>
+        </select>
+      </label>
+      <label>Mobile phone number*
+        <input type="tel" value="+5521998330989" required>
+      </label>
+      <button>Avançar</button>
+    </div>
+
+    <div id="step-resume" class="hidden">
+      <p>2 de 4 páginas</p>
+      <h3>Resume*</h3>
+      <p>Selecione ou carregue um currículo no formato DOC, DOCX ou PDF com menos de 2 MB</p>
+      <p>PDF Yuri_Abreu__old_resume_a.pdf</p>
+      <p>PDF Yuri_Abreu__old_resume_b.pdf</p>
+      <button>Carregar currículo</button>
+      <input class="hidden" type="file" accept="application/pdf" multiple>
+      <button>Voltar</button>
+      <button>Avançar</button>
+    </div>
+
+    <div id="step-questions" class="hidden">
+      <p>3 de 4 páginas</p>
+      <h3>Additional Questions</h3>
+      <div>
+        <label>How many years of work experience do you have with React.js?*</label>
+        <input type="text" required>
+      </div>
+      <div>
+        <label>How many years of work experience do you have with Python (Programming Language)?*</label>
+        <input type="text" required>
+      </div>
+      <div>
+        <label>Are you comfortable working on W2 (no C2C OR 1099)? Only GC Holders & US Citizen*</label>
+        <p>Yes</p>
+        <input type="radio" name="w2">
+        <p>No</p>
+        <input type="radio" name="w2">
+      </div>
+      <button>Voltar</button>
+      <button>Avaliar</button>
+    </div>
+
+    <div id="step-review" class="hidden">
+      <p>4 de 4 páginas</p>
+      <h3>Revise sua candidatura</h3>
+      <p>Resume</p>
+      <p>PDF Yuri_Abreu__senior_full_stack_developer__tsr_consulting.pdf</p>
+      <p>Are you comfortable working on W2 (no C2C OR 1099)? Only GC Holders & US Citizen</p>
+      <p>No</p>
+      <button>Editar</button>
+      <button>Enviar candidatura</button>
+    </div>
+  </div>
+
+  <div id="save-prompt" class="modal hidden" role="dialog">
+    <h2>Salvar esta candidatura?</h2>
+    <button>Descartar</button>
+    <button>Salvar</button>
+  </div>
+
+  <div class="toast hidden" role="status">
+    O currículo foi carregado
+    <button>Fechar</button>
+  </div>
+</body>
+</html>

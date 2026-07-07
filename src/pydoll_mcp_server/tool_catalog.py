@@ -79,6 +79,24 @@ from pydoll_mcp_server.tools.inspection import (
     console_list,
 )
 from pydoll_mcp_server.tools.javascript import js_evaluate, js_evaluate_readonly
+from pydoll_mcp_server.tools.linkedin import (
+    linkedin_easy_apply_click_next,
+    linkedin_easy_apply_fill_questions,
+    linkedin_easy_apply_handle_save_prompt,
+    linkedin_easy_apply_open,
+    linkedin_easy_apply_snapshot,
+    linkedin_easy_apply_submit,
+    linkedin_easy_apply_upload_resume,
+    linkedin_easy_apply_wait_ready,
+    linkedin_job_snapshot,
+)
+from pydoll_mcp_server.tools.linkedin_search import (
+    linkedin_application_evidence,
+    linkedin_jobs_open_result,
+    linkedin_jobs_page_snapshot,
+    linkedin_jobs_search,
+    linkedin_jobs_search_results,
+)
 from pydoll_mcp_server.tools.network import (
     network_clear,
     network_disable,
@@ -262,6 +280,20 @@ TOOLS: tuple[Tool, ...] = (
     submission_wait_for_confirmation,
     profile_list,
     profile_promote,
+    linkedin_job_snapshot,
+    linkedin_easy_apply_open,
+    linkedin_easy_apply_snapshot,
+    linkedin_easy_apply_wait_ready,
+    linkedin_easy_apply_upload_resume,
+    linkedin_easy_apply_click_next,
+    linkedin_easy_apply_fill_questions,
+    linkedin_easy_apply_handle_save_prompt,
+    linkedin_easy_apply_submit,
+    linkedin_jobs_page_snapshot,
+    linkedin_jobs_open_result,
+    linkedin_application_evidence,
+    linkedin_jobs_search,
+    linkedin_jobs_search_results,
 )
 
 

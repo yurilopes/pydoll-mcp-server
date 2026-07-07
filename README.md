@@ -173,6 +173,34 @@ JavaScript and advanced helpers:
 - `operation_cancel`
 - `http_request`
 
+LinkedIn Easy Apply helpers:
+
+- `linkedin_jobs_search`
+- `linkedin_jobs_search_results`
+- `linkedin_jobs_page_snapshot`
+- `linkedin_jobs_open_result`
+- `linkedin_application_evidence`
+- `linkedin_job_snapshot`
+- `linkedin_easy_apply_open`
+- `linkedin_easy_apply_snapshot`
+- `linkedin_easy_apply_wait_ready`
+- `linkedin_easy_apply_upload_resume`
+- `linkedin_easy_apply_click_next`
+- `linkedin_easy_apply_fill_questions`
+- `linkedin_easy_apply_handle_save_prompt`
+- `linkedin_easy_apply_submit`
+
+The LinkedIn helpers are browser automation helpers only. They do not generate
+resumes, choose answers, or integrate with external application trackers.
+`linkedin_jobs_search` builds and opens LinkedIn Jobs search URLs with keyword,
+location, remote-work, Easy Apply, date posted, experience level, job type, geo
+ID, pagination, and sort filters, then returns compact job results from the
+current page. Search result helpers can open a visible result in the same tab,
+inspect the search list plus detail panel, and return compact application
+evidence for external trackers.
+`linkedin_easy_apply_submit` refuses to submit unless `confirm_submit=true` is
+provided and the current modal is a verified final submit step.
+
 Network inspection:
 
 - `network_enable`
