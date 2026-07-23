@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LinkedIn Inline Easy Apply Fixture</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .hidden { display: none; }
+    #easy-apply-form { border: 1px solid #ccc; padding: 20px; width: 720px; }
+    input[type="radio"] { width: 0; height: 0; opacity: 0; }
+    [role="status"] { border: 1px solid #999; padding: 8px; }
+  </style>
+</head>
+<body>
+  <main id="job-page">
+    <h1>Automation Engineer</h1>
+    <p class="company">Example Automation</p>
+    <p>United States (Remote)</p>
+  </main>
+
+  <form id="easy-apply-form" class="jobs-easy-apply-form">
+    <section id="step-questions">
+      <p>3 of 4 pages</p>
+      <h2>Additional Questions</h2>
+      <div class="question">
+        <label>How many years of work experience do you have with UiPath?</label>
+        <input id="uipath-years" type="text" required>
+      </div>
+      <div class="question">
+        <label>How many years of work experience do you have with Python (Programming Language)?</label>
+        <input id="python-years" type="text" required>
+      </div>
+      <div class="question">
+        <label>Have you written your own code in Python (Programming Language)?</label>
+        <input id="python-own-code" type="text" required>
+      </div>
+      <div class="question">
+        <label>Are you comfortable working on W2 (no C2C OR 1099)?</label>
+        <p>Yes</p>
+        <input id="w2-yes" type="radio" name="w2" value="yes">
+        <p>No</p>
+        <input id="w2-no" type="radio" name="w2" value="no">
+      </div>
+      <button id="review-button" type="button">Review</button>
+    </section>
+    <section id="step-review" class="hidden">
+      <p>4 of 4 pages</p>
+      <h2>Review</h2>
+      <p>PDF Yuri_Abreu__automation_engineer__example_automation.pdf</p>
+      <div id="review-answers"></div>
+      <button id="submit-button" type="button">Submit application</button>
+    </section>
+  </form>
+
+  <div id="confirmation" class="hidden">
+    <p>Application submitted</p>
+    <p>just now</p>
+  </div>
+
+  <script>
+    const form = document.getElementById('easy-apply-form');
+    const questions = document.getElementById('step-questions');
+    const review = document.getElementById('step-review');
+    const confirmation = document.getElementById('confirmation');
+    const reviewButton = document.getElementById('review-button');
+    const submitButton = document.getElementById('submit-button');
+    reviewButton.addEventListener('click', () => {
+      document.getElementById('review-answers').innerHTML = [
+        ['How many years of work experience do you have with UiPath?', document.getElementById('uipath-years').value],
+        ['How many years of work experience do you have with Python (Programming Language)?', document.getElementById('python-years').value],
+        ['Have you written your own code in Python (Programming Language)?', document.getElementById('python-own-code').value],
+      ].map(([question, answer]) => `<p>${question}</p><p>${answer}</p>`).join('');
+      questions.classList.add('hidden');
+      review.classList.remove('hidden');
+    });
+    submitButton.addEventListener('click', () => {
+      form.classList.add('hidden');
+      confirmation.classList.remove('hidden');
+    });
+  </script>
+</body>
+</html>

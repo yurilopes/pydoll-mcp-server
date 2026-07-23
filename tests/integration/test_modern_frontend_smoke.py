@@ -79,6 +79,14 @@ async def test_agent_modern_frontend_workflow_without_custom_js() -> None:
         assert mode['success'] is True
         assert (await page_wait_for_text('modern-smoke', info.tab_id, 'Selected mode: Freelance'))['success'] is True
 
+        nested = await element_click_by_text('modern-smoke', info.tab_id, 'Nested action', exact=True)
+        assert nested['success'] is True
+        chosen = require_json_object(nested['chosen'], 'chosen nested action')
+        assert chosen['activation_tag'] == 'button'
+        assert (await page_wait_for_text('modern-smoke', info.tab_id, 'Selected mode: Nested action'))[
+            'success'
+        ] is True
+
         artifact = get_config().artifacts_dir / 'modern-smoke' / 'resume.txt'
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_text('resume', encoding='utf-8')

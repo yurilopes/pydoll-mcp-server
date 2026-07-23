@@ -231,7 +231,7 @@ async def _click_candidate(
     chosen: JsonObject,
     timeout: float | None,
 ) -> JsonObject:
-    selector = str(chosen.get('selector_hint', ''))
+    selector = str(chosen.get('activation_selector_hint') or chosen.get('selector_hint', ''))
     if selector and selector not in {'button', 'a', 'input', 'textarea', 'select', 'label', 'div', 'span'}:
         try:
             tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
@@ -278,7 +278,20 @@ function selectorHint(el) {
     if (el.id) return '#' + CSS.escape(el.id);
     if (el.getAttribute('data-testid')) return '[data-testid="' + el.getAttribute('data-testid') + '"]';
     if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name.replace(/"/g, '\\\\"') + '"]';
-    return el.tagName.toLowerCase();
+    const parts = [];
+    let current = el;
+    while (current && current.nodeType === 1 && current !== document.body) {
+        const tag = current.tagName.toLowerCase();
+        let position = 1;
+        let sibling = current.previousElementSibling;
+        while (sibling) {
+            if (sibling.tagName === current.tagName) position += 1;
+            sibling = sibling.previousElementSibling;
+        }
+        parts.unshift(tag + ':nth-of-type(' + position + ')');
+        current = current.parentElement;
+    }
+    return parts.join(' > ');
 }
 function nearestHeading(el) {
     const section = el.closest('section, form, article, main, aside, nav');
@@ -296,6 +309,10 @@ function isActionable(el) {
     if (ACTIVE_ROLES.has(rol)) return true;
     if (el.tabIndex >= 0) return true;
     return false;
+}
+function activationTarget(el) {
+    if (isActionable(el)) return el;
+    return el.closest('button,a,[role="button"],[role="link"],[tabindex]');
 }
 
 const results = [];
@@ -321,6 +338,8 @@ for (const el of allEls) {
 
     const role = el.getAttribute('role') || '';
     const actionable = isActionable(el);
+    const activation = activationTarget(el);
+    const activationActionable = Boolean(activation && isActionable(activation));
     const enabled = !el.disabled && el.getAttribute('aria-disabled') !== 'true';
     const inModal = !!el.closest('[role="dialog"], dialog, [aria-modal="true"], .modal-overlay');
     const inMain = !!el.closest('main, [role="main"]');
@@ -333,6 +352,8 @@ for (const el of allEls) {
     let score = 0.0;
     score += lower === expected ? 1000 : 600;
     if (actionable) score += 250;
+    if (activationActionable) score += 300;
+    if (!actionable && activationActionable) score -= 40;
     if (enabled && visible(el)) score += 150;
     if (opts.prefer_modal && inModal) score += 120;
     if (opts.prefer_main_content && inMain) score += 80;
@@ -360,6 +381,9 @@ for (const el of allEls) {
         in_modal: inModal,
         in_main: inMain,
         selector_hint: selectorHint(el),
+        activation_selector_hint: activationActionable ? selectorHint(activation) : selectorHint(el),
+        activation_tag: activationActionable ? activation.tagName.toLowerCase() : el.tagName.toLowerCase(),
+        activation_role: activationActionable ? (activation.getAttribute('role') || '') : role,
         bounds: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
         score,
         contains_multiple_options: false

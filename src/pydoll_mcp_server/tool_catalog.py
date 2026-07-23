@@ -81,6 +81,7 @@ from pydoll_mcp_server.tools.inspection import (
 from pydoll_mcp_server.tools.javascript import js_evaluate, js_evaluate_readonly
 from pydoll_mcp_server.tools.linkedin import (
     linkedin_easy_apply_click_next,
+    linkedin_easy_apply_close,
     linkedin_easy_apply_fill_questions,
     linkedin_easy_apply_handle_save_prompt,
     linkedin_easy_apply_open,
@@ -282,6 +283,7 @@ TOOLS: tuple[Tool, ...] = (
     profile_promote,
     linkedin_job_snapshot,
     linkedin_easy_apply_open,
+    linkedin_easy_apply_close,
     linkedin_easy_apply_snapshot,
     linkedin_easy_apply_wait_ready,
     linkedin_easy_apply_upload_resume,

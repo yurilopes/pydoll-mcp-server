@@ -92,7 +92,7 @@ Health and diagnostics:
 Lifecycle:
 
 - `browser_launch` (supports `session_intent="user_authenticated"` + `site_hint`)
-- `browser_list`
+- `browser_list` (accepts `include_health=true` for a live CDP probe)
 - `browser_close`
 - `browser_attach`
 - `tab_list`
@@ -182,6 +182,7 @@ LinkedIn Easy Apply helpers:
 - `linkedin_application_evidence`
 - `linkedin_job_snapshot`
 - `linkedin_easy_apply_open`
+- `linkedin_easy_apply_close`
 - `linkedin_easy_apply_snapshot`
 - `linkedin_easy_apply_wait_ready`
 - `linkedin_easy_apply_upload_resume`
@@ -200,6 +201,20 @@ inspect the search list plus detail panel, and return compact application
 evidence for external trackers.
 `linkedin_easy_apply_submit` refuses to submit unless `confirm_submit=true` is
 provided and the current modal is a verified final submit step.
+The Easy Apply helpers support both visible dialogs and inline LinkedIn forms.
+`linkedin_easy_apply_upload_resume` accepts a permitted local file through its
+`path` parameter, uploads it with `paths` internally, and reports filename and
+toast verification separately from upload acceptance. If LinkedIn exposes only
+its native File System Access picker instead of an `input[type="file"]`, the
+tool returns `UNSUPPORTED` without opening an unmanaged Windows dialog; use a
+desktop automation boundary for that selection, then capture the result with
+`linkedin_easy_apply_snapshot`.
+
+`element_find` requires a CSS selector by default or an XPath expression when
+`strategy="xpath"`. Use `element_find_by_role`, `element_find_by_text`, or
+`element_find_by_label` when the intent is semantic rather than selector-based.
+`element_click_by_text` prefers actionable ancestors for nested labels and returns
+the activation element in its chosen candidate metadata.
 
 Network inspection:
 

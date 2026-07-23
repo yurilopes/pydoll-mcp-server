@@ -13,11 +13,20 @@ from pydoll.exceptions import PydollException
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_bool, get_string, require_json_object
+from pydoll_mcp_server.json_types import (
+    JsonArray,
+    JsonObject,
+    get_array,
+    get_bool,
+    get_object,
+    get_string,
+    require_json_object,
+)
 from pydoll_mcp_server.tools.elements import element_click, element_find
 from pydoll_mcp_server.tools.linkedin import linkedin_job_snapshot
 from pydoll_mcp_server.tools.linkedin_search_scripts import (
     evidence_script,
+    open_result_target_script,
     page_snapshot_script,
     search_results_script,
 )
@@ -85,7 +94,7 @@ async def linkedin_jobs_search(
     navigation = await page_goto(client_id, tab_id, url, timeout=max(1, timeout_ms / 1000))
     if navigation.get('success') is not True:
         return navigation
-    results = await linkedin_jobs_search_results(client_id, tab_id)
+    results = await _wait_for_search_results(client_id, tab_id, timeout_ms)
     results['search_url'] = url
     results['navigation'] = navigation
     return results
@@ -148,21 +157,41 @@ async def linkedin_jobs_open_result(
         return StructuredError(ErrorCode.RESOURCE_NOT_FOUND, 'LinkedIn search result not found').to_dict()
     target_id = get_string(target, 'linkedin_job_id')
 
-    selector = f'a[href*="/jobs/view/{target_id}/"], [data-job-id="{target_id}"]'
-    found = await element_find(client_id, tab_id, selector=selector, timeout=max(1, timeout_ms / 1000))
-    if get_bool(found, 'success'):
+    resolution = await _execute_search_script(
+        client_id,
+        tab_id,
+        open_result_target_script(target_id, index),
+        'LinkedIn result target resolution failed',
+    )
+    card = get_object(resolution, 'card', {})
+    link = get_object(resolution, 'link', {})
+    for candidate in (card, link):
+        selector = get_string(candidate, 'selector_hint')
+        if not selector:
+            continue
+        found = await element_find(client_id, tab_id, selector=selector, timeout=max(1, timeout_ms / 1000))
+        if not get_bool(found, 'success'):
+            continue
         clicked = await element_click(
             client_id,
             tab_id,
             get_string(found, 'element_id'),
             timeout=max(1, timeout_ms / 1000),
+            click_strategy='native',
         )
-        if get_bool(clicked, 'success'):
-            snapshot = await _wait_for_opened_job(client_id, tab_id, target_id, timeout_ms)
-            if get_string(snapshot, 'linkedin_job_id') == target_id:
-                snapshot['opened_from_result'] = True
-                snapshot['target'] = target
-                return snapshot
+        if not get_bool(clicked, 'success'):
+            continue
+        snapshot = await _wait_for_opened_job(client_id, tab_id, target_id, timeout_ms)
+        if get_string(snapshot, 'linkedin_job_id') == target_id:
+            snapshot['opened_from_result'] = True
+            snapshot['target'] = target
+            snapshot['open_mode'] = (
+                'direct'
+                if '/jobs/view/' in get_string(snapshot, 'url') and not get_bool(snapshot, 'detail_panel_present')
+                else 'panel'
+            )
+            snapshot['search_context_preserved'] = get_string(snapshot, 'open_mode') == 'panel'
+            return snapshot
 
     fallback_url = f'https://www.linkedin.com/jobs/view/{target_id}/'
     navigation = await page_goto(client_id, tab_id, fallback_url, timeout=max(1, timeout_ms / 1000))
@@ -172,6 +201,8 @@ async def linkedin_jobs_open_result(
     snapshot['opened_from_result'] = False
     snapshot['fallback_navigation'] = True
     snapshot['target'] = target
+    snapshot['open_mode'] = 'fallback'
+    snapshot['search_context_preserved'] = False
     return snapshot
 
 
@@ -256,11 +287,31 @@ async def _wait_for_opened_job(client_id: str, tab_id: str, target_id: str, time
     deadline = time.monotonic() + max(1, timeout_ms) / 1000
     snapshot: JsonObject = {}
     while time.monotonic() < deadline:
+        page = await linkedin_jobs_page_snapshot(client_id, tab_id, max_results=25)
+        detail = get_object(page, 'detail_job_snapshot', {})
+        if get_string(detail, 'linkedin_job_id') == target_id:
+            detail['detail_panel_present'] = get_bool(page, 'detail_panel_present')
+            detail['detail_surface'] = get_string(page, 'detail_surface')
+            detail['url'] = get_string(page, 'detail_url', get_string(detail, 'url'))
+            return detail
         snapshot = await linkedin_job_snapshot(client_id, tab_id)
         if get_string(snapshot, 'linkedin_job_id') == target_id:
             return snapshot
         await asyncio.sleep(0.25)
     return snapshot
+
+
+async def _wait_for_search_results(client_id: str, tab_id: str, timeout_ms: int) -> JsonObject:
+    deadline = time.monotonic() + max(1, timeout_ms) / 1000
+    latest: JsonObject = {}
+    while time.monotonic() < deadline:
+        latest = await linkedin_jobs_search_results(client_id, tab_id, max_results=25)
+        if not get_bool(latest, 'success'):
+            return latest
+        if get_array(latest, 'results', []) or get_bool(latest, 'no_results'):
+            return latest
+        await asyncio.sleep(0.25)
+    return latest
 
 
 async def _execute_search_script(client_id: str, tab_id: str, script: str, message: str) -> JsonObject:

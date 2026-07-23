@@ -27,6 +27,7 @@
     <div id="mode-card" class="card" role="group" aria-label="Work mode options">
       <button id="full-time" class="choice" type="button">Full-time positions</button>
       <button id="freelance" class="choice" type="button">Freelance</button>
+      <button id="nested-action" class="choice" type="button"><span>Nested action</span></button>
     </div>
     <p id="mode-state">Selected mode: none</p>
   </section>
@@ -55,6 +56,7 @@
   <script>
     const fullTime = document.getElementById('full-time');
     const freelance = document.getElementById('freelance');
+    const nestedAction = document.getElementById('nested-action');
     const modeState = document.getElementById('mode-state');
     const title = document.getElementById('controlled-title');
     const titleState = document.getElementById('title-state');
@@ -77,6 +79,7 @@
 
     fullTime.addEventListener('click', () => setMode(fullTime, 'Full-time positions'));
     freelance.addEventListener('click', () => setMode(freelance, 'Freelance'));
+    nestedAction.addEventListener('click', () => setMode(nestedAction, 'Nested action'));
 
     title.addEventListener('input', () => {
       titleState.textContent = 'Title state: ' + (title.value || 'empty');

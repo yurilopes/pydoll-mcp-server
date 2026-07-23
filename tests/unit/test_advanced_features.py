@@ -163,3 +163,30 @@ def test_tool_catalog_contains_new_agent_friendly_tools() -> None:
         'artifact_import',
     }
     assert expected <= names
+
+
+def test_browser_list_can_probe_live_health() -> None:
+    async def run() -> None:
+        from pydoll_mcp_server.tools.browser import browser_list
+
+        browser = MagicMock()
+        browser.browser_id = 'browser-1'
+        browser.summary.return_value = {'browser_id': 'browser-1', 'health': 'healthy'}
+        registry = MagicMock()
+        registry.list_browsers.return_value = [browser]
+        health = {'healthy': True, 'state': 'healthy', 'version': {'product': 'Chrome'}}
+        with (
+            patch('pydoll_mcp_server.tools.browser.get_registry', return_value=registry),
+            patch('pydoll_mcp_server.tools.browser.check_browser_health', new=AsyncMock(return_value=health)) as probe,
+        ):
+            result = await browser_list('client', include_health=True)
+
+        assert result['success'] is True
+        browsers = result['browsers']
+        assert isinstance(browsers, list)
+        summary = browsers[0]
+        assert isinstance(summary, dict)
+        assert summary['live_health'] == health
+        probe.assert_awaited_once_with('client', 'browser-1')
+
+    asyncio.run(run())

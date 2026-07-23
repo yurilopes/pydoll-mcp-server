@@ -1,162 +1,205 @@
-"""JavaScript builders for LinkedIn Jobs search results."""
+"""JavaScript builders for LinkedIn Jobs search and evidence helpers."""
 
 from __future__ import annotations
 
 import json
 
+from pydoll_mcp_server.tools.linkedin_state_scripts import shared_state_helpers_script
+
 
 def search_results_script(max_results: int) -> str:
     payload = json.dumps({'max_results': max_results})
-    return (
-        '(() => {\n'
-        + shared_helpers_script()
-        + '\n  const opts = '
-        + payload
-        + """;
+    return _script(
+        f"""
+  const opts = {payload};
   return collectLinkedInJobs(opts.max_results);
-})()
-"""
+""",
+        include_collector=True,
     )
 
 
 def page_snapshot_script(max_results: int) -> str:
     payload = json.dumps({'max_results': max_results})
-    return (
-        '(() => {\n'
-        + shared_helpers_script()
-        + '\n  const opts = '
-        + payload
-        + """;
+    return _script(
+        f"""
+  const opts = {payload};
   const base = collectLinkedInJobs(opts.max_results);
-  const detail = jobSnapshotFromRoot(document);
+  const detailRoot = findDetailRoot(document);
+  const detail = detailRoot ? jobSnapshotFromRoot(detailRoot) : emptyJobSnapshot();
   const selectedId = detail.linkedin_job_id || selectedJobIdFromUrl() || '';
   const selectedResult = base.results.find((item) => item.linkedin_job_id === selectedId);
-  if (selectedResult) {
+  if (selectedResult) {{
     detail.role = detail.role || selectedResult.title;
     detail.company = detail.company || selectedResult.company;
     detail.location = detail.location || selectedResult.location;
-    if (detail.application_state === 'unknown' && selectedResult.easy_apply_hint) {
+    if (detail.application_state === 'unknown' && selectedResult.easy_apply_hint) {{
       detail.application_state = 'not_started';
       detail.button_state = 'easy_apply';
       detail.easy_apply_available = true;
-    }
-  }
-  return {
+    }}
+  }}
+  const hasNextPage = visibleControls(document).some((el) => !el.disabled && /^(proxima|next|seguinte)$/.test(fold(controlLabel(el))));
+  return {{
     ...base,
     selected_job_id: selectedId,
     detail_job_snapshot: detail,
-    detail_panel_present: Boolean(document.querySelector('.jobs-search__job-details, .jobs-details, main')),
+    detail_panel_present: Boolean(detailRoot && !isDirectJobView()),
     easy_apply_button_state: detail.button_state || 'unknown',
     detail_url: detail.canonical_url || location.href,
     list_count: base.count,
-    has_next_page: [...document.querySelectorAll('button, a')].some((el) => /Pr[oó]xima|Next/i.test(norm(el.innerText || el.getAttribute('aria-label') || '')) && visible(el)),
-  };
-})()
-"""
+    has_next_page: hasNextPage,
+    detail_surface: isDirectJobView() ? 'direct' : detailRoot ? 'panel' : 'none',
+  }};
+""",
+        include_collector=True,
     )
 
 
-def open_result_script(linkedin_job_id: str, index: int | None) -> str:
+def open_result_target_script(linkedin_job_id: str, index: int | None) -> str:
     payload = json.dumps({'linkedin_job_id': linkedin_job_id, 'index': index})
-    return (
-        '(() => {\n'
-        + shared_helpers_script()
-        + '\n  const opts = '
-        + payload
-        + """;
+    return _script(
+        f"""
+  const opts = {payload};
   const results = collectLinkedInJobs(100).results;
   let target = null;
-  if (opts.linkedin_job_id) {
-    target = results.find((item) => item.linkedin_job_id === opts.linkedin_job_id) || null;
-  } else if (Number.isInteger(opts.index)) {
-    target = results[opts.index] || null;
-  }
-  if (!target) return { success: false, clicked: false, reason: 'result_not_found', results_count: results.length };
-  const link = document.querySelector(`a[href*="/jobs/view/${target.linkedin_job_id}/"]`);
-  const clickable = link || document.querySelector(`[data-job-id="${CSS.escape(target.linkedin_job_id)}"]`);
-  if (!clickable) return { success: true, clicked: false, reason: 'click_target_not_found', target };
-  clickable.scrollIntoView({ block: 'center', inline: 'center' });
-  clickable.click();
-  return { success: true, clicked: true, target };
-})()
-"""
+  if (opts.linkedin_job_id) target = results.find((item) => item.linkedin_job_id === opts.linkedin_job_id) || null;
+  else if (Number.isInteger(opts.index)) target = results[opts.index] || null;
+  if (!target) return {{ success: false, clicked: false, reason: 'result_not_found', results_count: results.length }};
+  const cards = [...new Set([
+    ...document.querySelectorAll([
+      '[data-job-id]',
+      '[data-occludable-job-id]',
+      '[data-entity-urn*="jobPosting"]',
+      '.job-card-container',
+      '.jobs-search-results__list-item',
+      '.base-search-card',
+      '.job-search-card',
+      '.scaffold-layout__list-item',
+    ].join(', ')),
+    ...[...document.querySelectorAll('a[href*="/jobs/view/"]')]
+      .map((link) => jobCardForLink(link))
+      .filter(Boolean),
+  ])].filter((card) => visible(card));
+  const card = cards.find((item) => item.getAttribute('data-job-id') === target.linkedin_job_id
+    || item.getAttribute('data-occludable-job-id') === target.linkedin_job_id
+    || item.querySelector(`a[href*="/jobs/view/${{CSS.escape(target.linkedin_job_id)}}/"]`));
+  if (!card) return {{ success: true, clicked: false, reason: 'click_target_not_found', target }};
+  const link = card.querySelector(`a[href*="/jobs/view/${{CSS.escape(target.linkedin_job_id)}}/"]`);
+  return {{
+    success: true,
+    clicked: false,
+    target,
+    search_context: location.pathname.includes('/jobs/search/'),
+    card: controlInfo(card),
+    link: link ? controlInfo(link) : {{}},
+  }};
+""",
+        include_collector=True,
     )
 
 
 def evidence_script(include_review: bool) -> str:
     payload = json.dumps({'include_review': include_review})
-    return (
-        '(() => {\n'
-        + shared_helpers_script()
-        + '\n  const opts = '
-        + payload
-        + """;
-  const job = jobSnapshotFromRoot(document);
-  const dialog = [...document.querySelectorAll('[role="dialog"], dialog, .jobs-easy-apply-modal')].filter(visible).at(-1);
-  const dialogText = dialog ? norm(dialog.innerText || '') : '';
-  const reviewText = opts.include_review && dialogText ? dialogText : '';
-  const resumeMatch = (reviewText || document.body.innerText || '').match(/([^\\s]+\\.(?:pdf|docx?))/i);
-  const answers = [];
-  if (reviewText) {
-    const lines = reviewText.split(/\\n+/).map(norm).filter(Boolean);
-    for (let i = 0; i < lines.length - 1; i += 1) {
-      if (lines[i].endsWith('?') || /experience|W2|Citizen|sponsorship|authorization/i.test(lines[i])) {
-        answers.push({ question: lines[i], answer: lines[i + 1] });
-      }
-    }
-  }
-  return {
+    return _script(
+        f"""
+  const opts = {payload};
+  const detailRoot = findDetailRoot(document);
+  const job = detailRoot ? jobSnapshotFromRoot(detailRoot) : (isDirectJobView() ? jobSnapshotFromRoot(document) : emptyJobSnapshot());
+  const surface = findApplicationSurface();
+  const applicationRoot = surface.root && surface.kind !== 'confirmation' ? surface.root : null;
+  const applicationText = applicationRoot ? rootText(applicationRoot) : '';
+  const fields = applicationRoot
+    ? [...applicationRoot.querySelectorAll('input, textarea, select')]
+      .filter((el) => visible(el) || ['radio', 'checkbox'].includes(fold(el.getAttribute('type') || '')))
+      .map((el, index) => fieldSnapshot(el, applicationRoot, index))
+    : [];
+  const answersByKey = new Map();
+  for (const field of fields) {{
+    if (!field.label && !field.group_text) continue;
+    const key = field.question_key || field.label;
+    const answer = answersByKey.get(key) || {{ question: field.label || field.group_text, answer: '' }};
+    answer.answer = field.selected_option || field.value || field.selected_text?.[0] || answer.answer;
+    answersByKey.set(key, answer);
+  }}
+  const resumeLines = String(applicationText || rootText(document)).split(/\\n+/).map(norm).filter((line) => /\\.(?:pdf|docx?)$/i.test(line));
+  const resumeFilename = resumeLines[0]?.replace(/^pdf\\s+/i, '').replace(/^curriculo\\s*:?\\s*/i, '') || '';
+  const reviewAnswers = reviewAnswersFor(applicationText);
+  const reviewReady = Boolean(applicationRoot && /revise sua candidatura|review/.test(fold(applicationText))
+    && [...applicationRoot.querySelectorAll('button, [role="button"]')].some((button) => isSubmitLabel(controlLabel(button))));
+  const risk = job.risk_text || riskTextFor(applicationText);
+  const confirmationText = job.application_state === 'submitted'
+    ? job.application_state_text
+    : norm(rootText(document).match(/(Se candidatou agora|Candidatura enviada|Application submitted).{{0,80}}/i)?.[0] || '');
+  const applicationState = confirmationText || surface.kind === 'confirmation'
+    ? 'submitted'
+    : reviewReady || applicationRoot
+      ? 'draft'
+      : job.application_state || 'unknown';
+  return {{
     success: true,
     platform: 'linkedin',
-    linkedin_job_id: job.linkedin_job_id || '',
+    linkedin_job_id: job.linkedin_job_id || selectedJobIdFromUrl() || '',
     canonical_url: job.canonical_url || '',
     company: job.company || '',
     role: job.role || '',
     location: job.location || '',
-    application_state: job.application_state || 'unknown',
-    easy_apply_available: Boolean(job.easy_apply_available),
-    authorization_risk: Boolean(job.authorization_risk),
-    risk_text: job.risk_text || '',
-    resume_filename: resumeMatch ? resumeMatch[1] : '',
-    answers,
-    confirmation_text: job.application_state === 'submitted' ? job.application_state_text : '',
+    application_state: applicationState,
+    easy_apply_available: Boolean(job.easy_apply_available || applicationRoot),
+    authorization_risk: Boolean(job.authorization_risk || risk),
+    risk_text: risk,
+    resume_filename: resumeFilename,
+    answers: opts.include_review
+      ? (answersByKey.size ? [...answersByKey.values()] : reviewAnswers)
+      : [],
+    confirmation_text: confirmationText,
+    surface: surface.kind,
     captured_at_unix: Math.floor(Date.now() / 1000),
-  };
-})()
-"""
+  }};
+""",
     )
 
 
-def shared_helpers_script() -> str:
-    return """
-function norm(value) {
-  return (value || '').replace(/\\s+/g, ' ').trim();
-}
-function visible(el) {
-  const rect = el.getBoundingClientRect();
-  const style = getComputedStyle(el);
-  return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-}
-function selectedJobIdFromUrl() {
-  return location.href.match(/\\/jobs\\/view\\/(\\d+)/)?.[1] || new URL(location.href).searchParams.get('currentJobId') || '';
-}
+def _script(body: str, include_collector: bool = False) -> str:
+    collector = _collector_script() if include_collector else ''
+    return '(() => {\n' + shared_state_helpers_script() + collector + body + '\n})()'
+
+
+def _collector_script() -> str:
+    return r"""
 function collectLinkedInJobs(maxResults) {
   const params = new URL(location.href).searchParams;
-  const cards = [...document.querySelectorAll('li, .job-card-container, .jobs-search-results__list-item, [data-job-id]')];
+  const selectors = [
+    '[data-job-id]',
+    '[data-occludable-job-id]',
+    '[data-entity-urn*="jobPosting"]',
+    '.job-card-container',
+    '.jobs-search-results__list-item',
+    '.base-search-card',
+    '.job-search-card',
+    '.scaffold-layout__list-item',
+  ];
+  const cards = [...new Set([
+    ...selectors.flatMap((selector) => [...document.querySelectorAll(selector)]),
+    ...[...document.querySelectorAll('a[href*="/jobs/view/"]')]
+      .map((link) => jobCardForLink(link))
+      .filter(Boolean),
+  ])];
   const byId = new Map();
   for (const card of cards) {
-    if (!visible(card)) continue;
-    const link = [...card.querySelectorAll('a[href*="/jobs/view/"]')][0];
-    const rawUrl = link?.href || '';
-    const idFromUrl = rawUrl.match(/\\/jobs\\/view\\/(\\d+)/)?.[1] || '';
-    const id = card.getAttribute('data-job-id') || idFromUrl;
+    const link = [...card.querySelectorAll('a[href*="/jobs/view/"]')][0]
+      || (card.matches('a[href*="/jobs/view/"]') ? card : null);
+    if (!visible(card) && !visible(link)) continue;
+    const idFromUrl = link?.href.match(/\/jobs\/view\/(\d+)/)?.[1] || '';
+    const entityId = card.getAttribute('data-entity-urn')?.match(/jobPosting:(\d+)/)?.[1] || '';
+    const id = card.getAttribute('data-job-id') || card.getAttribute('data-occludable-job-id')
+      || entityId || idFromUrl;
     if (!id || byId.has(id)) continue;
     const rawText = card.innerText || '';
     const text = norm(rawText);
-    const lines = rawText.split(/\\n+/).map(norm).filter(Boolean);
-    const title = norm(link?.innerText || card.querySelector('[aria-label*="title"], strong')?.innerText || text.split('\\n')[0] || '');
-    const company = lines.find((line) => line !== title && !/Promoted|Promovida|Candidatura|Easy Apply/i.test(line)) || '';
-    const locationLine = lines.find((line) => /Remote|Remoto|United States|Estados Unidos|Brazil|Brasil|Europe|Europa/i.test(line)) || '';
+    const lines = rawText.split(/\n+/).map(norm).filter(Boolean);
+    const title = norm(link?.innerText || card.querySelector('[aria-label*="title"], strong, h3, h4')?.innerText || lines[0] || '');
+    const company = lines.find((line) => line !== title && !/promoted|promovida|sponsored|candidatura|easy apply/i.test(line)) || '';
+    const locationLine = lines.find((line) => /remote|remoto|united states|estados unidos|brazil|brasil|europe|europa/i.test(line)) || '';
     byId.set(id, {
       linkedin_job_id: id,
       title,
@@ -164,12 +207,13 @@ function collectLinkedInJobs(maxResults) {
       location: locationLine,
       url: `https://www.linkedin.com/jobs/view/${id}/`,
       visible_text: text.slice(0, 800),
-      easy_apply_hint: /Candidatura simplificada|Easy Apply/i.test(text) || params.get('f_AL') === 'true',
-      remote_hint: /Remote|Remoto/i.test(text) || params.get('f_WT') === '2',
+      easy_apply_hint: /candidatura simplificada|easy apply/i.test(fold(text)) || params.get('f_AL') === 'true',
+      remote_hint: /remote|remoto/i.test(fold(text)) || params.get('f_WT') === '2',
+      sponsored: /promoted|promovida|sponsored/i.test(fold(text)),
     });
     if (byId.size >= maxResults) break;
   }
-  const pageText = document.body.innerText || '';
+  const pageText = rootText(document);
   return {
     success: true,
     url: location.href,
@@ -188,70 +232,28 @@ function collectLinkedInJobs(maxResults) {
     results: [...byId.values()],
     count: byId.size,
     partial: byId.size >= maxResults,
-    no_results: /Nenhum resultado|No matching jobs|No results/i.test(pageText),
+    no_results: /nenhum resultado|no matching jobs|no results/i.test(fold(pageText)),
   };
 }
-function jobSnapshotFromRoot(root) {
-  const text = root.body?.innerText || root.innerText || '';
-  const url = new URL(location.href);
-  const idMatch = url.pathname.match(/\\/jobs\\/view\\/(\\d+)/);
-  const currentJobId = idMatch?.[1] || url.searchParams.get('currentJobId') || '';
-  const controls = [...root.querySelectorAll('button, a')].filter(visible).map((el) => ({
-    text: norm(el.innerText || ''),
-    aria: norm(el.getAttribute('aria-label') || ''),
-    disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true'),
-  }));
-  const easy = controls.find((item) => /candidatura simplificada|easy apply/i.test(`${item.text} ${item.aria}`));
-  const cont = controls.find((item) => /^continuar$/i.test(item.text) || /continue/i.test(item.aria));
-  const saved = controls.find((item) => /^salvo$|^saved$/i.test(item.text) || /vaga salva|saved job/i.test(item.aria));
-  const submitted = /se candidatou agora|candidatura enviada|application submitted/i.test(text);
-  const unavailable = /não aceita mais candidaturas|no longer accepting|vaga encerrada|job closed/i.test(text);
-  let applicationState = 'unknown';
-  let stateText = '';
-  if (submitted) {
-    applicationState = 'submitted';
-    stateText = norm(text.match(/(Se candidatou agora|Candidatura enviada|Application submitted).{0,80}/i)?.[0] || '');
-  } else if (cont || /suas respostas foram salvas|answers were saved/i.test(text)) {
-    applicationState = 'draft';
-    stateText = cont?.text || 'saved draft';
-  } else if (easy) {
-    applicationState = 'not_started';
-    stateText = easy.text || easy.aria;
-  } else if (saved) {
-    applicationState = 'saved';
-    stateText = saved.text || saved.aria;
-  } else if (unavailable) {
-    applicationState = 'unavailable';
-    stateText = 'unavailable';
+
+function jobCardForLink(link) {
+  if (!link) return null;
+  const semantic = link.closest([
+    '[data-job-id]',
+    '[data-occludable-job-id]',
+    '[data-entity-urn*="jobPosting"]',
+    '.job-card-container',
+    '.jobs-search-results__list-item',
+    '.base-search-card',
+    '.job-search-card',
+    '.scaffold-layout__list-item',
+  ].join(', '));
+  if (semantic) return semantic;
+  let current = link.parentElement;
+  for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+    const links = current.querySelectorAll('a[href*="/jobs/view/"]');
+    if (links.length === 1 && norm(current.innerText || '').length > norm(link.innerText || '').length) return current;
   }
-  const riskMatch = text.match(/.{0,80}(W2|GC Holder|Green Card|US Citizen|C2C|1099|sponsorship|visa|work authorization|no sponsorship).{0,120}/i);
-  const titleParts = document.title.split('|').map(norm).filter(Boolean);
-  const isDirectJobView = Boolean(idMatch);
-  const pageTitleRole = isDirectJobView && titleParts.length >= 2 && !/LinkedIn/i.test(titleParts[0]) ? titleParts[0] : '';
-  const pageTitleCompany = isDirectJobView && titleParts.length >= 2 ? titleParts[1] : '';
-  const heading = norm(root.querySelector('.jobs-unified-top-card h1, .job-details-jobs-unified-top-card h1, .jobs-details__main-content h1')?.innerText || '');
-  const title = heading && !/notifica/i.test(heading) ? heading : pageTitleRole;
-  const company = norm(root.querySelector('.job-details-jobs-unified-top-card__company-name, .job-details-jobs-unified-top-card__primary-description a, .company')?.innerText || pageTitleCompany);
-  return {
-    success: true,
-    linkedin_job_id: currentJobId,
-    canonical_url: currentJobId ? `https://www.linkedin.com/jobs/view/${currentJobId}/` : location.href,
-    url: location.href,
-    role: title,
-    company,
-    location: norm((text.match(/\\n([^\\n]*Estados Unidos[^\\n]*|[^\\n]*Brasil[^\\n]*|[^\\n]*Remote[^\\n]*|[^\\n]*Remoto[^\\n]*)\\n/) || [])[1] || ''),
-    button_state: applicationState === 'not_started' ? 'easy_apply' : applicationState === 'draft' ? 'continue' : applicationState,
-    application_state: applicationState,
-    application_state_text: stateText,
-    easy_apply_available: Boolean(easy || cont),
-    easy_apply_button_text: easy?.text || cont?.text || '',
-    easy_apply_button_aria: easy?.aria || cont?.aria || '',
-    can_continue_easy_apply: Boolean(cont),
-    already_applied: submitted,
-    application_status: submitted ? 'submitted' : '',
-    authorization_risk: Boolean(riskMatch),
-    risk_text: riskMatch ? norm(riskMatch[0]) : '',
-    description_excerpt: norm(text).slice(0, 2000),
-  };
+  return link;
 }
 """

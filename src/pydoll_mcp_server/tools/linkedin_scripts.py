@@ -1,324 +1,380 @@
-"""JavaScript builders for LinkedIn-specific browser helpers."""
+"""JavaScript builders for LinkedIn Easy Apply helpers."""
 
 from __future__ import annotations
 
 import json
 
 from pydoll_mcp_server.json_types import JsonObject
+from pydoll_mcp_server.tools.linkedin_state_scripts import shared_state_helpers_script
 
 
 def job_snapshot_script() -> str:
-    return """
-(() => {
-  const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-  const text = document.body.innerText || '';
-  const url = new URL(location.href);
-  const idMatch = url.pathname.match(/\\/jobs\\/view\\/(\\d+)/);
-  const buttons = [...document.querySelectorAll('button, a')].filter((el) => {
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-  }).map((el) => ({
-    text: norm(el.innerText || ''),
-    aria: norm(el.getAttribute('aria-label') || ''),
-    tag: el.tagName.toLowerCase(),
-  }));
-  const easy = buttons.find((b) => /candidatura simplificada|easy apply/i.test(b.text + ' ' + b.aria));
-  const cont = buttons.find((b) => /^continuar$/i.test(b.text));
-  const saved = buttons.find((b) => /^salvo$|^saved$/i.test(b.text) || /vaga salva|saved job/i.test(b.aria));
-  const applied = /se candidatou agora|candidatura enviada|application submitted/i.test(text);
-  const unavailable = /não aceita mais candidaturas|no longer accepting|vaga encerrada|job closed/i.test(text);
-  const titleParts = document.title.split('|').map(norm).filter(Boolean);
-  const isDirectJobView = Boolean(idMatch);
-  const pageTitleRole = isDirectJobView && titleParts.length >= 2 && !/LinkedIn/i.test(titleParts[0]) ? titleParts[0] : '';
-  const pageTitleCompany = isDirectJobView && titleParts.length >= 2 ? titleParts[1] : '';
-  const heading = norm(document.querySelector('.jobs-unified-top-card h1, .job-details-jobs-unified-top-card h1, .jobs-details__main-content h1')?.innerText || '');
-  const title = heading && !/notifica/i.test(heading) ? heading : pageTitleRole;
-  const company = norm(
-    document.querySelector('.job-details-jobs-unified-top-card__company-name, .job-details-jobs-unified-top-card__primary-description a')?.innerText
-    || pageTitleCompany
-  );
-  const riskMatch = text.match(/.{0,80}(W2|GC Holder|Green Card|US Citizen|C2C|1099|sponsorship|visa|work authorization|no sponsorship).{0,120}/i);
-  let buttonState = 'unknown';
-  let applicationState = 'unknown';
-  let applicationStateText = '';
-  if (applied) buttonState = 'applied';
-  else if (cont) buttonState = 'continue';
-  else if (easy) buttonState = 'easy_apply';
-  else if (saved) buttonState = 'saved';
-  else if (unavailable) buttonState = 'unavailable';
-  if (applied) {
-    applicationState = 'submitted';
-    applicationStateText = norm(text.match(/(Se candidatou agora|Candidatura enviada|Application submitted).{0,80}/i)?.[0] || '');
-  } else if (cont || /suas respostas foram salvas|answers were saved/i.test(text)) {
-    applicationState = 'draft';
-    applicationStateText = cont?.text || 'saved draft';
-  } else if (easy) {
-    applicationState = 'not_started';
-    applicationStateText = easy.text || easy.aria;
-  } else if (saved) {
-    applicationState = 'saved';
-    applicationStateText = saved.text || saved.aria;
-  } else if (unavailable) {
-    applicationState = 'unavailable';
-    applicationStateText = 'unavailable';
+    return _script(
+        """
+  const detailRoot = findDetailRoot(document);
+  if (!detailRoot && !isDirectJobView() && location.pathname.includes('/jobs/search/')) {
+    return emptyJobSnapshot();
   }
-  return {
-    success: true,
-    linkedin_job_id: idMatch ? idMatch[1] : '',
-    canonical_url: idMatch ? `https://www.linkedin.com/jobs/view/${idMatch[1]}/` : location.href,
-    url: location.href,
-    role: title,
-    company,
-    location: norm((text.match(/\\n([^\\n]*Estados Unidos[^\\n]*|[^\\n]*Brasil[^\\n]*)\\n/) || [])[1] || ''),
-    easy_apply_available: Boolean(easy || cont),
-    button_state: buttonState,
-    application_state: applicationState,
-    application_state_text: applicationStateText,
-    easy_apply_button_text: easy?.text || cont?.text || '',
-    easy_apply_button_aria: easy?.aria || cont?.aria || '',
-    can_continue_easy_apply: Boolean(cont),
-    already_applied: applied,
-    application_status: applied ? 'submitted' : '',
-    authorization_risk: Boolean(riskMatch),
-    risk_text: riskMatch ? norm(riskMatch[0]) : '',
-    description_excerpt: norm(text).slice(0, 2000),
-  };
-})()
-"""
-
-
-def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> str:
-    payload = json.dumps({'include_resume_entries': include_resume_entries, 'max_resume_entries': max_resume_entries})
-    return (
-        '(() => {\nconst opts = '
-        + payload
-        + """;
-  const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-  const visible = (el) => {
-    const rect = el.getBoundingClientRect();
-    const style = getComputedStyle(el);
-    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-  };
-  const dialogs = [...document.querySelectorAll('[role="dialog"], dialog, .jobs-easy-apply-modal')]
-    .filter((el) => {
-      const rect = el.getBoundingClientRect();
-      return rect.width > 100 && rect.height > 100 && getComputedStyle(el).visibility !== 'hidden';
-    });
-  const dialog = dialogs.at(-1);
-  const pageText = document.body.innerText || '';
-  if (!dialog) {
-    return {
-      success: true,
-      dialog_present: false,
-      submitted: /se candidatou agora|candidatura enviada|application submitted/i.test(pageText),
-      confirmation_text: norm(pageText.match(/(Se candidatou agora|Candidatura enviada|Application submitted).{0,80}/i)?.[0] || ''),
-      application_status: /candidatura enviada|application submitted/i.test(pageText) ? 'submitted' : '',
-      timestamp_text: norm(pageText.match(/\\bagora\\b|just now/i)?.[0] || ''),
-    };
-  }
-  const text = dialog.innerText || '';
-  const stepMatch = text.match(/(\\d+)\\s+de\\s+(\\d+)\\s+p[aá]ginas?|Step\\s+(\\d+)\\s+of\\s+(\\d+)/i);
-  const stepIndex = stepMatch ? Number(stepMatch[1] || stepMatch[3] || 0) : 0;
-  const stepCount = stepMatch ? Number(stepMatch[2] || stepMatch[4] || 0) : 0;
-  const lower = text.toLowerCase();
-  let stepTitle = '';
-  if (/revise sua candidatura|review/i.test(lower)) stepTitle = 'Review';
-  else if (/additional questions|perguntas adicionais/i.test(lower)) stepTitle = 'Additional Questions';
-  else if (/resume|curr[ií]culo/i.test(lower)) stepTitle = 'Resume';
-  else if (/education|forma[cç][aã]o/i.test(lower)) stepTitle = 'Education';
-  else if (/work experience|experi[eê]ncia/i.test(lower)) stepTitle = 'Work Experience';
-  else if (/contact info|informa[cç][oõ]es de contato/i.test(lower)) stepTitle = 'Contact info';
-  const fields = [...dialog.querySelectorAll('input, textarea, select')].filter((el) => visible(el) || el.type === 'radio')
-    .map((el) => {
-      const tag = el.tagName.toLowerCase();
-      const type = (el.getAttribute('type') || '').toLowerCase();
-      const selected = tag === 'select' ? [...el.selectedOptions].map((opt) => norm(opt.textContent || '')) : [];
-      const label = norm(
-        (el.id ? dialog.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText || '' : '')
-        || el.closest('label')?.innerText || el.getAttribute('aria-label') || el.placeholder || ''
-      );
-      const group = norm(el.closest('fieldset, .jobs-easy-apply-form-section__grouping, div')?.innerText || '');
-      return {
-        tag,
-        type,
-        label,
-        group_text: group.slice(0, 500),
-        required: Boolean(el.required || /\\*/.test(label || group)),
-        value: tag === 'select' ? '' : String(el.value || ''),
-        checked: type === 'radio' || type === 'checkbox' ? Boolean(el.checked) : null,
-        selected_text: selected,
-        selected_value: tag === 'select' ? String(el.value || '') : '',
-        validation_message: norm(el.validationMessage || ''),
-      };
-    });
-  const buttons = [...dialog.querySelectorAll('button')].filter(visible).map((button) => ({
-    text: norm(button.innerText || ''),
-    aria: norm(button.getAttribute('aria-label') || ''),
-    disabled: Boolean(button.disabled),
-  }));
-  const forward = buttons.find((b) => /^Avan|^Aval|^Next|^Review/i.test(b.text));
-  const submit = buttons.find((b) => /Enviar candidatura|Submit application/i.test(b.text));
-  const resumeMatches = [...text.matchAll(/(?:PDF|DOCX?)\\s+([^\\n]+\\.(?:pdf|docx?|PDF|DOCX?))/g)]
-    .map((match) => norm(match[1]));
-  const resumes = [...new Set(resumeMatches)];
-  const riskMatch = text.match(/.{0,80}(W2|GC Holder|Green Card|US Citizen|C2C|1099|sponsorship|visa|work authorization|no sponsorship).{0,120}/i);
-  const inlineErrors = [...dialog.querySelectorAll('[role="alert"], .artdeco-inline-feedback, .fb-dash-form-element__error-text')]
-    .map((el) => norm(el.innerText || '')).filter(Boolean);
-  const textErrors = [...text.matchAll(/Valor inválido|required|obrigat[oó]rio/gi)].map((match) => match[0]);
-  const toastMessages = [...document.querySelectorAll('.artdeco-toast-item, [role="status"]')]
-    .map((el) => norm(el.innerText || '')).filter(Boolean);
-  const questions = fields.filter((field) => field.label || field.group_text).map((field) => ({
-    label: field.label || field.group_text.split('?')[0],
-    input_type: field.type || field.tag,
-    required: field.required,
-    value: field.value,
-    options: field.type === 'radio' ? ['Yes', 'No'].filter((option) => field.group_text.includes(option)) : [],
-    selected_option: field.checked ? field.label : '',
-    validation_message: field.validation_message,
-  }));
-  const reviewSummary = {};
-  if (/revise sua candidatura|review/i.test(lower)) {
-    reviewSummary.text = norm(text).slice(0, 2500);
-    reviewSummary.resume_filename = resumes[0] || '';
-    reviewSummary.final_submit_available = Boolean(submit && !submit.disabled);
-  }
-  return {
-    success: true,
-    dialog_present: true,
-    step_index: stepIndex,
-    step_count: stepCount,
-    step_title: stepTitle,
-    is_review_step: /revise sua candidatura|review/i.test(lower),
-    is_final_submit_step: Boolean(submit),
-    fields,
-    questions,
-    uploads: {
-      selected_or_latest_resume: resumes[0] || '',
-      resume_entries: opts.include_resume_entries ? resumes.slice(0, opts.max_resume_entries) : [],
-      upload_button_available: buttons.some((b) => /Carregar curr|Upload resume/i.test(b.text)),
-      new_upload_visible: Boolean(resumes[0]),
-    },
-    primary_action: submit || forward || {},
-    secondary_actions: buttons.filter((b) => /Voltar|Back/i.test(b.text)),
-    blocking_prompt: /Salvar esta candidatura\\?|Save this application\\?/i.test(text)
-      ? { title: 'Salvar esta candidatura?', actions: buttons.map((b) => b.text).filter(Boolean) } : {},
-    toast_messages: toastMessages,
-    inline_errors: [...inlineErrors, ...textErrors],
-    pending_required: fields.filter((field) => field.required && !field.value && !field.checked).map((field) => field.label),
-    review_summary: reviewSummary,
-    authorization_risk: Boolean(riskMatch),
-    risk_text: riskMatch ? norm(riskMatch[0]) : '',
-  };
-})()
+  return jobSnapshotFromRoot(detailRoot || document);
 """
     )
 
 
-def click_forward_script() -> str:
-    return """
-(() => {
-  const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-  const visible = (el) => {
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
-  };
-  const dialog = [...document.querySelectorAll('[role="dialog"], dialog, .jobs-easy-apply-modal')].filter(visible).at(-1);
-  if (!dialog) return { clicked: false, reason: 'no_dialog' };
-  const buttons = [...dialog.querySelectorAll('button')].filter((button) => visible(button) && !button.disabled);
-  const target = buttons.find((button) => /^Avan|^Aval|^Next|^Review/i.test(norm(button.innerText || '')));
-  if (!target) return { clicked: false, reason: 'forward_not_found', buttons: buttons.map((button) => norm(button.innerText || '')) };
-  target.click();
-  return { clicked: true, text: norm(target.innerText || '') };
-})()
+def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> str:
+    payload = json.dumps({'include_resume_entries': include_resume_entries, 'max_resume_entries': max_resume_entries})
+    return _script(
+        f"""
+  const opts = {payload};
+  const surface = findApplicationSurface();
+  const pageText = rootText(document);
+  const confirmation = /se candidatou agora|candidatura enviada|application submitted/.test(fold(pageText));
+  if (!surface.root || surface.kind === 'confirmation') {{
+    return {{
+      success: true,
+      surface: confirmation ? 'confirmation' : 'none',
+      form_present: false,
+      dialog_present: false,
+      submitted: confirmation,
+      confirmation_text: norm(pageText.match(/(Se candidatou agora|Candidatura enviada|Application submitted).{{0,80}}/i)?.[0] || ''),
+      application_status: confirmation ? 'submitted' : '',
+      application_state: confirmation ? 'submitted' : 'unknown',
+      application_state_text: confirmation ? 'submitted' : '',
+      timestamp_text: norm(pageText.match(/\\bagora\\b|just now/i)?.[0] || ''),
+      authorization_risk: false,
+      risk_text: '',
+      fields: [],
+      questions: [],
+      uploads: {{ selected_or_latest_resume: '', resume_entries: [], upload_button_available: false, new_upload_visible: false }},
+      primary_action: {{}},
+      secondary_actions: [],
+      blocking_prompt: {{}},
+      toast_messages: [],
+      inline_errors: [],
+      pending_required: [],
+      review_summary: {{}},
+    }};
+  }}
+  const root = surface.kind === 'dialog' ? narrowApplicationRoot(surface.root) : surface.root;
+  const text = rootText(root);
+  const surfaceText = rootText(surface.root);
+  const progress = stepProgressFor(surfaceText);
+  const localProgress = stepProgressFor(text);
+  const stepIndex = progress.index || localProgress.index;
+  const stepCount = progress.count || localProgress.count;
+  const headingText = [...root.querySelectorAll('h1, h2, h3, h4, [role="heading"]')]
+    .filter((heading) => visible(heading))
+    .map((heading) => norm(heading.innerText || '')).filter(Boolean).join(' ');
+  const stepTitle = inferStepTitle(headingText || text);
+  const fieldElements = [...root.querySelectorAll('input, textarea, select, [contenteditable="true"]')]
+    .filter((el) => visible(el) || fold(el.getAttribute('type') || '') === 'radio');
+  const fields = fieldElements.map((el, index) => fieldSnapshot(el, root, index));
+  const questionMap = new Map();
+  for (const field of fields) {{
+    if (!field.label && !field.group_text) continue;
+    const key = field.question_key || field.label;
+    if (!questionMap.has(key)) {{
+      questionMap.set(key, {{
+        label: field.label || field.group_text.split('?')[0],
+        input_type: field.type || field.tag,
+        required: false,
+        value: '',
+        options: [],
+        selected_option: '',
+        validation_message: '',
+      }});
+    }}
+    const question = questionMap.get(key);
+    question.required = question.required || field.required;
+    question.value = field.value || question.value;
+    question.validation_message = field.validation_message || question.validation_message;
+    if (field.selected_option) question.selected_option = field.selected_option;
+    for (const option of field.options || []) {{
+      const optionText = typeof option === 'string' ? option : norm(option?.text || '');
+      if (optionText && !question.options.includes(optionText)) question.options.push(optionText);
+    }}
+  }}
+  const questions = [...questionMap.values()];
+  const buttons = visibleControls(root).filter((button) => enabled(button)).map(controlInfo);
+  const submit = buttons.find((button) => isSubmitLabel(`${{button.text}} ${{button.aria}}`));
+  const forward = buttons.find((button) => isForwardLabel(button.text));
+  const resumeLines = String(text).split(/\\n+/).map(norm).filter((line) => /\\.(?:pdf|docx?)$/i.test(line));
+  const inputResumeNames = [...root.querySelectorAll('input[type="file"]')]
+    .flatMap((input) => [...(input.files || [])].map((file) => norm(file.name)));
+  const resumeNames = [...new Set([...inputResumeNames, ...resumeLines.map((line) => line.replace(/^pdf\\s+/i, ''))])];
+  const toastNodes = [...document.querySelectorAll('.artdeco-toast-item, [role="status"], [data-test-toast]')]
+    .filter((item) => visible(item));
+  const toasts = toastNodes.map((item) => norm(item.innerText || '')).filter(Boolean);
+  const inlineErrors = [...root.querySelectorAll('[role="alert"], .artdeco-inline-feedback, .fb-dash-form-element__error-text')]
+    .filter((item) => !item.closest('.artdeco-toast-item, [role="status"], [data-test-toast]'))
+    .map((item) => norm(item.innerText || '')).filter(Boolean);
+  for (const field of fields) {{
+    if (field.validation_message) inlineErrors.push(field.validation_message);
+  }}
+  const uniqueErrors = [...new Set(inlineErrors)];
+  const pending = [];
+  const pendingKeys = new Set();
+  for (const field of fields) {{
+    if (!field.required || pendingKeys.has(field.question_key)) continue;
+    const isChoice = field.type === 'radio' || field.type === 'checkbox';
+    const hasValue = isChoice ? fields.some((item) => item.question_key === field.question_key && item.checked) : Boolean(field.value || field.selected_text?.length);
+    if (!hasValue) {{
+      pending.push(field.label || field.group_text);
+      pendingKeys.add(field.question_key);
+    }}
+  }}
+  const risk = riskTextFor(text);
+  const reviewAnswers = reviewAnswersFor(text);
+  const isReview = stepTitle === 'Review' || Boolean(submit && /revise sua candidatura|review/.test(fold(text)));
+  const reviewSummary = isReview ? {{
+    text: norm(text).slice(0, 2500),
+    resume_filename: resumeNames[0] || '',
+    final_submit_available: Boolean(submit && !submit.disabled),
+    answers: questions.length ? questions : reviewAnswers,
+  }} : {{}};
+  const prompt = isSavePromptText(text) ? {{
+    title: 'Salvar esta candidatura?',
+    actions: buttons.map((button) => button.text).filter(Boolean),
+  }} : {{}};
+  return {{
+    success: true,
+    surface: surface.kind,
+    form_present: surface.kind === 'dialog' || surface.kind === 'inline',
+    dialog_present: surface.kind === 'dialog' || surface.kind === 'save_prompt',
+    step_index: stepIndex,
+    step_count: stepCount,
+    step_title: stepTitle,
+    is_review_step: isReview,
+    is_final_submit_step: Boolean(submit && !submit.disabled),
+    application_state: isReview ? 'draft' : 'unknown',
+    application_state_text: isReview ? 'review_ready' : '',
+    fields,
+    questions,
+    uploads: {{
+      selected_or_latest_resume: resumeNames[0] || '',
+      resume_entries: opts.include_resume_entries ? resumeNames.slice(0, opts.max_resume_entries) : [],
+      upload_button_available: buttons.some((button) => isUploadLabel(`${{button.text}} ${{button.aria}}`)),
+      new_upload_visible: Boolean(resumeNames[0]),
+    }},
+    primary_action: submit || forward || {{}},
+    secondary_actions: buttons.filter((button) => /voltar|back|editar|edit/.test(fold(button.text))),
+    blocking_prompt: prompt,
+    toast_messages: [...new Set(toasts)],
+    inline_errors: uniqueErrors,
+    pending_required: pending.filter(Boolean),
+    review_summary: reviewSummary,
+    authorization_risk: Boolean(risk),
+    risk_text: risk,
+  }};
 """
+    )
 
 
-def click_dialog_button_script(pattern: str) -> str:
-    payload = json.dumps({'pattern': pattern})
-    return (
-        '(() => {\nconst opts = '
-        + payload
-        + """;
-  const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-  const visible = (el) => {
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
-  };
-  const dialog = [...document.querySelectorAll('[role="dialog"], dialog, .jobs-easy-apply-modal')].filter(visible).at(-1);
-  if (!dialog) return { clicked: false, reason: 'no_dialog' };
-  const regex = new RegExp(opts.pattern, 'i');
-  const target = [...dialog.querySelectorAll('button')].find((button) => visible(button) && !button.disabled && regex.test(norm(button.innerText || button.getAttribute('aria-label') || '')));
-  if (!target) return { clicked: false, reason: 'button_not_found' };
-  target.click();
-  return { clicked: true, text: norm(target.innerText || target.getAttribute('aria-label') || '') };
-})()
+def resolve_action_script(action: str) -> str:
+    payload = json.dumps({'action': action})
+    return _script(
+        f"""
+  const opts = {payload};
+  let surface = findApplicationSurface();
+  let root = surface.root;
+  if (opts.action === 'apply') {{
+    root = findDetailRoot(document) || document;
+    surface = {{ kind: isDirectJobView() ? 'job_view' : 'search_detail', root }};
+  }}
+  if (!root) return {{ success: false, action: opts.action, reason: 'surface_not_found' }};
+  if (opts.action === 'file_input') {{
+    const inputs = [...document.querySelectorAll('input[type="file"]')];
+    const input = inputs.find((item) => root.contains(item)) || inputs.find((item) => item.isConnected);
+    return input ? {{ success: true, action: opts.action, surface: surface.kind, target: controlInfo(input) }}
+      : {{
+        success: false,
+        action: opts.action,
+        surface: surface.kind,
+        reason: 'file_input_not_found',
+        file_system_access_api: typeof window.showOpenFilePicker === 'function',
+        native_picker_likely: typeof window.showOpenFilePicker === 'function',
+      }};
+  }}
+  const controls = visibleControls(root)
+    .filter((control) => enabled(control))
+    .filter((control) => ['button', 'a', 'input', 'label'].includes(control.tagName.toLowerCase())
+      || ['button', 'link', 'radio', 'checkbox', 'option'].includes(fold(control.getAttribute('role') || '')));
+  let matcher = () => false;
+  if (opts.action === 'apply') matcher = (control) => isEasyApplyLabel(`${{controlText(control)}} ${{controlAria(control)}}`) || isContinueLabel(`${{controlText(control)}} ${{controlAria(control)}}`);
+  if (opts.action === 'forward') matcher = (control) => isForwardLabel(controlLabel(control));
+  if (opts.action === 'submit') matcher = (control) => isSubmitLabel(controlLabel(control));
+  if (opts.action === 'upload') matcher = (control) => isUploadLabel(controlLabel(control));
+  if (opts.action === 'save') matcher = (control) => isSaveLabel(controlLabel(control));
+  if (opts.action === 'discard') matcher = (control) => isDiscardLabel(controlLabel(control));
+  if (opts.action === 'close') matcher = (control) => isCloseLabel(controlLabel(control));
+  const matches = controls.filter(matcher);
+  matches.sort((left, right) => {{
+    const leftTag = left.tagName.toLowerCase();
+    const rightTag = right.tagName.toLowerCase();
+    const leftButton = leftTag === 'button' || fold(left.getAttribute('role') || '') === 'button';
+    const rightButton = rightTag === 'button' || fold(right.getAttribute('role') || '') === 'button';
+    return Number(rightButton) - Number(leftButton);
+  }});
+  const target = matches[0];
+  if (!target) return {{
+    success: false,
+    action: opts.action,
+    surface: surface.kind,
+    reason: 'target_not_found',
+    candidates: controls.map(controlInfo).slice(0, 20),
+  }};
+  return {{ success: true, action: opts.action, surface: surface.kind, target: controlInfo(target) }};
+"""
+    )
+
+
+def action_state_script(action: str) -> str:
+    payload = json.dumps({'action': action})
+    return _script(
+        f"""
+  const opts = {payload};
+  const surface = findApplicationSurface();
+  const root = surface.root && surface.kind !== 'confirmation'
+    ? (surface.kind === 'dialog' ? narrowApplicationRoot(surface.root) : surface.root)
+    : null;
+  const text = root ? rootText(root) : rootText(document);
+  const progress = stepProgressFor(text);
+  const buttons = root ? visibleControls(root).filter((button) => enabled(button)).map(controlInfo) : [];
+  const submit = buttons.find((button) => isSubmitLabel(`${{button.text}} ${{button.aria}}`));
+  const forward = buttons.find((button) => isForwardLabel(button.text));
+  const primary = submit || forward || {{}};
+  const bodyText = rootText(document);
+  return {{
+    success: true,
+    action: opts.action,
+    surface: surface.kind,
+    form_present: surface.kind === 'dialog' || surface.kind === 'inline',
+    dialog_present: surface.kind === 'dialog' || surface.kind === 'save_prompt',
+    submitted: surface.kind === 'confirmation' || /se candidatou agora|candidatura enviada|application submitted/.test(fold(bodyText)),
+    prompt_present: surface.kind === 'save_prompt' || isSavePromptText(bodyText),
+    step_index: progress.index,
+    step_count: progress.count,
+    step_title: inferStepTitle(text),
+    primary_label: norm(`${{primary.text || ''}} ${{primary.aria || ''}}`),
+    content_signature: norm(text).slice(0, 1200),
+  }};
 """
     )
 
 
 def fill_questions_script(answers: list[JsonObject]) -> str:
     payload = json.dumps({'answers': answers})
-    return (
-        '(() => {\nconst opts = '
-        + payload
-        + """;
-  const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-  const lower = (value) => norm(value).toLowerCase();
-  const visible = (el) => {
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
-  };
-  const setValue = (el, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-      || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-    if (setter) setter.call(el, String(value));
-    else el.value = String(value);
-    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText', data: String(value) }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
-  };
-  const dialog = [...document.querySelectorAll('[role="dialog"], dialog, .jobs-easy-apply-modal')].filter(visible).at(-1);
-  if (!dialog) return { success: false, filled: [], unfilled: opts.answers, ambiguous: [], blockers: [], reason: 'no_dialog' };
+    return _script(
+        f"""
+  const opts = {payload};
+  const surface = findApplicationSurface();
+  if (!surface.root) return {{ success: false, filled: [], unfilled: opts.answers, ambiguous: [], radio_actions: [], blockers: [], reason: 'surface_not_found' }};
+  const root = surface.root;
   const filled = [];
   const unfilled = [];
   const ambiguous = [];
-  for (const answer of opts.answers) {
-    const needle = lower(answer.question_contains || '');
-    const controls = [...dialog.querySelectorAll('input, textarea, select')].filter((el) => {
-      const groupText = lower(el.closest('fieldset, .jobs-easy-apply-form-section__grouping, div')?.innerText || '');
-      return groupText.includes(needle);
-    });
-    if (!needle || controls.length === 0) {
-      unfilled.push({ question_contains: answer.question_contains || '', reason: 'no_match' });
+  const radioActions = [];
+  const controls = [...root.querySelectorAll('input, textarea, select, [contenteditable="true"]')]
+    .filter((el) => visible(el) || ['radio', 'checkbox'].includes(fold(el.getAttribute('type') || '')));
+  const metadata = controls.map((el) => {{
+    const questionRoot = questionRootFor(el, root);
+    return {{ el, field: fieldSnapshot(el, root, 0), questionRoot }};
+  }});
+  const uniqueQuestionRoots = (items) => [...new Map(items.map((item) => [item.field.question_key, item])).values()];
+  const setValue = (el, value) => {{
+    const stringValue = String(value ?? '');
+    const prototype = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (setter) setter.call(el, stringValue); else el.value = stringValue;
+    el.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertReplacementText', data: stringValue }}));
+    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+    el.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+  }};
+  for (const answer of opts.answers) {{
+    const needle = questionText(answer.question_contains || '');
+    if (!needle) {{
+      unfilled.push({{ question_contains: '', reason: 'no_match' }});
       continue;
-    }
-    const textControl = controls.find((el) => visible(el) && (el.matches('input[type="text"], input:not([type]), textarea') || el.tagName === 'TEXTAREA'));
-    if (answer.value !== undefined && textControl) {
-      setValue(textControl, answer.value);
-      filled.push({ question_contains: answer.question_contains || '', value: String(answer.value) });
+    }}
+    const scored = uniqueQuestionRoots(metadata)
+      .map((item) => ({{ item, score: questionMatchScore(item, needle, answer) }}))
+      .filter((candidate) => candidate.score >= 0)
+      .sort((left, right) => right.score - left.score);
+    if (scored.length === 0) {{
+      unfilled.push({{ question_contains: answer.question_contains || '', reason: 'no_match' }});
       continue;
-    }
-    const optionText = lower(answer.option_text || answer.value || '');
-    const radios = controls.filter((el) => el.matches('input[type="radio"]'));
-    if (optionText && radios.length > 0) {
-      const groupText = controls.map((el) => norm(el.closest('fieldset, .jobs-easy-apply-form-section__grouping, div')?.innerText || '')).join('\\n');
-      const optionLines = groupText.split(/\\n+/)
-        .map((line) => norm(line))
-        .filter((line) => line && line.length < 80 && !line.includes('?') && !line.includes('*'));
-      const optionIndex = optionLines.findIndex((line) => lower(line) === optionText);
-      const targetIndex = optionIndex >= 0 ? Math.min(optionIndex, radios.length - 1) : -1;
-      if (targetIndex >= 0) {
-        radios[targetIndex].click();
-        radios[targetIndex].dispatchEvent(new Event('change', { bubbles: true }));
-        filled.push({ question_contains: answer.question_contains || '', option_text: answer.option_text || String(answer.value || '') });
+    }}
+    const bestScore = scored[0].score;
+    const matches = scored.filter((candidate) => candidate.score === bestScore).map((candidate) => candidate.item);
+    if (matches.length > 1) {{
+      ambiguous.push({{
+        question_contains: answer.question_contains || '',
+        reason: 'multiple_equally_specific_questions',
+        matches: matches.map((item) => ({{ label: item.field.label, input_type: item.field.type || item.field.tag, question_key: item.field.question_key, match_score: bestScore }})),
+      }});
+      continue;
+    }}
+    const match = matches[0];
+    const group = metadata.filter((item) => item.field.question_key === match.field.question_key);
+    const optionText = fold(answer.option_text || answer.value || '');
+    const textControl = group.find((item) => ['text', 'email', 'number', 'tel', 'url', ''].includes(fold(item.field.type)) || item.field.tag === 'textarea');
+    if (answer.value !== undefined && answer.value !== null && textControl) {{
+      setValue(textControl.el, answer.value);
+      filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, value: String(answer.value), input_type: textControl.field.type || textControl.field.tag }});
+      continue;
+    }}
+    const selectControl = group.find((item) => item.field.tag === 'select');
+    if (optionText && selectControl) {{
+      const option = [...selectControl.el.options].find((item) => fold(item.textContent || '') === optionText || fold(item.value || '') === optionText);
+      if (!option) {{
+        unfilled.push({{ question_contains: answer.question_contains || '', reason: 'option_not_found', matched_label: match.field.label }});
         continue;
-      }
-    }
-    ambiguous.push({ question_contains: answer.question_contains || '', matches: controls.length });
-  }
-  const text = dialog.innerText || '';
-  const blockerMatches = [...text.matchAll(/.{0,80}(W2|GC Holder|Green Card|US Citizen|C2C|1099|sponsorship|visa|work authorization|no sponsorship).{0,120}/gi)].map((match) => norm(match[0]));
-  return { success: unfilled.length === 0 && ambiguous.length === 0, filled, unfilled, ambiguous, blockers: [...new Set(blockerMatches)] };
-})()
+      }}
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      if (setter) setter.call(selectControl.el, option.value); else selectControl.el.value = option.value;
+      selectControl.el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+      selectControl.el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+      filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: norm(option.textContent || ''), selected_value: String(option.value || '') }});
+      continue;
+    }}
+    const radios = group.filter((item) => ['radio', 'checkbox'].includes(fold(item.field.type)));
+    if (optionText && radios.length) {{
+      const choices = radios.filter((item) => fold(optionLabelFor(item.el)) === optionText);
+      if (choices.length !== 1) {{
+        unfilled.push({{ question_contains: answer.question_contains || '', reason: choices.length ? 'ambiguous_option' : 'option_not_found', matched_label: match.field.label }});
+        continue;
+      }}
+      const choice = choices[0];
+      if (choice.field.checked) {{
+        filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: optionLabelFor(choice.el), verified: true }});
+      }} else {{
+        radioActions.push({{ selector: cssPath(choice.el), question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: optionLabelFor(choice.el) }});
+      }}
+      continue;
+    }}
+    ambiguous.push({{ question_contains: answer.question_contains || '', matches: group.length, reason: 'unsupported_or_ambiguous_control' }});
+  }}
+  const risk = riskTextFor(rootText(root));
+  return {{ success: unfilled.length === 0 && ambiguous.length === 0, filled, unfilled, ambiguous, radio_actions: radioActions, blockers: risk ? [risk] : [], authorization_risk: Boolean(risk), risk_text: risk }};
 """
     )
+
+
+def set_choice_state_script(selector: str) -> str:
+    payload = json.dumps({'selector': selector})
+    return _script(
+        f"""
+  const opts = {payload};
+  const target = document.querySelector(opts.selector);
+  if (!target) return {{ success: false, verified: false, reason: 'choice_not_found' }};
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set;
+  if (setter) setter.call(target, true); else target.checked = true;
+  target.dispatchEvent(new InputEvent('input', {{ bubbles: true }}));
+  target.dispatchEvent(new Event('change', {{ bubbles: true }}));
+  target.dispatchEvent(new MouseEvent('click', {{ bubbles: true, view: window }}));
+  return {{ success: target.checked === true, verified: target.checked === true, selector: opts.selector }};
+"""
+    )
+
+
+def _script(body: str) -> str:
+    return '(() => {\n' + shared_state_helpers_script() + body + '\n})()'

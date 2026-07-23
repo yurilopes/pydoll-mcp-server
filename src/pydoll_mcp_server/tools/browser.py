@@ -17,8 +17,9 @@ from pydoll_mcp_server.browser.pydoll_compat import (
 )
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, normalize_json_value
 from pydoll_mcp_server.logging import get_logger
+from pydoll_mcp_server.recovery.health import check_browser_health
 from pydoll_mcp_server.security.proxy import validate_proxy
 
 
@@ -215,12 +216,20 @@ def _warning_to_json(warning: BrowserLaunchWarning) -> JsonObject:
     return {'code': warning['code'], 'message': warning['message']}
 
 
-async def browser_list(client_id: str) -> JsonObject:
+async def browser_list(client_id: str, include_health: bool = False) -> JsonObject:
+    """List owned browsers and optionally probe their live CDP connection."""
     registry = get_registry()
     browsers = registry.list_browsers(client_id)
+    summaries: list[JsonObject] = [b.summary() for b in browsers]
+    if include_health:
+        live_health = await asyncio.gather(
+            *(check_browser_health(client_id, browser.browser_id) for browser in browsers)
+        )
+        for summary, health in zip(summaries, live_health, strict=True):
+            summary['live_health'] = health
     return {
         'success': True,
-        'browsers': [b.summary() for b in browsers],
+        'browsers': [normalize_json_value(summary, 'browsers[]') for summary in summaries],
     }
 
 

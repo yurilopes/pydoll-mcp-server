@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LinkedIn Jobs Search Fixture</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .layout { display: flex; gap: 24px; }
+    .results { width: 320px; }
+    .jobs-search__job-details { border: 1px solid #ccc; padding: 20px; width: 620px; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="results">
+      <ul>
+        <li class="jobs-search-results__list-item" data-job-id="101">
+          <a href="/jobs/view/101/">Full Stack Developer</a>
+          <p>Example Software</p>
+          <p>United States (Remote)</p>
+        </li>
+        <li class="jobs-search-results__list-item" data-job-id="202">
+          <a href="/jobs/view/202/">Automation Engineer</a>
+          <p>Example Automation</p>
+          <p>Brazil (Remote)</p>
+        </li>
+        <li class="base-search-card job-search-card" data-entity-urn="urn:li:jobPosting:303">
+          <a class="base-card__full-link" href="/jobs/view/303/">Modern Automation Engineer</a>
+          <p>Modern Automation Inc</p>
+          <p>Brazil (Remote)</p>
+          <p>Easy Apply</p>
+        </li>
+      </ul>
+      <button aria-label="Next">Next</button>
+    </aside>
+    <section class="jobs-search__job-details" data-job-id="101">
+      <h1>Full Stack Developer</h1>
+      <a class="job-details-jobs-unified-top-card__company-name">Example Software</a>
+      <p>United States (Remote)</p>
+      <button role="button" aria-label="Use Easy Apply for this job">Easy Apply</button>
+      <p>Python, React, and FastAPI.</p>
+    </section>
+  </div>
+</body>
+<script>
+  document.querySelectorAll('.jobs-search-results__list-item a').forEach((link) => {
+    link.addEventListener('click', (event) => event.preventDefault());
+  });
+  const wireEasyApply = () => {
+    const apply = document.querySelector('.jobs-search__job-details button');
+    if (!apply || !apply.textContent.includes('Easy Apply')) return;
+    apply.addEventListener('click', () => {
+      const detail = document.querySelector('.jobs-search__job-details');
+      detail.innerHTML = '<form class="jobs-easy-apply-form"><section><p>1 of 2 pages</p><h2>Contact info</h2><label>Email<input type="email" required></label><button type="button">Next</button></section></form>';
+    });
+  };
+  window.setLinkedInJobState = (state) => {
+    const detail = document.querySelector('.jobs-search__job-details');
+    const markup = {
+      not_started: '<h1>Full Stack Developer</h1><p>Example Software</p><p>United States (Remote)</p><button aria-label="Use Easy Apply for this job">Easy Apply</button>',
+      draft: '<h1>Full Stack Developer</h1><p>Example Software</p><p>Your answers were saved</p><button>Continue</button>',
+      submitted: '<h1>Full Stack Developer</h1><p>Example Software</p><p>Application submitted</p>',
+      saved: '<h1>Full Stack Developer</h1><p>Example Software</p><button aria-label="Save job">Save job</button>',
+      unavailable: '<h1>Full Stack Developer</h1><p>Example Software</p><p>Job closed</p>',
+    };
+    detail.innerHTML = markup[state] || markup.not_started;
+    wireEasyApply();
+  };
+  wireEasyApply();
+</script>
+</html>

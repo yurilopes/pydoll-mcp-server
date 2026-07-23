@@ -54,6 +54,7 @@
   </main>
 
   <div id="easy-apply" class="modal hidden" role="dialog" aria-modal="true">
+    <button id="close-apply" aria-label="Fechar">Fechar</button>
     <h2>Candidate-se à empresa TSR Consulting</h2>
     <div id="step-contact">
       <p>1 de 4 páginas</p>
@@ -132,5 +133,33 @@
     O currículo foi carregado
     <button>Fechar</button>
   </div>
+
+  <script>
+    const applyButton = document.querySelector('main > button[aria-label*="candidatura"]');
+    const applyModal = document.getElementById('easy-apply');
+    const savePrompt = document.getElementById('save-prompt');
+    const applicationStatus = document.getElementById('application-status');
+    const steps = ['step-contact', 'step-resume', 'step-questions', 'step-review'];
+    const showStep = (index) => steps.forEach((id, position) => {
+      document.getElementById(id).classList.toggle('hidden', position !== index);
+    });
+    applyButton.addEventListener('click', () => {
+      applyModal.classList.remove('hidden');
+      showStep(0);
+    });
+    document.getElementById('step-contact').querySelector('button').addEventListener('click', () => showStep(1));
+    document.getElementById('step-resume').querySelector('button:last-of-type').addEventListener('click', () => showStep(2));
+    document.getElementById('step-questions').querySelector('button:last-of-type').addEventListener('click', () => showStep(3));
+    document.getElementById('step-review').querySelector('button:last-of-type').addEventListener('click', () => {
+      applyModal.classList.add('hidden');
+      applicationStatus.classList.remove('hidden');
+    });
+    document.getElementById('close-apply').addEventListener('click', () => {
+      applyModal.classList.add('hidden');
+      savePrompt.classList.remove('hidden');
+    });
+    savePrompt.querySelector('button:first-of-type').addEventListener('click', () => savePrompt.classList.add('hidden'));
+    savePrompt.querySelector('button:last-of-type').addEventListener('click', () => savePrompt.classList.add('hidden'));
+  </script>
 </body>
 </html>

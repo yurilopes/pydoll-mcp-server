@@ -1,33 +1,43 @@
-"""LinkedIn Easy Apply tools."""
+"""LinkedIn Easy Apply browser helpers."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
 from typing import TypedDict
 
-from pydoll.exceptions import PydollException
-
-from pydoll_mcp_server.browser.locks import tab_operation_lock
-from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import (
     JsonObject,
+    get_array,
     get_bool,
+    get_object,
     get_string,
     normalize_json_value,
     require_json_object,
 )
-from pydoll_mcp_server.tools.elements import element_click, element_find
-from pydoll_mcp_server.tools.files import upload_files
+from pydoll_mcp_server.tools.linkedin_runtime import (
+    click_resolved_action as _click_resolved_action,
+)
+from pydoll_mcp_server.tools.linkedin_runtime import (
+    click_selector as _click_selector,
+)
+from pydoll_mcp_server.tools.linkedin_runtime import (
+    execute_mutating_script as _execute_mutating_script,
+)
+from pydoll_mcp_server.tools.linkedin_runtime import (
+    execute_script as _execute_script,
+)
+from pydoll_mcp_server.tools.linkedin_runtime import (
+    snapshot_ready as _snapshot_ready,
+)
 from pydoll_mcp_server.tools.linkedin_scripts import (
-    click_dialog_button_script,
-    click_forward_script,
     fill_questions_script,
     job_snapshot_script,
     snapshot_script,
+)
+from pydoll_mcp_server.tools.linkedin_upload import (
+    linkedin_easy_apply_upload_resume as _linkedin_easy_apply_upload_resume,
 )
 
 
@@ -38,7 +48,18 @@ class LinkedInQuestionAnswer(TypedDict, total=False):
 
 
 async def linkedin_job_snapshot(client_id: str, tab_id: str) -> JsonObject:
+    """Capture the active LinkedIn job detail and application state."""
     return await _execute_script(client_id, tab_id, job_snapshot_script(), 'LinkedIn job snapshot failed')
+
+
+async def linkedin_easy_apply_upload_resume(
+    client_id: str,
+    tab_id: str,
+    path: str,
+    expected_filename: str | None = None,
+    timeout_ms: int = 30000,
+) -> JsonObject:
+    return await _linkedin_easy_apply_upload_resume(client_id, tab_id, path, expected_filename, timeout_ms)
 
 
 async def linkedin_easy_apply_open(
@@ -46,28 +67,16 @@ async def linkedin_easy_apply_open(
     tab_id: str,
     timeout_ms: int = 15000,
 ) -> JsonObject:
-    selector = (
-        'button[aria-label*="candidatura simplificada"],'
-        'button[aria-label*="Easy Apply"],'
-        'button[aria-label*="easy apply"],'
-        'button[aria-label*="Continuar"],'
-        'button[aria-label*="Continue"]'
-    )
-    find_result = await element_find(client_id, tab_id, selector=selector, timeout=max(1, timeout_ms / 1000))
-    if not get_bool(find_result, 'success'):
-        return find_result
-    element_id = get_string(find_result, 'element_id')
-    click_result = await element_click(
-        client_id,
-        tab_id,
-        element_id,
-        timeout=max(1, timeout_ms / 1000),
-        expect_dialog=True,
-        effect_timeout=max(1, timeout_ms / 1000),
-    )
+    """Open Easy Apply from the active job detail and return its first snapshot."""
+    current = await linkedin_easy_apply_snapshot(client_id, tab_id)
+    if get_bool(current, 'form_present') or get_bool(current, 'submitted'):
+        return current
+    click_result = await _click_resolved_action(client_id, tab_id, 'apply', timeout_ms)
     if not get_bool(click_result, 'success'):
         return click_result
-    return await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=timeout_ms)
+    ready = await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=timeout_ms)
+    ready['open'] = click_result
+    return ready
 
 
 async def linkedin_easy_apply_snapshot(
@@ -76,6 +85,7 @@ async def linkedin_easy_apply_snapshot(
     include_resume_entries: bool = False,
     max_resume_entries: int = 5,
 ) -> JsonObject:
+    """Capture the visible Easy Apply dialog or inline form only."""
     safe_max = max(1, min(max_resume_entries, 50))
     return await _execute_script(
         client_id,
@@ -90,6 +100,7 @@ async def linkedin_easy_apply_wait_ready(
     tab_id: str,
     timeout_ms: int = 15000,
 ) -> JsonObject:
+    """Wait for an Easy Apply surface, blocking prompt, error, or confirmation."""
     deadline = time.monotonic() + max(1, timeout_ms) / 1000
     last_snapshot: JsonObject = {}
     while time.monotonic() < deadline:
@@ -109,84 +120,27 @@ async def linkedin_easy_apply_wait_ready(
     }
 
 
-async def linkedin_easy_apply_upload_resume(
-    client_id: str,
-    tab_id: str,
-    path: str,
-    expected_filename: str | None = None,
-    timeout_ms: int = 30000,
-) -> JsonObject:
-    filename = expected_filename or Path(path).name
-    click_result = await _click_dialog_button(client_id, tab_id, r'Carregar curr|Upload resume')
-    if not get_bool(click_result, 'success'):
-        return click_result
-
-    file_input = await element_find(
-        client_id,
-        tab_id,
-        selector='input[type="file"]',
-        timeout=max(1, timeout_ms / 1000),
-    )
-    if not get_bool(file_input, 'success'):
-        return file_input
-    element_id = get_string(file_input, 'element_id')
-    upload_result = await upload_files(
-        client_id,
-        tab_id,
-        element_id=element_id,
-        paths=[path],
-        expect_filename_visible=False,
-    )
-    if not get_bool(upload_result, 'success'):
-        return upload_result
-
-    deadline = time.monotonic() + max(1, timeout_ms) / 1000
-    snapshot: JsonObject = {}
-    while time.monotonic() < deadline:
-        snapshot = await linkedin_easy_apply_snapshot(client_id, tab_id, include_resume_entries=True)
-        if filename and filename in str(snapshot):
-            break
-        await asyncio.sleep(0.5)
-    latest = require_json_object(snapshot.get('uploads', {}), 'uploads') if snapshot else {}
-    return {
-        'success': True,
-        'uploaded': True,
-        'filename': filename,
-        'new_upload_visible': filename in str(snapshot),
-        'selected_or_latest_resume': get_string(latest, 'selected_or_latest_resume', ''),
-        'toast_messages': snapshot.get('toast_messages', []),
-        'upload': upload_result,
-    }
-
-
 async def linkedin_easy_apply_click_next(
     client_id: str,
     tab_id: str,
     expected_current_step: int | None = None,
 ) -> JsonObject:
+    """Click only the forward action of the active Easy Apply surface."""
     if expected_current_step is not None:
         current = await linkedin_easy_apply_snapshot(client_id, tab_id)
-        step_index = current.get('step_index')
+        raw_step_index = current.get('step_index')
+        step_index = (
+            raw_step_index if isinstance(raw_step_index, int) and not isinstance(raw_step_index, bool) else None
+        )
         if step_index != expected_current_step:
             return StructuredError(
                 ErrorCode.INVALID_INPUT,
                 f'Expected LinkedIn Easy Apply step {expected_current_step}, found {step_index}',
                 retryable=False,
             ).to_dict()
-    click_result = await _execute_mutating_script(
-        client_id,
-        tab_id,
-        click_forward_script(),
-        'LinkedIn next click failed',
-    )
-    if not get_bool(click_result, 'success') or not get_bool(click_result, 'clicked'):
-        return StructuredError(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            f'LinkedIn forward action not found: {get_string(click_result, "reason", "unknown")}',
-            retryable=True,
-            details=click_result,
-        ).to_dict()
-    await asyncio.sleep(0.5)
+    click_result = await _click_resolved_action(client_id, tab_id, 'forward', 10000)
+    if not get_bool(click_result, 'success'):
+        return click_result
     snapshot = await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=10000)
     snapshot['click'] = click_result
     return snapshot
@@ -197,6 +151,7 @@ async def linkedin_easy_apply_fill_questions(
     tab_id: str,
     answers: list[LinkedInQuestionAnswer],
 ) -> JsonObject:
+    """Fill explicitly provided Easy Apply answers and report unresolved questions."""
     normalized_answers = [_answer_to_json(answer) for answer in answers]
     result = await _execute_mutating_script(
         client_id,
@@ -204,10 +159,39 @@ async def linkedin_easy_apply_fill_questions(
         fill_questions_script(normalized_answers),
         'LinkedIn Easy Apply question fill failed',
     )
+    filled = get_array(result, 'filled', [])
+    unfilled = get_array(result, 'unfilled', [])
+    for action_value in get_array(result, 'radio_actions', []):
+        action = require_json_object(action_value, 'radio action')
+        selector = get_string(action, 'selector')
+        click = await _click_selector(client_id, tab_id, selector, 10000, allow_hidden_choice_fallback=True)
+        if get_bool(click, 'success'):
+            filled.append(
+                {
+                    'question_contains': get_string(action, 'question_contains'),
+                    'matched_label': get_string(action, 'matched_label'),
+                    'option_text': get_string(action, 'option_text'),
+                    'verified': True,
+                }
+            )
+        else:
+            unfilled.append(
+                {
+                    'question_contains': get_string(action, 'question_contains'),
+                    'matched_label': get_string(action, 'matched_label'),
+                    'option_text': get_string(action, 'option_text'),
+                    'reason': 'click_failed',
+                    'click_error': click,
+                }
+            )
+    result['filled'] = filled
+    result['unfilled'] = unfilled
+    result['radio_actions'] = []
+    result['success'] = len(unfilled) == 0 and len(get_array(result, 'ambiguous', [])) == 0
     snapshot = await linkedin_easy_apply_snapshot(client_id, tab_id)
     result['snapshot'] = snapshot
-    result['authorization_risk'] = get_bool(snapshot, 'authorization_risk') or bool(result.get('blockers'))
-    result['risk_text'] = get_string(snapshot, 'risk_text', '')
+    result['authorization_risk'] = get_bool(snapshot, 'authorization_risk') or bool(get_array(result, 'blockers', []))
+    result['risk_text'] = get_string(snapshot, 'risk_text', get_string(result, 'risk_text', ''))
     return result
 
 
@@ -216,14 +200,13 @@ async def linkedin_easy_apply_handle_save_prompt(
     tab_id: str,
     action: str,
 ) -> JsonObject:
+    """Act on a visible LinkedIn save prompt without choosing an answer."""
     if action not in {'save', 'discard'}:
         return StructuredError(ErrorCode.INVALID_INPUT, 'action must be save or discard').to_dict()
-    pattern = r'^Salvar$|^Save$' if action == 'save' else r'^Descartar$|^Discard$'
     snapshot = await linkedin_easy_apply_snapshot(client_id, tab_id)
-    prompt = require_json_object(snapshot.get('blocking_prompt', {}), 'blocking_prompt')
-    if not prompt:
+    if not get_object(snapshot, 'blocking_prompt', {}):
         return StructuredError(ErrorCode.RESOURCE_NOT_FOUND, 'No LinkedIn save prompt is visible').to_dict()
-    click_result = await _click_dialog_button(client_id, tab_id, pattern)
+    click_result = await _click_resolved_action(client_id, tab_id, action, 10000)
     if not get_bool(click_result, 'success'):
         return click_result
     await asyncio.sleep(0.5)
@@ -233,12 +216,32 @@ async def linkedin_easy_apply_handle_save_prompt(
     return job_snapshot
 
 
+async def linkedin_easy_apply_close(client_id: str, tab_id: str) -> JsonObject:
+    """Close Easy Apply and report whether LinkedIn opened a save prompt."""
+    current = await linkedin_easy_apply_snapshot(client_id, tab_id)
+    if not get_bool(current, 'form_present') and not get_bool(current, 'dialog_present'):
+        return StructuredError(ErrorCode.RESOURCE_NOT_FOUND, 'No LinkedIn Easy Apply surface is visible').to_dict()
+    click_result = await _click_resolved_action(client_id, tab_id, 'close', 10000)
+    if not get_bool(click_result, 'success'):
+        return click_result
+    await asyncio.sleep(0.5)
+    after = await linkedin_easy_apply_snapshot(client_id, tab_id)
+    return {
+        'success': True,
+        'closed': not get_bool(after, 'form_present') and not get_bool(after, 'dialog_present'),
+        'save_prompt_visible': bool(get_object(after, 'blocking_prompt', {})),
+        'snapshot': after,
+        'click': click_result,
+    }
+
+
 async def linkedin_easy_apply_submit(
     client_id: str,
     tab_id: str,
     confirm_submit: bool = False,
     timeout_ms: int = 20000,
 ) -> JsonObject:
+    """Submit only a verified final step when explicitly confirmed."""
     if not confirm_submit:
         return StructuredError(
             ErrorCode.INVALID_INPUT,
@@ -253,7 +256,7 @@ async def linkedin_easy_apply_submit(
             retryable=False,
             details=snapshot,
         ).to_dict()
-    click_result = await _click_dialog_button(client_id, tab_id, r'Enviar candidatura|Submit application')
+    click_result = await _click_resolved_action(client_id, tab_id, 'submit', timeout_ms)
     if not get_bool(click_result, 'success'):
         return click_result
 
@@ -269,7 +272,8 @@ async def linkedin_easy_apply_submit(
                 'confirmation_text': get_string(post, 'confirmation_text', ''),
                 'application_status': get_string(post, 'application_status', ''),
                 'timestamp_text': get_string(post, 'timestamp_text', ''),
-                'dialog_closed': not get_bool(post, 'dialog_present'),
+                'dialog_closed': not get_bool(post, 'dialog_present') and not get_bool(post, 'form_present'),
+                'surface': get_string(post, 'surface', ''),
                 'click': click_result,
             }
         await asyncio.sleep(0.5)
@@ -277,65 +281,8 @@ async def linkedin_easy_apply_submit(
         ErrorCode.TIMEOUT,
         f'LinkedIn submit confirmation did not appear within {timeout_ms}ms',
         retryable=True,
-        details=last_snapshot,
+        details={'last_snapshot': last_snapshot, 'click': click_result},
     ).to_dict()
-
-
-async def _click_dialog_button(client_id: str, tab_id: str, pattern: str) -> JsonObject:
-    result = await _execute_mutating_script(
-        client_id,
-        tab_id,
-        click_dialog_button_script(pattern),
-        'LinkedIn dialog button click failed',
-    )
-    if not get_bool(result, 'clicked'):
-        return StructuredError(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            f'LinkedIn dialog button not found for pattern: {pattern}',
-            retryable=True,
-            details=result,
-        ).to_dict()
-    result['success'] = True
-    return result
-
-
-async def _execute_script(client_id: str, tab_id: str, script: str, message: str) -> JsonObject:
-    try:
-        tab_info = get_registry().get_tab(client_id, tab_id)
-    except StructuredError as exc:
-        return exc.to_dict()
-    try:
-        result = await tab_info.pydoll_tab.execute_script(script, return_by_value=True)
-        return extract_script_object(result)
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'{message}: {exc}', retryable=True).to_dict()
-
-
-async def _execute_mutating_script(client_id: str, tab_id: str, script: str, message: str) -> JsonObject:
-    try:
-        tab_info = get_registry().get_tab(client_id, tab_id)
-    except StructuredError as exc:
-        return exc.to_dict()
-    try:
-        async with tab_operation_lock(tab_id):
-            result = await tab_info.pydoll_tab.execute_script(script, return_by_value=True)
-        data = extract_script_object(result)
-        data.setdefault('success', True)
-        return data
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'{message}: {exc}', retryable=True).to_dict()
-
-
-def _snapshot_ready(snapshot: JsonObject) -> bool:
-    if get_bool(snapshot, 'submitted'):
-        return True
-    if not get_bool(snapshot, 'dialog_present'):
-        return False
-    if snapshot.get('blocking_prompt'):
-        return True
-    if snapshot.get('step_index') or snapshot.get('step_title'):
-        return True
-    return bool(snapshot.get('inline_errors'))
 
 
 def _answer_to_json(answer: LinkedInQuestionAnswer) -> JsonObject:

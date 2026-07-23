@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LinkedIn Upload Fixture</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    #easy-apply-form { border: 1px solid #ccc; padding: 20px; width: 720px; }
+    .hidden { display: none; }
+    [role="status"] { border: 1px solid #999; padding: 8px; }
+  </style>
+</head>
+<body>
+  <form id="easy-apply-form" class="jobs-easy-apply-form">
+    <section id="step-resume">
+      <p>2 of 4 pages</p>
+      <h2>Resume</h2>
+      <button id="upload-resume" type="button">Upload resume</button>
+      <input id="resume-file" type="file" accept="application/pdf" class="hidden">
+      <p id="selected-resume"></p>
+      <button type="button">Next</button>
+    </section>
+  </form>
+  <div id="upload-toast" class="hidden" role="status">Resume uploaded</div>
+  <script>
+    const input = document.getElementById('resume-file');
+    const selected = document.getElementById('selected-resume');
+    const toast = document.getElementById('upload-toast');
+    input.addEventListener('change', () => {
+      selected.textContent = Array.from(input.files).map((file) => file.name).join(', ');
+      toast.classList.remove('hidden');
+    });
+  </script>
+</body>
+</html>

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pydoll_mcp_server.json_types import JsonObject
+from pydoll_mcp_server.json_types import JsonObject, get_array, get_object
 
 pytestmark = [pytest.mark.unit]
 
@@ -24,6 +24,7 @@ class TestLinkedInToolRegistration:
         assert 'linkedin_job_snapshot' in names
         assert 'linkedin_easy_apply_open' in names
         assert 'linkedin_easy_apply_snapshot' in names
+        assert 'linkedin_easy_apply_close' in names
         assert 'linkedin_easy_apply_submit' in names
         assert 'linkedin_jobs_search' in names
         assert 'linkedin_jobs_search_results' in names
@@ -67,7 +68,7 @@ class TestLinkedInSnapshot:
                 }
             )
         )
-        with patch('pydoll_mcp_server.tools.linkedin.get_registry') as registry:
+        with patch('pydoll_mcp_server.tools.linkedin_runtime.get_registry') as registry:
             tab_info = MagicMock()
             tab_info.pydoll_tab = mock_tab
             registry.return_value.get_tab.return_value = tab_info
@@ -99,7 +100,7 @@ class TestLinkedInSnapshot:
                 }
             )
         )
-        with patch('pydoll_mcp_server.tools.linkedin.get_registry') as registry:
+        with patch('pydoll_mcp_server.tools.linkedin_runtime.get_registry') as registry:
             tab_info = MagicMock()
             tab_info.pydoll_tab = mock_tab
             registry.return_value.get_tab.return_value = tab_info
@@ -138,7 +139,7 @@ class TestLinkedInSnapshot:
                 }
             )
         )
-        with patch('pydoll_mcp_server.tools.linkedin.get_registry') as registry:
+        with patch('pydoll_mcp_server.tools.linkedin_runtime.get_registry') as registry:
             tab_info = MagicMock()
             tab_info.pydoll_tab = mock_tab
             registry.return_value.get_tab.return_value = tab_info
@@ -155,41 +156,44 @@ class TestLinkedInActions:
 
         with (
             patch(
-                'pydoll_mcp_server.tools.linkedin.element_find',
-                new=AsyncMock(return_value={'success': True, 'element_id': 'el_apply'}),
-            ) as find,
+                'pydoll_mcp_server.tools.linkedin.linkedin_easy_apply_snapshot',
+                new=AsyncMock(return_value={'success': True, 'form_present': False, 'submitted': False}),
+            ),
             patch(
-                'pydoll_mcp_server.tools.linkedin.element_click',
-                new=AsyncMock(return_value={'success': True, 'clicked': True}),
+                'pydoll_mcp_server.tools.linkedin._click_resolved_action',
+                new=AsyncMock(return_value={'success': True, 'action': 'apply', 'click': {'clicked': True}}),
             ) as click,
             patch(
                 'pydoll_mcp_server.tools.linkedin.linkedin_easy_apply_wait_ready',
-                new=AsyncMock(return_value={'success': True, 'dialog_present': True}),
+                new=AsyncMock(return_value={'success': True, 'surface': 'dialog', 'form_present': True}),
             ),
         ):
             result = asyncio.run(linkedin_easy_apply_open('client', 'tab'))
 
         assert result['success'] is True
-        find.assert_awaited_once()
         click.assert_awaited_once()
         click_args = click.await_args
         assert click_args is not None
-        assert click_args.kwargs['expect_dialog'] is True
+        assert click_args.args[2] == 'apply'
 
     def test_upload_resume_passes_paths_to_upload_files(self) -> None:
         from pydoll_mcp_server.tools.linkedin import linkedin_easy_apply_upload_resume
 
         with (
             patch(
-                'pydoll_mcp_server.tools.linkedin._click_dialog_button',
+                'pydoll_mcp_server.tools.linkedin_upload._click_resolved_action',
                 new=AsyncMock(return_value={'success': True, 'clicked': True}),
             ),
             patch(
-                'pydoll_mcp_server.tools.linkedin.element_find',
+                'pydoll_mcp_server.tools.linkedin_upload._execute_script',
+                new=AsyncMock(return_value={'success': True, 'target': {'selector_hint': '#resume-file'}}),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin_upload.element_find',
                 new=AsyncMock(return_value={'success': True, 'element_id': 'el_file'}),
             ),
             patch(
-                'pydoll_mcp_server.tools.linkedin.upload_files',
+                'pydoll_mcp_server.tools.linkedin_upload.upload_files',
                 new=AsyncMock(return_value={'success': True, 'accepted': []}),
             ) as upload,
             patch(
@@ -214,6 +218,7 @@ class TestLinkedInActions:
             )
 
         assert result['uploaded'] is True
+        assert result['upload_verified'] is True
         upload.assert_awaited_once()
         upload_args = upload.await_args
         assert upload_args is not None
@@ -250,7 +255,7 @@ class TestLinkedInActions:
                 new=AsyncMock(side_effect=snapshot_side_effect),
             ),
             patch(
-                'pydoll_mcp_server.tools.linkedin._click_dialog_button',
+                'pydoll_mcp_server.tools.linkedin._click_resolved_action',
                 new=AsyncMock(return_value={'success': True, 'clicked': True}),
             ),
         ):
@@ -276,7 +281,7 @@ class TestLinkedInActions:
             )
         )
         with (
-            patch('pydoll_mcp_server.tools.linkedin.get_registry') as registry,
+            patch('pydoll_mcp_server.tools.linkedin_runtime.get_registry') as registry,
             patch(
                 'pydoll_mcp_server.tools.linkedin.linkedin_easy_apply_snapshot',
                 new=AsyncMock(
@@ -303,3 +308,86 @@ class TestLinkedInActions:
         assert result['success'] is True
         assert result['authorization_risk'] is True
         assert result['risk_text'] == 'Only GC Holders & US Citizen'
+
+
+class TestLinkedInRuntime:
+    def test_click_resolved_action_retries_with_pointer_after_no_effect(self) -> None:
+        from pydoll_mcp_server.tools.linkedin_runtime import click_resolved_action
+
+        before = {
+            'success': True,
+            'surface': 'none',
+            'form_present': False,
+            'prompt_present': False,
+            'content_signature': 'job detail',
+        }
+        after_no_effect = {
+            'success': True,
+            'surface': 'none',
+            'form_present': False,
+            'prompt_present': False,
+            'content_signature': 'job detail',
+        }
+        after_effect = {
+            'success': True,
+            'surface': 'dialog',
+            'form_present': True,
+            'prompt_present': False,
+            'content_signature': 'Contact info',
+        }
+        resolution = {'success': True, 'surface': 'job_view', 'target': {'selector_hint': '#apply'}}
+        clicks = [
+            {'success': True, 'strategy_used': 'native'},
+            {'success': True, 'strategy_used': 'dispatch_pointer_sequence'},
+        ]
+        with (
+            patch(
+                'pydoll_mcp_server.tools.linkedin_runtime.execute_script',
+                new=AsyncMock(side_effect=[before, resolution, resolution]),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin_runtime.click_selector',
+                new=AsyncMock(side_effect=clicks),
+            ) as click,
+            patch(
+                'pydoll_mcp_server.tools.linkedin_runtime._wait_for_action_state',
+                new=AsyncMock(side_effect=[after_no_effect, after_effect]),
+            ),
+        ):
+            result = asyncio.run(click_resolved_action('client', 'tab', 'apply', 3000))
+
+        assert result['success'] is True
+        assert result['effect_observed'] is True
+        assert click.await_count == 2
+        assert click.await_args_list[1].kwargs['click_strategy'] == 'dispatch_pointer_sequence'
+
+    def test_click_resolved_action_returns_no_effect_after_failed_recovery(self) -> None:
+        from pydoll_mcp_server.tools.linkedin_runtime import click_resolved_action
+
+        state = {
+            'success': True,
+            'surface': 'none',
+            'form_present': False,
+            'prompt_present': False,
+            'content_signature': 'unchanged',
+        }
+        resolution = {'success': True, 'surface': 'job_view', 'target': {'selector_hint': '#apply'}}
+        with (
+            patch(
+                'pydoll_mcp_server.tools.linkedin_runtime.execute_script',
+                new=AsyncMock(side_effect=[state, resolution, resolution]),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin_runtime.click_selector',
+                new=AsyncMock(return_value={'success': True}),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin_runtime._wait_for_action_state',
+                new=AsyncMock(return_value=state),
+            ),
+        ):
+            result = asyncio.run(click_resolved_action('client', 'tab', 'apply', 3000))
+
+        assert result['error_code'] == 'NO_EFFECT'
+        details = get_object(result, 'details', {})
+        assert len(get_array(details, 'attempts', [])) == 2

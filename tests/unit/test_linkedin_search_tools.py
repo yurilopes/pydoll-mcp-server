@@ -64,7 +64,7 @@ class TestLinkedInSearch:
             ) as goto,
             patch(
                 'pydoll_mcp_server.tools.linkedin_search.linkedin_jobs_search_results',
-                new=AsyncMock(return_value={'success': True, 'results': [], 'count': 0}),
+                new=AsyncMock(return_value={'success': True, 'results': [], 'count': 0, 'no_results': True}),
             ) as results,
         ):
             response = asyncio.run(
@@ -80,7 +80,37 @@ class TestLinkedInSearch:
         assert response['count'] == 0
         assert 'search_url' in response
         goto.assert_awaited_once()
-        results.assert_awaited_once_with('client', 'tab')
+        results.assert_awaited_once_with('client', 'tab', max_results=25)
+
+    def test_search_waits_for_hydrated_results(self) -> None:
+        from pydoll_mcp_server.tools.linkedin_search import linkedin_jobs_search
+
+        responses: list[JsonObject] = [
+            {'success': True, 'results': [], 'count': 0, 'no_results': False},
+            {'success': True, 'results': [{'linkedin_job_id': '123'}], 'count': 1, 'no_results': False},
+        ]
+        with (
+            patch(
+                'pydoll_mcp_server.tools.linkedin_search.page_goto',
+                new=AsyncMock(return_value={'success': True, 'url': 'https://www.linkedin.com/jobs/search/'}),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin_search.linkedin_jobs_search_results',
+                new=AsyncMock(side_effect=responses),
+            ) as results,
+        ):
+            response = asyncio.run(
+                linkedin_jobs_search(
+                    'client',
+                    'tab',
+                    keywords='Python Developer',
+                    location='Brazil',
+                    timeout_ms=1000,
+                )
+            )
+
+        assert response['count'] == 1
+        assert results.await_count == 2
 
     def test_search_results_extracts_compact_payload(self) -> None:
         from pydoll_mcp_server.tools.linkedin_search import linkedin_jobs_search_results
@@ -149,6 +179,10 @@ class TestLinkedInSearch:
                 ),
             ),
             patch(
+                'pydoll_mcp_server.tools.linkedin_search._execute_search_script',
+                new=AsyncMock(return_value={'success': True, 'card': {'selector_hint': '#job-card'}}),
+            ),
+            patch(
                 'pydoll_mcp_server.tools.linkedin_search.element_find',
                 new=AsyncMock(return_value={'success': True, 'element_id': 'el_job'}),
             ),
@@ -157,8 +191,14 @@ class TestLinkedInSearch:
                 new=AsyncMock(return_value={'success': True, 'clicked': True}),
             ),
             patch(
-                'pydoll_mcp_server.tools.linkedin_search.linkedin_job_snapshot',
-                new=AsyncMock(return_value={'success': True, 'linkedin_job_id': '123'}),
+                'pydoll_mcp_server.tools.linkedin_search._wait_for_opened_job',
+                new=AsyncMock(
+                    return_value={
+                        'success': True,
+                        'linkedin_job_id': '123',
+                        'detail_panel_present': True,
+                    }
+                ),
             ),
         ):
             result = asyncio.run(linkedin_jobs_open_result('client', 'tab', linkedin_job_id='123', timeout_ms=1000))
@@ -180,8 +220,8 @@ class TestLinkedInSearch:
                 ),
             ),
             patch(
-                'pydoll_mcp_server.tools.linkedin_search.element_find',
-                new=AsyncMock(return_value={'error_code': 'RESOURCE_NOT_FOUND'}),
+                'pydoll_mcp_server.tools.linkedin_search._execute_search_script',
+                new=AsyncMock(return_value={'success': True}),
             ),
             patch(
                 'pydoll_mcp_server.tools.linkedin_search.page_goto',

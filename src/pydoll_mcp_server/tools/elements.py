@@ -33,6 +33,7 @@ async def element_find(
     timeout: float | None = None,
     find_all: bool = False,
 ) -> JsonObject:
+    """Find elements with CSS or XPath; use semantic finders for intent-based lookup."""
     config = get_timeout_config()
     timeout = timeout or config.wait_selector
     timeout = min(timeout, config.max_timeout)
