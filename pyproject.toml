@@ -35,6 +35,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+windows = [
+    "pywinauto>=0.6.9",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -85,5 +88,6 @@ markers = [
     "slow: Tests that take a long time to run",
     "contract: Tests that validate the MCP contract",
     "browser_smoke: Smoke test with real browser (headless Chrome)",
+    "native_ui: Tests that require an interactive Windows desktop",
     "mcp_e2e: End-to-end tests through a real MCP client and server process",
 ]

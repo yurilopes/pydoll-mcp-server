@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
+from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
@@ -16,19 +18,22 @@ from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_float, get_s
 async def element_find_by_text_candidates(
     client_id: str,
     tab_id: str,
-    text: str,
-    exact: bool = True,
-    role: str = '',
-    tag: str = '',
-    within_element_id: str = '',
-    nearest_heading: str = '',
-    section_label: str = '',
-    aria_contains: str = '',
-    prefer_modal: bool = True,
-    prefer_main_content: bool = True,
-    prefer_visible_center: bool = True,
-    prefer_largest: bool = False,
-    max_candidates: int = 20,
+    text: Annotated[str, Field(description='Visible text to rank as candidate matches.')],
+    exact: Annotated[bool, Field(description='Require exact normalized text when true.')] = True,
+    role: Annotated[str, Field(description='Optional ARIA role filter.')] = '',
+    tag: Annotated[str, Field(description='Optional HTML tag filter.')] = '',
+    within_element_id: Annotated[
+        str,
+        Field(description='Optional cached container element_id that limits the search scope.'),
+    ] = '',
+    nearest_heading: Annotated[str, Field(description='Optional nearby heading ranking hint.')] = '',
+    section_label: Annotated[str, Field(description='Optional section label ranking hint.')] = '',
+    aria_contains: Annotated[str, Field(description='Optional accessible-label substring filter.')] = '',
+    prefer_modal: Annotated[bool, Field(description='Prefer candidates inside a modal or dialog.')] = True,
+    prefer_main_content: Annotated[bool, Field(description='Prefer candidates inside main content.')] = True,
+    prefer_visible_center: Annotated[bool, Field(description='Prefer candidates near the viewport center.')] = True,
+    prefer_largest: Annotated[bool, Field(description='Prefer candidates with larger visible bounds.')] = False,
+    max_candidates: Annotated[int, Field(description='Maximum ranked candidates to return.')] = 20,
 ) -> JsonObject:
     safe_max = max(1, min(max_candidates, 100))
 

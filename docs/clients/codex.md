@@ -27,12 +27,16 @@ mcp_servers:
 
 ## stdio transport (optional)
 
+The default `full` profile preserves compatibility. For general browser
+automation, prefer `--tool-profile agent`; use `--tool-profile linkedin` when
+LinkedIn search or Easy Apply helpers are needed.
+
 ```yaml
 mcp_servers:
   pydoll-mcp:
     transport: stdio
     command: pydoll-mcp-server
-    args: ["--transport", "stdio"]
+    args: ["--transport", "stdio", "--tool-profile", "agent"]
 ```
 
 Restart Codex after config changes.

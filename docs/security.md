@@ -44,6 +44,10 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
   controlled client artifact directory before upload. It rejects sources outside
   runtime directories and explicit allowlists, returns exact allowed directories
   on denial, and sanitizes filenames.
+- **Native picker note**: Chrome's File System Access API may reject files under
+  protected Windows locations such as `AppData` even when the MCP allowlist
+  permits them. Use a user-controlled directory and add it explicitly to the
+  upload allowlist for native-picker uploads.
 - **Download**: files stored in `downloads_dir/{client_id}/`.
 - **Screenshots**: saved to artifact files by default (`return_base64=false`).
   Base64 is returned only with explicit opt-in. Path writing validated against

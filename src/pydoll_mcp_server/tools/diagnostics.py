@@ -10,6 +10,7 @@ from pydoll_mcp_server.diagnostics.trace import TraceEvent, get_trace_manager
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.server_state import SCHEMA_VERSION, get_server_state
+from pydoll_mcp_server.tool_runtime import get_active_tool_count, get_active_tool_profile
 from pydoll_mcp_server.version import get_version
 
 
@@ -38,6 +39,8 @@ def server_status(client_id: str = 'anonymous', include_clients: bool = False) -
         'schema_version': SCHEMA_VERSION,
         'uptime_seconds': round(state.uptime_seconds, 1),
         'auth_mode': 'token' if config.auth_enabled else 'none',
+        'tool_profile': get_active_tool_profile().value,
+        'exposed_tool_count': get_active_tool_count(),
         'capabilities': {
             'transports': ['http', 'sse', 'stdio'],
             'browser': ['launch', 'close', 'list', 'attach'],

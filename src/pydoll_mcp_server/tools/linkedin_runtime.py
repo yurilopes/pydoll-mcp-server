@@ -6,7 +6,6 @@ import asyncio
 import time
 import unicodedata
 
-from pydoll.browser.tab import Tab
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
@@ -15,8 +14,8 @@ from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, e
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_bool, get_object, get_string
 from pydoll_mcp_server.tools.elements import element_click, element_find
-from pydoll_mcp_server.tools.files import upload_allowlist
 from pydoll_mcp_server.tools.linkedin_scripts import action_state_script, resolve_action_script, set_choice_state_script
+from pydoll_mcp_server.tools.upload_trigger import upload_files_from_trigger
 
 
 async def click_resolved_action(
@@ -166,70 +165,21 @@ async def upload_with_file_chooser(
     path: str,
     timeout_ms: int,
 ) -> JsonObject:
-    if not upload_allowlist().is_allowed(path):
-        return StructuredError(
-            ErrorCode.PERMISSION_DENIED,
-            f'Upload path not in allowed directories: {path}',
-            retryable=False,
-            recovery_hint='Place files in the artifacts or downloads directory.',
-        ).to_dict()
-    try:
-        tab_info = get_registry().get_tab(client_id, tab_id)
-    except StructuredError as exc:
-        return exc.to_dict()
     found = await element_find(client_id, tab_id, selector=selector, timeout=max(1, timeout_ms / 1000))
     if not get_bool(found, 'success'):
         return found
     element_id = get_string(found, 'element_id')
     if not element_id:
         return StructuredError(ErrorCode.STALE_ELEMENT, 'LinkedIn upload control was not resolved').to_dict()
-    try:
-        click = await asyncio.wait_for(
-            _click_with_file_chooser(tab_info.pydoll_tab, client_id, tab_id, element_id, path, timeout_ms),
-            timeout=max(1, timeout_ms) / 1000,
-        )
-    except asyncio.TimeoutError:
-        return StructuredError(
-            ErrorCode.TIMEOUT,
-            f'LinkedIn file chooser did not complete within {timeout_ms}ms',
-            retryable=True,
-        ).to_dict()
-    except (PydollException, OSError, TypeError, ValueError) as exc:
-        return StructuredError(
-            ErrorCode.EXECUTION_ERROR,
-            f'LinkedIn file chooser upload failed: {exc}',
-            retryable=True,
-        ).to_dict()
-    if not get_bool(click, 'success'):
-        return click
-    return {
-        'success': True,
-        'uploaded_via': 'file_chooser',
-        'element_id': element_id,
-        'clicked': True,
-        'chooser_intercepted': True,
-        'click': click,
-    }
-
-
-async def _click_with_file_chooser(
-    tab: Tab,
-    client_id: str,
-    tab_id: str,
-    element_id: str,
-    path: str,
-    timeout_ms: int,
-) -> JsonObject:
-    async with tab.expect_file_chooser(files=path):
-        click = await element_click(
-            client_id,
-            tab_id,
-            element_id,
-            timeout=max(1, timeout_ms / 1000),
-            click_strategy='native',
-        )
-        await asyncio.sleep(0.2)
-    return click
+    return await upload_files_from_trigger(
+        client_id=client_id,
+        tab_id=tab_id,
+        trigger_element_id=element_id,
+        paths=[path],
+        picker_strategy='auto',
+        expected_filenames=[path.rsplit('\\', 1)[-1].rsplit('/', 1)[-1]],
+        timeout_ms=timeout_ms,
+    )
 
 
 async def _wait_for_action_state(

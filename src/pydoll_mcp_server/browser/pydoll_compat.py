@@ -11,6 +11,7 @@ from typing import TypeGuard
 from pydoll.browser.chromium.base import Browser
 from pydoll.browser.options import ChromiumOptions
 from pydoll.browser.tab import Tab
+from pydoll.commands.dom_commands import DomCommands
 from pydoll.commands.network_commands import NetworkCommands
 from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import PydollException
@@ -90,6 +91,21 @@ async def enable_page_events(tab: Tab) -> None:
     await operation()
 
 
+async def disable_page_events(tab: Tab) -> None:
+    operation: Callable[[], Awaitable[object]] = tab.disable_page_events
+    await operation()
+
+
+async def enable_intercept_file_chooser_dialog(tab: Tab) -> None:
+    operation: Callable[[], Awaitable[object]] = tab.enable_intercept_file_chooser_dialog
+    await operation()
+
+
+async def disable_intercept_file_chooser_dialog(tab: Tab) -> None:
+    operation: Callable[[], Awaitable[object]] = tab.disable_intercept_file_chooser_dialog
+    await operation()
+
+
 async def bring_tab_to_front(tab: Tab) -> None:
     operation: Callable[[], Awaitable[object]] = tab.bring_to_front
     await operation()
@@ -117,6 +133,20 @@ async def refresh_tab(tab: Tab) -> None:
 async def stop_browser(browser: Browser) -> None:
     operation: Callable[[], Awaitable[object]] = browser.stop
     await operation()
+
+
+def get_browser_process_id(browser: Browser) -> int | None:
+    """Read the launched browser PID through one isolated Pydoll compatibility boundary."""
+
+    try:
+        process_manager: object = object.__getattribute__(browser, '_browser_process_manager')
+        process: object = object.__getattribute__(process_manager, '_process')
+        if process is None:
+            return None
+        process_id: object = object.__getattribute__(process, 'pid')
+    except AttributeError:
+        return None
+    return process_id if isinstance(process_id, int) and not isinstance(process_id, bool) else None
 
 
 async def register_runtime_callback(
@@ -169,3 +199,20 @@ async def set_input_files(element: WebElement, paths: list[str]) -> None:
     if not _is_object_awaitable(upload):
         raise TypeError('Pydoll file upload did not return an awaitable')
     await asyncio.ensure_future(upload)
+
+
+async def set_input_files_by_backend_node(tab: Tab, backend_node_id: int, paths: list[str]) -> None:
+    """Set files for a CDP file chooser event without exposing arbitrary CDP commands."""
+
+    method: object = object.__getattribute__(tab, '_execute_command')
+    if not callable(method):
+        raise TypeError('Pydoll tab does not expose command execution')
+    pending: object = method(
+        DomCommands.set_file_input_files(
+            files=list(paths),
+            backend_node_id=backend_node_id,
+        )
+    )
+    if not _is_object_awaitable(pending):
+        raise TypeError('Pydoll command execution did not return an awaitable')
+    await asyncio.ensure_future(pending)

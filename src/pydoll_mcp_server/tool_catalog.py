@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
 
@@ -10,6 +11,14 @@ from pydoll_mcp_server.browser.cdp_helpers import get_user_agent, get_viewport, 
 from pydoll_mcp_server.dom.deep_traversal import element_find_deep, page_get_tree_deep
 from pydoll_mcp_server.dom.tree import build_page_tree, page_get_text, page_screenshot
 from pydoll_mcp_server.security.proxy import proxy_validate
+from pydoll_mcp_server.tool_metadata import (
+    TOOL_METADATA,
+    ToolMetadata,
+    ToolProfile,
+    parse_tool_profile,
+    tool_names_for_profile,
+)
+from pydoll_mcp_server.tool_runtime import set_active_tool_profile
 from pydoll_mcp_server.tools.active_surface import page_get_active_surface
 from pydoll_mcp_server.tools.browser import browser_close, browser_launch, browser_list, proxy_get
 from pydoll_mcp_server.tools.diagnostics import (
@@ -136,6 +145,7 @@ from pydoll_mcp_server.tools.tab_advanced import (
 from pydoll_mcp_server.tools.tabs import tab_activate, tab_close, tab_list, tab_recover
 from pydoll_mcp_server.tools.text_ranking import element_find_by_text_candidates
 from pydoll_mcp_server.tools.upload_prep import artifact_prepare_upload
+from pydoll_mcp_server.tools.upload_trigger import upload_files_from_trigger
 from pydoll_mcp_server.tools.waits import (
     element_wait_for_state,
     network_wait_for_request,
@@ -151,6 +161,16 @@ from pydoll_mcp_server.tools.waits import (
 from pydoll_mcp_server.tools.websocket import websocket_frames_list, websocket_get, websocket_list
 
 Tool = Callable[..., object]
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """Resolved registration data for one public MCP tool."""
+
+    function: Tool
+    public_name: str
+    metadata: ToolMetadata
+
 
 TOOLS: tuple[Tool, ...] = (
     health_check,
@@ -197,6 +217,7 @@ TOOLS: tuple[Tool, ...] = (
     storage_set,
     download_expect,
     upload_files,
+    upload_files_from_trigger,
     file_upload_state,
     artifact_get_paths,
     artifact_import,
@@ -299,9 +320,58 @@ TOOLS: tuple[Tool, ...] = (
 )
 
 
-def register_tools(mcp: FastMCP) -> None:
-    for function in TOOLS:
-        mcp.tool(name=_public_tool_name(function), structured_output=False)(function)
+def get_tool_specs(profile: ToolProfile | str = ToolProfile.FULL) -> tuple[ToolSpec, ...]:
+    """Resolve the ordered public tools for an exposure profile."""
+
+    selected_profile = profile if isinstance(profile, ToolProfile) else parse_tool_profile(profile)
+    all_names = tuple(_public_tool_name(function) for function in TOOLS)
+    if len(all_names) != len(set(all_names)):
+        raise RuntimeError('The MCP catalog contains duplicate public tool names.')
+    catalog_names = set(all_names)
+    metadata_names = set(TOOL_METADATA)
+    missing_metadata = catalog_names - metadata_names
+    extra_metadata = metadata_names - catalog_names
+    if missing_metadata or extra_metadata:
+        missing = ', '.join(sorted(missing_metadata)) or 'none'
+        extra = ', '.join(sorted(extra_metadata)) or 'none'
+        raise RuntimeError(f'Tool metadata mismatch. Missing: {missing}; extra: {extra}.')
+    selected_names = tool_names_for_profile(selected_profile, all_names)
+    unknown_names = selected_names - catalog_names
+    if unknown_names:
+        names = ', '.join(sorted(unknown_names))
+        raise RuntimeError(f'Tool profile {selected_profile.value} contains unknown tools: {names}')
+
+    specs: list[ToolSpec] = []
+    for function, public_name in zip(TOOLS, all_names, strict=True):
+        metadata = TOOL_METADATA.get(public_name)
+        if metadata is None:
+            raise RuntimeError(f'Missing metadata for public tool: {public_name}')
+        if public_name in selected_names:
+            specs.append(ToolSpec(function, public_name, metadata))
+    return tuple(specs)
+
+
+def get_exposed_tool_names(profile: ToolProfile | str = ToolProfile.FULL) -> tuple[str, ...]:
+    """Return ordered public names for an exposure profile."""
+
+    return tuple(spec.public_name for spec in get_tool_specs(profile))
+
+
+def register_tools(mcp: FastMCP, profile: ToolProfile | str = ToolProfile.FULL) -> tuple[ToolSpec, ...]:
+    """Register all tools selected by an exposure profile."""
+
+    selected_profile = profile if isinstance(profile, ToolProfile) else parse_tool_profile(profile)
+    specs = get_tool_specs(selected_profile)
+    set_active_tool_profile(selected_profile, len(specs))
+    for spec in specs:
+        mcp.tool(
+            name=spec.public_name,
+            title=spec.metadata.title,
+            description=spec.metadata.description,
+            annotations=spec.metadata.annotations,
+            structured_output=False,
+        )(spec.function)
+    return specs
 
 
 def _public_tool_name(function: Tool) -> str:

@@ -54,21 +54,6 @@ async def linkedin_easy_apply_upload_resume(
         'reason': 'file_input_already_mounted' if selector else 'file_input_not_mounted',
     }
     if not selector:
-        if get_bool(input_resolution, 'native_picker_likely'):
-            return StructuredError(
-                ErrorCode.UNSUPPORTED,
-                'LinkedIn uses a native File System Access picker instead of an input[type=file]',
-                retryable=False,
-                details={
-                    'filename': filename,
-                    'file_input_resolution': input_resolution,
-                    'native_picker_opened': False,
-                },
-                recovery_hint=(
-                    'Use a desktop automation boundary to select the allowed artifact in the Windows dialog, '
-                    'then capture the upload toast with linkedin_easy_apply_snapshot.'
-                ),
-            ).to_dict()
         upload_resolution = await _execute_script(
             client_id,
             tab_id,
@@ -102,7 +87,8 @@ async def linkedin_easy_apply_upload_resume(
             if selector:
                 break
             await asyncio.sleep(0.25)
-    if not selector:
+    strategy_used = get_string(click_result, 'strategy_used')
+    if not selector and strategy_used not in {'direct_input', 'chooser_intercept', 'desktop_picker'}:
         return StructuredError(
             ErrorCode.RESOURCE_NOT_FOUND,
             'LinkedIn Easy Apply file input was not resolved after opening the upload control',
@@ -112,20 +98,23 @@ async def linkedin_easy_apply_upload_resume(
                 'Use an artifact path or a desktop automation boundary when LinkedIn opens a native file chooser.'
             ),
         ).to_dict()
-    file_input = await element_find(client_id, tab_id, selector=selector, timeout=max(1, timeout_ms / 1000))
-    if not get_bool(file_input, 'success'):
-        return file_input
-    element_id = get_string(file_input, 'element_id')
-    upload_result = await upload_files(
-        client_id,
-        tab_id,
-        element_id=element_id,
-        paths=[path],
-        expect_filename_visible=True,
-        verify_timeout=max(1, timeout_ms / 1000),
-    )
-    if not get_bool(upload_result, 'success'):
-        return upload_result
+    if strategy_used in {'direct_input', 'chooser_intercept', 'desktop_picker'}:
+        upload_result = click_result
+    else:
+        file_input = await element_find(client_id, tab_id, selector=selector, timeout=max(1, timeout_ms / 1000))
+        if not get_bool(file_input, 'success'):
+            return file_input
+        element_id = get_string(file_input, 'element_id')
+        upload_result = await upload_files(
+            client_id,
+            tab_id,
+            element_id=element_id,
+            paths=[path],
+            expect_filename_visible=True,
+            verify_timeout=max(1, timeout_ms / 1000),
+        )
+        if not get_bool(upload_result, 'success'):
+            return upload_result
 
     deadline = time.monotonic() + max(1, timeout_ms) / 1000
     latest: JsonObject = {}

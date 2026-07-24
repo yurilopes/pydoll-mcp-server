@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Annotated
 
+from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
@@ -17,13 +19,22 @@ from pydoll_mcp_server.json_types import JsonObject
 async def submission_wait_for_confirmation(
     client_id: str,
     tab_id: str,
-    success_text_any: list[str] | None = None,
-    status_text_any: list[str] | None = None,
-    button_text_any: list[str] | None = None,
-    expect_url_change: bool = False,
-    expect_modal_gone: bool = False,
-    card_selector: str = '',
-    timeout: float | None = None,
+    success_text_any: Annotated[
+        list[str] | None,
+        Field(description='Text patterns that prove a successful submission.'),
+    ] = None,
+    status_text_any: Annotated[
+        list[str] | None,
+        Field(description='Text patterns that describe submitted, blocked, or uncertain status.'),
+    ] = None,
+    button_text_any: Annotated[
+        list[str] | None,
+        Field(description='Button text patterns used as additional evidence.'),
+    ] = None,
+    expect_url_change: Annotated[bool, Field(description='Treat a URL change as evidence when true.')] = False,
+    expect_modal_gone: Annotated[bool, Field(description='Treat a closed modal as evidence when true.')] = False,
+    card_selector: Annotated[str, Field(description='Optional CSS selector for a result card to inspect.')] = '',
+    timeout: Annotated[float | None, Field(description='Maximum confirmation wait in seconds.')] = None,
 ) -> JsonObject:
     success_texts = success_text_any or []
     status_texts = status_text_any or []

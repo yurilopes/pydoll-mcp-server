@@ -35,10 +35,29 @@ In your OpenCode project config (`.opencode/opencode.jsonc`):
 For Windows native mode, keep stdio UTF-8 explicit:
 
 ```powershell
+python -m pip install "pydoll-mcp-server[windows]"
+$env:PYDOLL_MCP_ALLOW_NO_AUTH = "true"
+$env:PYTHONIOENCODING = "utf-8"
+python -m pydoll_mcp_server.cli --transport stdio --tool-profile linkedin
+```
+
+The `windows` extra is needed only when an upload portal opens a native file
+picker through the File System Access API. The fallback requires a visible
+browser. Headless sessions receive a structured unsupported result.
+
+For stdio without the optional Windows picker:
+
+```powershell
 $env:PYDOLL_MCP_ALLOW_NO_AUTH = "true"
 $env:PYTHONIOENCODING = "utf-8"
 python -m pydoll_mcp_server.cli --transport stdio
 ```
+
+Use the `linkedin` profile for the current OpenCode job-application workflow.
+It exposes the canonical browser tools plus the LinkedIn search and Easy Apply
+helpers, while keeping advanced network, JavaScript, and diagnostic tools out
+of the default model context. Use `agent` for non-LinkedIn browser automation
+or `full` only when advanced compatibility is required.
 
 ```jsonc
 {
@@ -50,7 +69,9 @@ python -m pydoll_mcp_server.cli --transport stdio
         "-m",
         "pydoll_mcp_server.cli",
         "--transport",
-        "stdio"
+        "stdio",
+        "--tool-profile",
+        "linkedin"
       ],
       "environment": {
         "PYDOLL_MCP_ALLOW_NO_AUTH": "true",

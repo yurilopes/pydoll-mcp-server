@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import time
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
+from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
@@ -30,10 +31,21 @@ class FormFillField(TypedDict, total=False):
 async def form_fill_fields(
     client_id: str,
     tab_id: str,
-    fields: list[FormFillField],
-    scope: str = 'auto',
-    validate: bool = True,
-    include_values: bool = False,
+    fields: Annotated[
+        list[FormFillField],
+        Field(
+            description='Explicit field mappings. Use one or more label, question, placeholder, selector, role, or name hints per field.'
+        ),
+    ],
+    scope: Annotated[
+        str,
+        Field(
+            description='Form scope hint: auto, modal, dialog, form, or main.',
+            json_schema_extra={'enum': ['auto', 'modal', 'dialog', 'form', 'main']},
+        ),
+    ] = 'auto',
+    validate: Annotated[bool, Field(description='Run validation and return validation_errors after filling.')] = True,
+    include_values: Annotated[bool, Field(description='Include values in field evidence when true.')] = False,
 ) -> JsonObject:
     try:
         tab_info = get_registry().get_tab(client_id, tab_id)

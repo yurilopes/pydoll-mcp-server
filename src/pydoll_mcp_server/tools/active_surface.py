@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from typing import Annotated
 
+from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
@@ -21,11 +23,19 @@ VALID_SCOPES = frozenset({'auto', 'modal', 'dialog', 'form', 'main', 'viewport',
 async def page_get_active_surface(
     client_id: str,
     tab_id: str,
-    scope: str = 'auto',
-    max_fields: int = 100,
-    max_controls: int = 120,
-    include_values: bool = False,
-    text_max_chars: int = 300,
+    scope: Annotated[
+        str,
+        Field(
+            description='Surface scope: auto, modal, dialog, form, main, viewport, or active_element_context.',
+            json_schema_extra={
+                'enum': ['auto', 'modal', 'dialog', 'form', 'main', 'viewport', 'active_element_context']
+            },
+        ),
+    ] = 'auto',
+    max_fields: Annotated[int, Field(description='Maximum form fields to inspect.')] = 100,
+    max_controls: Annotated[int, Field(description='Maximum actionable controls to inspect.')] = 120,
+    include_values: Annotated[bool, Field(description='Include current input values when true.')] = False,
+    text_max_chars: Annotated[int, Field(description='Maximum text excerpt length for surface labels.')] = 300,
 ) -> JsonObject:
     if scope not in VALID_SCOPES:
         return StructuredError(

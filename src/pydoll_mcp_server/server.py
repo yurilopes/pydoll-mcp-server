@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import AsyncGenerator
 
 from mcp.server.fastmcp import FastMCP
@@ -23,6 +24,7 @@ from pydoll_mcp_server.server_state import (
     get_server_state,
 )
 from pydoll_mcp_server.tool_catalog import register_tools
+from pydoll_mcp_server.tool_metadata import ToolProfile, parse_tool_profile
 from pydoll_mcp_server.tools.diagnostics import (
     browser_attach,
     diagnostics_snapshot,
@@ -35,13 +37,20 @@ from pydoll_mcp_server.tools.diagnostics import (
 )
 from pydoll_mcp_server.version import get_version
 
+
+def _configured_tool_profile() -> ToolProfile:
+    raw_profile = os.environ.get('PYDOLL_MCP_TOOL_PROFILE', ToolProfile.FULL.value)
+    return parse_tool_profile(raw_profile)
+
+
+TOOL_PROFILE = _configured_tool_profile()
 mcp = FastMCP(
     'pydoll-mcp-server',
     instructions='Browser automation MCP server using Pydoll.',
     streamable_http_path='/',
     sse_path='/',
 )
-register_tools(mcp)
+register_tools(mcp, TOOL_PROFILE)
 _server_state = get_server_state()
 
 
@@ -86,6 +95,7 @@ def create_app() -> Starlette:
 
 
 __all__ = [
+    'TOOL_PROFILE',
     'ServerState',
     'browser_attach',
     'create_app',

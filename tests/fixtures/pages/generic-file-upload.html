@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Generic File Upload Fixture</title>
+</head>
+<body>
+  <main>
+    <h1>Application documents</h1>
+    <section id="input-upload">
+      <h2>Input upload</h2>
+      <button id="input-trigger" type="button">Upload resume with input</button>
+      <input id="input-file" type="file" accept=".pdf" hidden>
+      <p id="input-selected"></p>
+      <div id="input-status" role="status"></div>
+    </section>
+    <section id="native-upload">
+      <h2>Native picker upload</h2>
+      <button id="native-trigger" type="button">Upload resume with native picker</button>
+      <p id="native-selected"></p>
+      <div id="native-status" role="status"></div>
+    </section>
+  </main>
+  <script>
+    const input = document.getElementById('input-file');
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      document.getElementById('input-selected').textContent = file.name;
+      document.getElementById('input-status').textContent = 'Resume uploaded';
+    });
+
+    document.getElementById('input-trigger').addEventListener('click', () => input.click());
+    document.getElementById('native-trigger').addEventListener('click', async () => {
+      const status = document.getElementById('native-status');
+      try {
+        const handles = await window.showOpenFilePicker({ multiple: false });
+        const file = await handles[0].getFile();
+        document.getElementById('native-selected').textContent = file.name;
+        status.textContent = 'Resume uploaded';
+      } catch (error) {
+        status.textContent = error && error.name === 'AbortError' ? 'Selection cancelled' : 'Upload failed';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -94,6 +94,7 @@ class BrowserInfo:
     profile: ProfileInfo | None = None
     health: ResourceHealth = ResourceHealth.HEALTHY
     headless: bool = False
+    browser_process_id: int | None = field(default=None, repr=False)
     proxy_server: str = ''
     proxy_launch_url: str = field(default='', repr=False)
     proxy_scheme: str = ''

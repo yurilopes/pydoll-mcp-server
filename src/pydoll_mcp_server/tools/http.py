@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Annotated
 from urllib.parse import urlencode
 
 import aiohttp
+from pydantic import Field
 
 from pydoll_mcp_server.browser.http_client import (
     MAX_BODY_BYTES,
@@ -40,20 +42,32 @@ OMITTED_REPLAY_HEADERS = {'host', 'content-length', 'transfer-encoding', 'connec
 async def http_request(
     client_id: str,
     tab_id: str,
-    method: str,
-    url: str,
-    headers: dict[str, str] | None = None,
-    query: list[HttpField] | None = None,
-    json_value: object = None,
-    form_fields: list[HttpField] | None = None,
-    body: str | None = None,
-    body_base64: str | None = None,
-    content_type: str = '',
-    follow_redirects: bool = True,
-    allow_cross_origin: bool = False,
-    timeout: float = 30.0,
-    max_response_bytes: int = 1_048_576,
-    operation_id: str = '',
+    method: Annotated[str, Field(description='HTTP method. Payload methods require explicit side-effect policy.')],
+    url: Annotated[str, Field(description='Relative URL or absolute URL allowed by the tab and cross-origin policy.')],
+    headers: Annotated[dict[str, str] | None, Field(description='Optional request headers.')] = None,
+    query: Annotated[list[HttpField] | None, Field(description='Optional query fields.')] = None,
+    json_value: Annotated[
+        object, Field(description='JSON payload. Do not combine with form_fields, body, or body_base64.')
+    ] = None,
+    form_fields: Annotated[
+        list[HttpField] | None,
+        Field(description='Form payload fields. Do not combine with json_value, body, or body_base64.'),
+    ] = None,
+    body: Annotated[
+        str | None, Field(description='Raw text payload. Do not combine with another payload mode.')
+    ] = None,
+    body_base64: Annotated[
+        str | None, Field(description='Base64 binary payload. Do not combine with another payload mode.')
+    ] = None,
+    content_type: Annotated[str, Field(description='Optional content type for raw or binary payloads.')] = '',
+    follow_redirects: Annotated[bool, Field(description='Follow HTTP redirects when true.')] = True,
+    allow_cross_origin: Annotated[
+        bool,
+        Field(description='Allow a destination outside the current tab origin when true.'),
+    ] = False,
+    timeout: Annotated[float, Field(description='Request timeout in seconds.')] = 30.0,
+    max_response_bytes: Annotated[int, Field(description='Maximum response body bytes returned.')] = 1_048_576,
+    operation_id: Annotated[str, Field(description='Optional ID used to cancel this long-running request.')] = '',
 ) -> JsonObject:
     try:
         return await get_operation_manager().run(
@@ -148,13 +162,19 @@ async def _http_request_impl(
 async def network_replay_request(
     client_id: str,
     tab_id: str,
-    request_id: str,
-    confirm_side_effects: bool = False,
-    follow_redirects: bool = True,
-    allow_cross_origin: bool = False,
-    timeout: float = 30.0,
-    max_response_bytes: int = 1_048_576,
-    operation_id: str = '',
+    request_id: Annotated[str, Field(description='Captured request ID returned by network_list.')],
+    confirm_side_effects: Annotated[
+        bool,
+        Field(description='Required for POST, PUT, PATCH, and DELETE replay operations.'),
+    ] = False,
+    follow_redirects: Annotated[bool, Field(description='Follow HTTP redirects when true.')] = True,
+    allow_cross_origin: Annotated[
+        bool,
+        Field(description='Allow replay to a destination outside the current tab origin when true.'),
+    ] = False,
+    timeout: Annotated[float, Field(description='Replay timeout in seconds.')] = 30.0,
+    max_response_bytes: Annotated[int, Field(description='Maximum response body bytes returned.')] = 1_048_576,
+    operation_id: Annotated[str, Field(description='Optional ID used to cancel this long-running replay.')] = '',
 ) -> JsonObject:
     if not request_id.strip():
         return StructuredError(ErrorCode.INVALID_INPUT, 'request_id is required').to_dict()

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
+from pydantic import Field
 from pydoll.exceptions import PydollException
 from pydoll.protocol.input.types import MouseButton
 
@@ -23,20 +25,28 @@ from pydoll_mcp_server.tools.element_resolver import resolve_element
 async def element_click_by_text(
     client_id: str,
     tab_id: str,
-    text: str,
-    exact: bool = True,
+    text: Annotated[str, Field(description='Visible text of the intended actionable control.')],
+    exact: Annotated[bool, Field(description='Require exact normalized text when true.')] = True,
     timeout: float | None = None,
-    role: str = '',
-    tag: str = '',
-    within_element_id: str = '',
-    nearest_heading: str = '',
-    section_label: str = '',
-    aria_contains: str = '',
-    prefer_modal: bool = True,
-    prefer_main_content: bool = True,
-    prefer_visible_center: bool = True,
-    prefer_largest: bool = False,
-    ambiguity_threshold: int = 25,
+    role: Annotated[str, Field(description='Optional ARIA role filter such as button or link.')] = '',
+    tag: Annotated[str, Field(description='Optional HTML tag filter.')] = '',
+    within_element_id: Annotated[
+        str,
+        Field(description='Optional cached container element_id that limits the search scope.'),
+    ] = '',
+    nearest_heading: Annotated[str, Field(description='Optional nearby heading used to rank candidates.')] = '',
+    section_label: Annotated[str, Field(description='Optional section label used to rank candidates.')] = '',
+    aria_contains: Annotated[str, Field(description='Optional substring required in the accessible label.')] = '',
+    prefer_modal: Annotated[bool, Field(description='Prefer visible controls inside a modal or dialog.')] = True,
+    prefer_main_content: Annotated[bool, Field(description='Prefer controls in the main content region.')] = True,
+    prefer_visible_center: Annotated[
+        bool, Field(description='Prefer candidates near the visible viewport center.')
+    ] = True,
+    prefer_largest: Annotated[bool, Field(description='Prefer the candidate with the largest visible bounds.')] = False,
+    ambiguity_threshold: Annotated[
+        int,
+        Field(description='Minimum score gap required to accept a close candidate match.'),
+    ] = 25,
 ) -> JsonObject:
     safe_threshold = max(1, min(ambiguity_threshold, 1000))
     within_selector = ''

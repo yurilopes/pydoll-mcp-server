@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Sequence
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlencode
 
+from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
@@ -64,17 +65,23 @@ JOB_TYPE_PARAMS: dict[str, str] = {
 async def linkedin_jobs_search(
     client_id: str,
     tab_id: str,
-    keywords: str,
-    location: str,
-    remote: bool = True,
-    easy_apply: bool = True,
-    sort_by: SortMode = 'recent',
-    date_posted: DatePosted = 'any',
-    experience_levels: list[ExperienceLevel] | None = None,
-    job_types: list[JobType] | None = None,
-    geo_id: str = '',
-    start: int | None = None,
-    timeout_ms: int = 30000,
+    keywords: Annotated[str, Field(description='Job keywords or role terms.')],
+    location: Annotated[str, Field(description='LinkedIn location or country text.')],
+    remote: Annotated[bool, Field(description='Apply LinkedIn remote-work filtering when true.')] = True,
+    easy_apply: Annotated[bool, Field(description='Apply LinkedIn Easy Apply filtering when true.')] = True,
+    sort_by: Annotated[SortMode, Field(description='Sort results by recent or relevance.')] = 'recent',
+    date_posted: Annotated[
+        DatePosted,
+        Field(description='Posted-date filter: any, past_24h, past_week, or past_month.'),
+    ] = 'any',
+    experience_levels: Annotated[
+        list[ExperienceLevel] | None,
+        Field(description='Optional experience level filters.'),
+    ] = None,
+    job_types: Annotated[list[JobType] | None, Field(description='Optional employment type filters.')] = None,
+    geo_id: Annotated[str, Field(description='Optional LinkedIn geo ID when already known.')] = '',
+    start: Annotated[int | None, Field(description='Zero-based result offset for pagination.')] = None,
+    timeout_ms: Annotated[int, Field(description='Maximum navigation and hydration wait in milliseconds.')] = 30000,
 ) -> JsonObject:
     try:
         url = linkedin_jobs_search_url(
@@ -138,9 +145,15 @@ async def linkedin_jobs_page_snapshot(
 async def linkedin_jobs_open_result(
     client_id: str,
     tab_id: str,
-    linkedin_job_id: str | None = None,
-    index: int | None = None,
-    timeout_ms: int = 15000,
+    linkedin_job_id: Annotated[
+        str | None,
+        Field(description='Visible LinkedIn job ID. Provide this or index, but not both.'),
+    ] = None,
+    index: Annotated[
+        int | None,
+        Field(description='Zero-based visible result index. Provide this or linkedin_job_id, but not both.'),
+    ] = None,
+    timeout_ms: Annotated[int, Field(description='Maximum wait for the selected job detail.')] = 15000,
 ) -> JsonObject:
     if (linkedin_job_id is None) == (index is None):
         return StructuredError(

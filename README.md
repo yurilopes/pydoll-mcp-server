@@ -19,6 +19,14 @@ Endpoints:
 - Chrome or Chromium installed
 - Pydoll `>=2.23.0`
 
+Windows native picker fallback is optional. Install the `windows` extra when a
+portal uses the File System Access API and the browser must control its native
+file dialog:
+
+```powershell
+python -m pip install "pydoll-mcp-server[windows]"
+```
+
 Contributors must follow the quality gates and engineering conventions in
 [`docs/development.md`](docs/development.md).
 
@@ -65,6 +73,38 @@ Or via stdio:
 ```powershell
 python -m pydoll_mcp_server.cli --transport stdio
 ```
+
+### Curated tool profiles
+
+The server keeps the complete catalog available by default for compatibility:
+
+- `full` exposes all 144 public tools, including advanced network, JavaScript,
+  deep traversal, diagnostics, and low-level fallback operations.
+- `agent` exposes 63 canonical tools for general browser automation.
+- `linkedin` exposes the 63 `agent` tools plus 15 LinkedIn search and Easy Apply
+  helpers, for 78 tools total.
+
+Select a profile explicitly with the CLI:
+
+```powershell
+python -m pydoll_mcp_server.cli --transport stdio --tool-profile agent
+python -m pydoll_mcp_server.cli --transport stdio --tool-profile linkedin
+```
+
+The same setting can be provided through `PYDOLL_MCP_TOOL_PROFILE`; an explicit
+`--tool-profile` argument takes precedence. Use `agent` for general-purpose
+automation, `linkedin` for LinkedIn job search and Easy Apply, and `full` only
+when compatibility with advanced tools or low-level diagnostics is required.
+`server_status` reports the active `tool_profile` and `exposed_tool_count`.
+
+The curated profiles establish preferred contracts without removing anything
+from `full`: `page_snapshot` is the initial observation, `page_get_active_surface`
+is preferred for focused dialogs and forms, `element_fill` is the standard
+single-field fill, `form_fill_fields` is the standard bulk fill, and specific
+wait tools are preferred over the generic `page_wait`. LinkedIn workflows
+should use the `linkedin_easy_apply_*` tools instead of rebuilding the flow
+from generic form actions. Final LinkedIn submission still requires
+`confirm_submit=true`.
 
 Endpoints:
 
@@ -168,6 +208,7 @@ JavaScript and advanced helpers:
 - `download_expect`
 - `download_prepare`, `download_wait`, `download_list`, `download_get_info`
 - `upload_files`
+- `upload_files_from_trigger`
 - `file_upload_state`, `artifact_get_paths`, `artifact_import`, `artifact_prepare_upload`
 - `profile_list`, `profile_promote`
 - `operation_cancel`
@@ -204,11 +245,28 @@ provided and the current modal is a verified final submit step.
 The Easy Apply helpers support both visible dialogs and inline LinkedIn forms.
 `linkedin_easy_apply_upload_resume` accepts a permitted local file through its
 `path` parameter, uploads it with `paths` internally, and reports filename and
-toast verification separately from upload acceptance. If LinkedIn exposes only
-its native File System Access picker instead of an `input[type="file"]`, the
-tool returns `UNSUPPORTED` without opening an unmanaged Windows dialog; use a
-desktop automation boundary for that selection, then capture the result with
-`linkedin_easy_apply_snapshot`.
+toast verification separately from upload acceptance. It delegates native
+picker handling to the generic upload layer when no `input[type="file"]` is
+available, while preserving LinkedIn-specific snapshot and toast verification.
+
+`upload_files_from_trigger` supports three strategies for portals such as
+Greenhouse, Lever, and Workable:
+
+- `auto` first uses a direct input, then a CDP file chooser interception, and
+  finally the Windows native picker when the browser is visible and owned.
+- `intercept` never opts into the desktop fallback and returns a structured
+  `UNSUPPORTED` result for a real File System Access picker.
+- `desktop` forces the Windows native picker and accepts one permitted file.
+
+The Windows fallback requires `pydoll-mcp-server[windows]`, a visible browser,
+and a dialog that can be associated with the browser process. Headless sessions
+return a structured unsupported result instead of opening or controlling a
+native window. All paths are checked against the upload allowlist before the
+trigger is clicked. Chrome may still reject a file below a protected Windows
+location such as the runtime `AppData` directory when the portal uses the File
+System Access API. For that case, use a user-controlled directory such as
+`Downloads` and add it explicitly to `PYDOLL_MCP_UPLOAD_ALLOWLIST`; the default
+allowlist is intentionally unchanged.
 
 `element_find` requires a CSS selector by default or an XPath expression when
 `strategy="xpath"`. Use `element_find_by_role`, `element_find_by_text`, or

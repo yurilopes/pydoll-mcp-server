@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TypedDict
+from typing import Annotated, TypedDict
+
+from pydantic import Field
 
 from pydoll_mcp_server.browser.locks import get_lock_manager
 from pydoll_mcp_server.browser.models import ProfileMode
@@ -11,6 +13,7 @@ from pydoll_mcp_server.browser.profile_index import get_profile_index
 from pydoll_mcp_server.browser.profiles import get_profile_manager
 from pydoll_mcp_server.browser.pydoll_compat import (
     create_chromium_options,
+    get_browser_process_id,
     get_tab_title,
     get_tab_url,
     stop_browser,
@@ -30,13 +33,34 @@ class BrowserLaunchWarning(TypedDict):
 
 async def browser_launch(
     client_id: str,
-    headless: bool = False,
-    profile_mode: str = 'persistent',
-    profile_id: str = '',
-    proxy_server: str = '',
-    proxy_bypass_list: str = '',
-    session_intent: str = '',
-    site_hint: str = '',
+    headless: Annotated[bool, Field(description='Run without a visible window when true.')] = False,
+    profile_mode: Annotated[
+        str,
+        Field(
+            description='Use persistent to preserve login state or temporary for an isolated disposable profile.',
+            json_schema_extra={'enum': ['persistent', 'temporary']},
+        ),
+    ] = 'persistent',
+    profile_id: Annotated[
+        str,
+        Field(description='Explicit managed profile ID. Leave empty to reuse or create the client default.'),
+    ] = '',
+    proxy_server: Annotated[
+        str,
+        Field(description='Optional HTTP, HTTPS, SOCKS4, or SOCKS5 proxy URL.'),
+    ] = '',
+    proxy_bypass_list: Annotated[
+        str,
+        Field(description='Optional comma-separated hosts that bypass the proxy.'),
+    ] = '',
+    session_intent: Annotated[
+        str,
+        Field(description='Set user_authenticated when an existing logged-in profile should be reused.'),
+    ] = '',
+    site_hint: Annotated[
+        str,
+        Field(description='Site or domain hint used to match an authenticated persistent profile.'),
+    ] = '',
 ) -> JsonObject:
     logger = get_logger()
     registry = get_registry()
@@ -152,6 +176,7 @@ async def browser_launch(
 
         browser = Chrome(options=options)
         pydoll_tab = await asyncio.wait_for(browser.start(), timeout=60.0)
+        browser_process_id = get_browser_process_id(browser)
 
         url = await get_tab_url(pydoll_tab)
         title = await get_tab_title(pydoll_tab)
@@ -161,6 +186,7 @@ async def browser_launch(
             browser=browser,
             profile=profile,
             headless=headless,
+            browser_process_id=browser_process_id,
             proxy_server=proxy.sanitized_url if proxy else '',
             proxy_launch_url=proxy.launch_url if proxy else '',
             proxy_scheme=proxy.scheme if proxy else '',

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pydoll_mcp_server.json_types import get_array, get_object
+from pydoll_mcp_server.json_types import get_array, get_object, get_string
 from tests.integration.test_browser_smoke import launch_and_goto_fixture, register_smoke_tab, stop_smoke_browser
 
 pytestmark = [pytest.mark.browser_smoke, pytest.mark.browser, pytest.mark.slow]
@@ -199,7 +199,9 @@ async def test_inline_easy_apply_upload_requires_filename_and_toast(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_native_picker_upload_reports_unsupported_before_opening_dialog(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_native_picker_upload_reports_headless_unsupported_without_dialog_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from pydoll_mcp_server.tools.linkedin import linkedin_easy_apply_upload_resume
 
     monkeypatch.setenv('PYDOLL_MCP_AUTH_TOKEN', 'test-token')
@@ -222,7 +224,7 @@ async def test_native_picker_upload_reports_unsupported_before_opening_dialog(mo
 
         assert result.get('error_code') == 'UNSUPPORTED', result
         details = get_object(result, 'details', {})
-        assert details.get('native_picker_opened') is False
-        assert get_object(result, 'details', {}).get('file_input_resolution')
+        assert get_string(details, 'reason') == 'native_picker_requires_visible_browser'
+        assert get_string(result, 'strategy_requested') == 'auto'
     finally:
         await stop_smoke_browser(browser)

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
+from pydantic import Field
 from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import PydollException
 
@@ -15,13 +18,16 @@ from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_string, requ
 async def element_resolve_again(
     client_id: str,
     tab_id: str,
-    element_id: str,
-    selector_hint: str = '',
-    xpath_hint: str = '',
-    text: str = '',
-    role: str = '',
-    within_element_id: str = '',
-    max_candidates: int = 5,
+    element_id: Annotated[str, Field(description='Stale or previously cached element_id to recover.')],
+    selector_hint: Annotated[str, Field(description='Optional CSS selector hint from the previous resolution.')] = '',
+    xpath_hint: Annotated[str, Field(description='Optional XPath hint from the previous resolution.')] = '',
+    text: Annotated[str, Field(description='Optional visible text fallback for resolution.')] = '',
+    role: Annotated[str, Field(description='Optional ARIA role filter for the text fallback.')] = '',
+    within_element_id: Annotated[
+        str,
+        Field(description='Optional cached container element_id that limits the recovery search.'),
+    ] = '',
+    max_candidates: Annotated[int, Field(description='Maximum candidates returned when recovery is ambiguous.')] = 5,
 ) -> JsonObject:
     try:
         tab_info = get_registry().get_tab(client_id, tab_id)

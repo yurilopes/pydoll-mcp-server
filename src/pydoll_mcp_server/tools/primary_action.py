@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import time
+from typing import Annotated
 
+from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
@@ -16,11 +18,26 @@ from pydoll_mcp_server.tools.active_surface import page_get_active_surface
 async def page_click_primary_action(
     client_id: str,
     tab_id: str,
-    scope: str = 'auto',
-    button_text_any: list[str] | None = None,
-    expected_next_text: str = '',
-    expected_progress_change: bool = False,
-    timeout: float | None = None,
+    scope: Annotated[
+        str,
+        Field(
+            description='Surface scope hint: auto, modal, dialog, form, or main.',
+            json_schema_extra={'enum': ['auto', 'modal', 'dialog', 'form', 'main']},
+        ),
+    ] = 'auto',
+    button_text_any: Annotated[
+        list[str] | None,
+        Field(description='Optional ordered button text candidates for the primary action.'),
+    ] = None,
+    expected_next_text: Annotated[
+        str,
+        Field(description='Optional text expected after advancing the active surface.'),
+    ] = '',
+    expected_progress_change: Annotated[
+        bool,
+        Field(description='Require progress metadata to change after the click when true.'),
+    ] = False,
+    timeout: Annotated[float | None, Field(description='Optional action and verification timeout.')] = None,
 ) -> JsonObject:
     btn_texts = button_text_any or []
 

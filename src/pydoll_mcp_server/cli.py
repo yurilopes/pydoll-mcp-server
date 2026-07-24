@@ -7,6 +7,8 @@ import os
 
 import uvicorn
 
+from pydoll_mcp_server.tool_metadata import ToolProfile
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Pydoll MCP Server - Browser automation via MCP')
@@ -33,7 +35,15 @@ def main() -> None:
         choices=['debug', 'info', 'warning', 'error'],
         help='Logging level',
     )
+    parser.add_argument(
+        '--tool-profile',
+        default=os.environ.get('PYDOLL_MCP_TOOL_PROFILE', ToolProfile.FULL.value),
+        choices=[profile.value for profile in ToolProfile],
+        help='Tool exposure profile: full, agent, or linkedin',
+    )
     args = parser.parse_args()
+
+    os.environ['PYDOLL_MCP_TOOL_PROFILE'] = args.tool_profile
 
     from pydoll_mcp_server.logging import get_logger
 
@@ -42,7 +52,7 @@ def main() -> None:
 
     if args.transport == 'stdio':
         os.environ.setdefault('PYDOLL_MCP_TRANSPORT', 'stdio')
-        logger.info('Starting Pydoll MCP Server via stdio')
+        logger.info(f'Starting Pydoll MCP Server via stdio with tool profile {args.tool_profile}')
         run_stdio()
         return
 
@@ -59,7 +69,7 @@ def main() -> None:
 
     app_path = 'pydoll_mcp_server.server:create_app'
 
-    logger.info(f'Starting Pydoll MCP Server on {args.host}:{args.port}')
+    logger.info(f'Starting Pydoll MCP Server on {args.host}:{args.port} with tool profile {args.tool_profile}')
     uvicorn.run(
         f'{app_path}',
         host=args.host,

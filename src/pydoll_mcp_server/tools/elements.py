@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
+from pydantic import Field
+
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import (
     get_element_attribute,
@@ -29,7 +33,13 @@ async def element_find(
     client_id: str,
     tab_id: str,
     selector: str,
-    strategy: str = 'css',
+    strategy: Annotated[
+        str,
+        Field(
+            description='Selector strategy: css, xpath, or text.',
+            json_schema_extra={'enum': ['css', 'xpath', 'text']},
+        ),
+    ] = 'css',
     timeout: float | None = None,
     find_all: bool = False,
 ) -> JsonObject:
@@ -112,13 +122,27 @@ async def element_click(
     tab_id: str,
     element_id: str,
     timeout: float | None = None,
-    click_strategy: str = 'native',
-    expect_dialog: bool = False,
-    expect_url_change: bool = False,
-    expect_text: str = '',
-    expect_selector: str = '',
-    expect_network_idle: bool = False,
-    effect_timeout: float | None = None,
+    click_strategy: Annotated[
+        str,
+        Field(
+            description='Click strategy. Use native normally; enhanced strategies are advanced fallbacks.',
+            json_schema_extra={
+                'enum': ['native', 'center_mouse', 'dispatch_pointer_sequence', 'trusted_fallback_if_safe']
+            },
+        ),
+    ] = 'native',
+    expect_dialog: Annotated[bool, Field(description='Wait for a JavaScript dialog after the click.')] = False,
+    expect_url_change: Annotated[bool, Field(description='Require the tab URL to change after the click.')] = False,
+    expect_text: Annotated[str, Field(description='Optional visible text that must appear after the click.')] = '',
+    expect_selector: Annotated[
+        str,
+        Field(description='Optional CSS selector that must appear after the click.'),
+    ] = '',
+    expect_network_idle: Annotated[bool, Field(description='Wait for network idle after the click.')] = False,
+    effect_timeout: Annotated[
+        float | None,
+        Field(description='Optional timeout used only for effect verification.'),
+    ] = None,
 ) -> JsonObject:
     has_effect = any((expect_dialog, expect_url_change, expect_text, expect_selector, expect_network_idle))
     if has_effect or click_strategy != 'native':
