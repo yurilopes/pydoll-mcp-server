@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 
@@ -13,6 +14,7 @@ from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, e
 from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonObject, get_bool, get_string
+from pydoll_mcp_server.tools.choice_group_scripts import choice_group_helpers_script
 
 VALID_SCOPES = frozenset({'auto', 'modal', 'dialog', 'form', 'main', 'viewport'})
 
@@ -31,16 +33,33 @@ async def form_select_choice(
     except StructuredError as exc:
         return exc.to_dict()
     payload = json.dumps({'field': field_label, 'option': option_label, 'scope': scope})
-    try:
-        async with tab_operation_lock(tab_id):
-            raw = await tab_info.pydoll_tab.execute_script(_choice_script(payload), return_by_value=True)
-        result = extract_script_object(raw)
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Choice selection failed: {exc}', retryable=True).to_dict()
-    error = get_string(result, 'error', '')
-    if error:
-        code = ErrorCode.AMBIGUOUS_ELEMENT if error.startswith('ambiguous') else ErrorCode.INVALID_INPUT
-        return StructuredError(code, f'Choice selection failed: {error}', details=result).to_dict()
+    result: JsonObject = {}
+    for attempt in range(3):
+        try:
+            async with tab_operation_lock(tab_id):
+                raw = await tab_info.pydoll_tab.execute_script(_choice_script(payload), return_by_value=True)
+            result = extract_script_object(raw)
+        except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
+            return StructuredError(
+                ErrorCode.EXECUTION_ERROR,
+                f'Choice selection failed: {exc}',
+                retryable=True,
+            ).to_dict()
+        error = get_string(result, 'error', '')
+        if error:
+            code = ErrorCode.AMBIGUOUS_ELEMENT if error.startswith('ambiguous') else ErrorCode.INVALID_INPUT
+            return StructuredError(code, f'Choice selection failed: {error}', details=result).to_dict()
+        if get_bool(result, 'verified'):
+            break
+        if attempt < 2:
+            await asyncio.sleep(0.1)
+    if not get_bool(result, 'verified'):
+        return StructuredError(
+            ErrorCode.STALE_ELEMENT,
+            'Choice control was re-rendered before selection could be verified',
+            retryable=True,
+            details={'attempts': 3, 'last_result': result},
+        ).to_dict()
     element_id = _cache_choice(tab_info.tab_id, tab_info.document_generation, result)
     return {
         'success': True,
@@ -71,67 +90,44 @@ def _cache_choice(tab_id: str, generation: int, result: JsonObject) -> str:
 
 
 def _choice_script(payload: str) -> str:
-    return f"""
+    return (
+        f"""
     const request = {payload};
-    const norm = value => (value || '').trim().replace(/\\s+/g, ' ').toLowerCase();
-    const visible = el => {{
-        const rect = el.getBoundingClientRect(); const style = getComputedStyle(el);
-        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-    }};
-    const dialog = [...document.querySelectorAll('dialog,[role="dialog"],[aria-modal="true"]')].filter(visible).pop();
+    const dialog = [...document.querySelectorAll('dialog,[role="dialog"],[aria-modal="true"]')]
+        .filter(choiceVisible).pop();
     let root = document.body;
     if (['auto','modal','dialog'].includes(request.scope) && dialog) root = dialog;
-    else if (request.scope === 'form') root = [...document.querySelectorAll('form')].find(visible) || root;
+    else if (request.scope === 'form') root = [...document.querySelectorAll('form')].find(choiceVisible) || root;
     else if (request.scope === 'main') root = document.querySelector('main,[role="main"]') || root;
-    const groupSelector = 'fieldset,[role="radiogroup"],[role="group"],' +
-        '.form-group,.radio-group,.checkbox-group';
-    const groups = [...root.querySelectorAll(groupSelector)].filter(visible);
-    const groupLabel = group => {{
-        const labelled = (group.getAttribute('aria-labelledby') || '').split(/\\s+/)
-            .map(id => document.getElementById(id)?.innerText || '').join(' ');
-        const headingSelector = ':scope > legend,:scope > label,:scope > h1,' +
-            ':scope > h2,:scope > h3,:scope > h4';
-        const parentSelector = ':scope > label,:scope > legend,:scope > h1,' +
-            ':scope > h2,:scope > h3,:scope > h4';
-        const heading = group.querySelector(headingSelector);
-        const parent = group.parentElement?.querySelector(parentSelector);
-        return heading?.innerText || labelled || group.getAttribute('aria-label') || parent?.innerText || '';
-    }};
-    const matchingGroups = groups.filter(group => norm(groupLabel(group)).includes(norm(request.field)));
-    if (matchingGroups.length === 0) return {{error:'field_not_found'}};
-    if (matchingGroups.length > 1) return {{error:'ambiguous_field', count:matchingGroups.length}};
-    const group = matchingGroups[0];
-    const choiceSelector = 'input[type="radio"],input[type="checkbox"],' +
-        '[role="radio"],[role="checkbox"]';
-    const choices = [...group.querySelectorAll(choiceSelector)];
-    const labelFor = el => {{
-        const explicit = el.id ? document.querySelector('label[for="' + CSS.escape(el.id) + '"]') : null;
-        return explicit?.innerText || el.closest('label')?.innerText || el.getAttribute('aria-label') || el.value || '';
-    }};
-    const matches = choices.filter(el => norm(labelFor(el)) === norm(request.option));
-    if (matches.length === 0) return {{error:'option_not_found'}};
-    if (matches.length > 1) return {{error:'ambiguous_option', count:matches.length}};
+    const match = choiceFindGroup(root, request.field);
+    if (!match.group) return {{error: match.reason === 'no_match' ? 'field_not_found' : 'ambiguous_field',
+        count: match.candidates.length,
+        candidates: match.candidates.map(item => ({{label:item.label, score:item.score,
+            options:item.options.map(choiceOptionText).filter(Boolean)}}))}};
+    const matches = choiceOptionMatches(match.group, request.option);
+    if (matches.length === 0) return {{error:'option_not_found', field_label:match.group.label}};
+    if (matches.length > 1) return {{error:'ambiguous_option', count:matches.length,
+        field_label:match.group.label}};
     const target = matches[0];
-    const state = () => target.tagName === 'INPUT' ? target.checked === true :
-        target.getAttribute('aria-checked') === 'true';
+    const selector = choiceSelectorHint(target);
+    const state = () => choiceChecked(target);
     let strategy = 'already_selected';
     if (!state()) {{
-        target.click(); strategy = 'input';
+        target.click(); strategy = 'choice';
         if (!state()) {{
-            const explicit = target.id ?
-                document.querySelector('label[for="' + CSS.escape(target.id) + '"]') : null;
-            const label = target.closest('label') || explicit;
-            if (label && visible(label)) {{ label.click(); strategy = 'associated_label'; }}
+            const label = target.closest('label');
+            if (label && choiceVisible(label)) {{ label.click(); strategy = 'associated_label'; }}
         }}
     }}
-    if (!state()) return {{error:'choice_state_not_verified'}};
-    const esc = value => value.replace(/"/g, '\\"');
-    const selector = target.id ? '#' + CSS.escape(target.id) :
-        (target.name && target.value ? target.tagName.toLowerCase() +
-            '[name="' + esc(target.name) + '"][value="' + esc(target.value) + '"]' : '');
-    const xpath = target.id ? '//*[@id="' + esc(target.id) + '"]' :
-        (target.name && target.value ? '//' + target.tagName.toLowerCase() +
-            '[@name="' + esc(target.name) + '" and @value="' + esc(target.value) + '"]' : '');
+    if (!state()) return {{checked:false,verified:false,clicked:true,strategy_used:strategy,
+        tag:target.tagName.toLowerCase(),label:choiceOptionText(target),field_label:match.group.label,
+        selector_hint:selector}};
     return {{checked:true,verified:true,strategy_used:strategy,tag:target.tagName.toLowerCase(),
-        label:labelFor(target),selector_hint:selector,xpath_hint:xpath}};
-    """
+        label:choiceOptionText(target),field_label:match.group.label,
+        selector_hint:selector}};
+"""
+        + choice_group_helpers_script()
+        + """
+    ;
+"""
+    )

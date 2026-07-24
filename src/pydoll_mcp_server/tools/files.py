@@ -15,7 +15,7 @@ from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, e
 from pydoll_mcp_server.config import get_config, get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject
-from pydoll_mcp_server.security.policy import PathAllowlist
+from pydoll_mcp_server.security.upload_policy import validate_upload_path
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 
 
@@ -92,15 +92,10 @@ async def upload_files(
 
     registry = get_registry()
 
-    allowlist = upload_allowlist()
     for p in paths:
-        if not allowlist.is_allowed(p):
-            return StructuredError(
-                error_code=ErrorCode.PERMISSION_DENIED,
-                message=f'Upload path not in allowed directories: {p}',
-                retryable=False,
-                recovery_hint='Place files in the artifacts or downloads directory.',
-            ).to_dict()
+        validation_error = validate_upload_path(p)
+        if validation_error is not None:
+            return validation_error
 
     try:
         tab_info = registry.get_tab(client_id, tab_id)
@@ -190,7 +185,6 @@ async def artifact_import(
     max_size_bytes: int = 50 * 1024 * 1024,
 ) -> JsonObject:
     config = get_config()
-    allowlist = upload_allowlist()
     source = Path(source_path)
     try:
         resolved = source.resolve(strict=True)
@@ -198,12 +192,9 @@ async def artifact_import(
         return StructuredError(ErrorCode.RESOURCE_NOT_FOUND, f'Import source not found: {exc}').to_dict()
     if not resolved.is_file():
         return StructuredError(ErrorCode.INVALID_INPUT, 'Import source must be a file.').to_dict()
-    if not allowlist.is_allowed(str(resolved)):
-        return StructuredError(
-            ErrorCode.PERMISSION_DENIED,
-            f'Import source not in allowed directories: {source_path}',
-            recovery_hint='Use artifacts, downloads, tmp, or PYDOLL_MCP_IMPORT_ALLOWLIST.',
-        ).to_dict()
+    validation_error = validate_upload_path(str(resolved), max_size_bytes)
+    if validation_error is not None:
+        return validation_error
     size = resolved.stat().st_size
     if size > max_size_bytes:
         return StructuredError(ErrorCode.INVALID_INPUT, f'File is too large: {size} bytes').to_dict()
@@ -219,16 +210,6 @@ async def artifact_import(
         return StructuredError(ErrorCode.PERMISSION_DENIED, 'Imported filename escapes artifacts directory.').to_dict()
     shutil.copy2(resolved, target)
     return {'success': True, 'path': str(target), 'file': file_info(target)}
-
-
-def upload_allowlist() -> PathAllowlist:
-    config = get_config()
-    allowed_dirs = [str(config.artifacts_dir), str(config.downloads_dir), str(config.tmp_dir)]
-    for env_name in ('PYDOLL_MCP_UPLOAD_ALLOWLIST', 'PYDOLL_MCP_IMPORT_ALLOWLIST'):
-        extra_allowed = os.environ.get(env_name, '')
-        if extra_allowed:
-            allowed_dirs.extend(extra_allowed.split(os.pathsep))
-    return PathAllowlist(allowed_dirs)
 
 
 def file_info(path: Path) -> JsonObject:

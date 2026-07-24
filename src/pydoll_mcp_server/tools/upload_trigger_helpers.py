@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Literal
 
-from pydoll_mcp_server.errors import ErrorCode, StructuredError
+from pydoll_mcp_server.errors import ErrorCode
 from pydoll_mcp_server.json_types import JsonObject, get_bool, get_int, get_object, get_string
+from pydoll_mcp_server.security.upload_policy import validate_upload_path
 from pydoll_mcp_server.tools.elements import element_find
-from pydoll_mcp_server.tools.files import upload_allowlist, upload_files
+from pydoll_mcp_server.tools.files import upload_files
 from pydoll_mcp_server.tools.upload_trigger_scripts import UploadTriggerElement, wait_for_upload_verification
 
 PickerStrategy = Literal['auto', 'intercept', 'desktop']
@@ -17,21 +17,10 @@ PickerStrategy = Literal['auto', 'intercept', 'desktop']
 def validate_upload_paths(paths: list[str]) -> JsonObject | None:
     """Reject disallowed or missing files before any page interaction."""
 
-    allowlist = upload_allowlist()
     for path in paths:
-        if not allowlist.is_allowed(path):
-            return StructuredError(
-                ErrorCode.PERMISSION_DENIED,
-                f'Upload path not in allowed directories: {path}',
-                retryable=False,
-                recovery_hint='Use artifact_prepare_upload or configure an explicit upload allowlist.',
-            ).to_dict()
-        if not Path(path).is_file():
-            return StructuredError(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                f'Upload file does not exist: {path}',
-                retryable=False,
-            ).to_dict()
+        validation_error = validate_upload_path(path)
+        if validation_error is not None:
+            return validation_error
     return None
 
 

@@ -70,8 +70,8 @@ race with Chrome.
 - [x] JS scanner blocks dangerous patterns
 - [x] Bearer token never logged
 - [x] Screenshots default to artifact files (base64 opt-in only)
-- [x] `artifact_prepare_upload` rejects sources outside allowlist
-- [x] Upload paths validated against runtime directories and explicit allowlists
+- [x] `restricted` upload policy rejects sources outside runtime directories and explicit allowlists
+- [x] `local` upload policy validates explicit regular files and size limits
 
 ### Structured errors (verified)
 - [x] `AMBIGUOUS_ELEMENT`

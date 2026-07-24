@@ -238,6 +238,8 @@ class TestMCPTools:
 
             result = server_status(client_id='test-client')
             assert result['status'] == 'ok'
+            assert result['upload_policy'] == 'local'
+            assert result['native_picker_staging'] == 'automatic'
 
     def test_error_model(self) -> None:
         from pydoll_mcp_server.errors import ErrorCode, StructuredError

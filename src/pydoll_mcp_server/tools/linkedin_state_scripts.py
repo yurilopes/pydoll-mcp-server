@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydoll_mcp_server.tools.choice_group_scripts import choice_group_helpers_script
 from pydoll_mcp_server.tools.linkedin_form_scripts import form_state_helpers_script
 
 
@@ -105,6 +106,9 @@ function cssPath(el) {
   }
   return `body > ${parts.join(' > ')}`;
 }
+"""
+        + choice_group_helpers_script()
+        + r"""
 function controlInfo(el) {
   const rect = el.getBoundingClientRect();
   return {
@@ -133,33 +137,56 @@ function isApplicationControl(el) {
 }
 function hasApplicationAnchor(root) {
   const text = rootText(root);
-  if (isApplicationStepText(text) && root.querySelectorAll('input, textarea, select').length > 0) return true;
+  if (isApplicationStepText(text) && root.querySelectorAll(
+    'input, textarea, select, [role="radio"], [role="checkbox"]'
+  ).length > 0) return true;
   return visibleControls(root).some((el) => isApplicationControl(el));
 }
 function applicationRootFor(node) {
   let current = node;
+  let fallback = null;
   for (let depth = 0; current && depth < 12; depth += 1, current = current.parentElement) {
     if (current === document.body || current === document.documentElement) break;
     if (!visible(current)) continue;
     if (hasApplicationAnchor(current) && (isApplicationStepText(rootText(current)) || current.matches('form'))) {
-      return narrowApplicationRoot(current);
+      fallback = current;
+      const controls = visibleControls(current);
+      const hasForward = controls.some((control) =>
+        isForwardLabel(controlLabel(control)) || isSubmitLabel(controlLabel(control))
+      );
+      if (hasForward || current.matches('form')) return current;
     }
   }
-  return null;
+  return fallback ? narrowApplicationRoot(fallback) : null;
 }
 function narrowApplicationRoot(root) {
   const candidates = [root, ...root.querySelectorAll('section, [data-step], [class*="step"], [id*="step"], form > div')]
     .filter((candidate) => visible(candidate) && isApplicationStepText(rootText(candidate)));
   const actionable = candidates.filter((candidate) => visibleControls(candidate).some((el) => isApplicationControl(el)));
   if (!actionable.length) return root;
-  actionable.sort((left, right) => rootText(left).length - rootText(right).length);
-  return actionable[0];
+  const complete = actionable.filter((candidate) => {
+    const controls = visibleControls(candidate);
+    const hasForward = controls.some((control) =>
+      isForwardLabel(controlLabel(control)) || isSubmitLabel(controlLabel(control))
+    );
+    const hasContent = controls.some((control) =>
+      isUploadLabel(controlLabel(control)) || control.matches(
+        'input, textarea, select, [contenteditable="true"], [role="radio"], [role="checkbox"]'
+      )
+    );
+    return hasForward && hasContent;
+  });
+  const scoped = complete.length ? complete : actionable;
+  scoped.sort((left, right) => rootText(left).length - rootText(right).length);
+  return scoped[0];
 }
 function isSavePromptText(value) {
   return /salvar esta candidatura|save this application/.test(fold(value));
 }
 function findApplicationSurface() {
-  const dialogs = [...document.querySelectorAll('[role="dialog"], dialog, [aria-modal="true"], .jobs-easy-apply-modal')]
+  const dialogs = [...document.querySelectorAll(
+    '[role="dialog"], dialog, [aria-modal="true"], .jobs-easy-apply-modal, .artdeco-modal, [data-test-modal]'
+  )]
     .filter((el) => visible(el));
   for (let index = dialogs.length - 1; index >= 0; index -= 1) {
     const dialog = dialogs[index];
@@ -216,52 +243,40 @@ function labelForControl(el, root) {
   }
   const closest = el.closest('label');
   if (closest) return norm(closest.innerText || '');
-  const type = fold(el.getAttribute('type') || '');
+  const type = choiceType(el) || fold(el.getAttribute('type') || '');
+  if (type === 'radio' || type === 'checkbox') return choiceOptionText(el);
   return norm(el.getAttribute('aria-label') || el.placeholder || (type === 'radio' || type === 'checkbox' ? '' : el.name || ''));
 }
 function questionRootFor(el, root) {
-  const grouped = el.closest('fieldset, [role="group"], [role="radiogroup"], .form-group, .jobs-easy-apply-form-section__grouping');
-  if (grouped && root.contains(grouped)) return grouped;
+  const type = choiceType(el);
+  if (type) return choiceGroupFor(el, root);
   const label = el.closest('label');
   if (label && root.contains(label)) return label;
   let current = el.parentElement;
   for (let depth = 0; current && current !== root && depth < 6; depth += 1, current = current.parentElement) {
     const text = rootText(current);
-    const controls = current.querySelectorAll('input, textarea, select');
+    const controls = current.querySelectorAll('input, textarea, select, [role="radio"], [role="checkbox"]');
     if (controls.length <= 4 && (/[?]/.test(text) || current.querySelector('label'))) return current;
   }
   return el.parentElement || root;
 }
 function optionLabelFor(el) {
-  if (el.id) {
-    const explicit = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-    if (explicit) return norm(explicit.innerText || '');
-  }
-  const direct = norm(el.closest('label')?.innerText || el.getAttribute('aria-label') || '');
-  if (direct) return direct;
-  let sibling = el.previousElementSibling;
-  for (let index = 0; sibling && index < 2; index += 1, sibling = sibling.previousElementSibling) {
-    const text = norm(sibling.innerText || sibling.textContent || '');
-    if (text && text.length < 100) return text;
-  }
-  sibling = el.nextElementSibling;
-  for (let index = 0; sibling && index < 2; index += 1, sibling = sibling.nextElementSibling) {
-    const text = norm(sibling.innerText || sibling.textContent || '');
-    if (text && text.length < 100) return text;
-  }
-  return norm(el.value || '');
+  return choiceOptionText(el);
 }
 function fieldSnapshot(el, root, questionIndex) {
   const tag = el.tagName.toLowerCase();
-  const type = fold(el.getAttribute('type') || '');
+  const type = choiceType(el) || fold(el.getAttribute('type') || '');
   const questionRoot = questionRootFor(el, root);
-  const groupText = norm(rootText(questionRoot));
-  const label = labelForControl(el, root) || groupText;
+  const rawGroupText = norm(rootText(questionRoot));
+  const choiceQuestion = type === 'radio' || type === 'checkbox'
+    ? choiceQuestionText(questionRoot, root) : '';
+  const groupText = choiceQuestion ? norm(`${choiceQuestion} ${rawGroupText}`) : rawGroupText;
+  const label = choiceQuestion || labelForControl(el, root) || groupText;
   const selected = tag === 'select' ? [...el.selectedOptions].map((option) => norm(option.textContent || '')) : [];
   const options = tag === 'select'
     ? [...el.options].map((option) => ({ text: norm(option.textContent || ''), value: String(option.value || '') }))
     : (type === 'radio' || type === 'checkbox'
-      ? [...questionRoot.querySelectorAll('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')].map(optionLabelFor).filter(Boolean)
+      ? choiceOptionElements(questionRoot).map(optionLabelFor).filter(Boolean)
       : []);
   return {
     tag,
@@ -271,8 +286,8 @@ function fieldSnapshot(el, root, questionIndex) {
     question_key: cssPath(questionRoot) || `question-${questionIndex}`,
     required: Boolean(el.required || el.getAttribute('aria-required') === 'true' || /\*/.test(label || groupText)),
     value: tag === 'select' ? String(el.value || '') : String(el.value || ''),
-    checked: type === 'radio' || type === 'checkbox' ? Boolean(el.checked || el.getAttribute('aria-checked') === 'true') : null,
-    selected_option: type === 'radio' || type === 'checkbox' ? (el.checked ? optionLabelFor(el) : '') : (selected[0] || ''),
+    checked: type === 'radio' || type === 'checkbox' ? choiceChecked(el) : null,
+    selected_option: type === 'radio' || type === 'checkbox' ? (choiceChecked(el) ? optionLabelFor(el) : '') : (selected[0] || ''),
     selected_text: selected,
     selected_value: tag === 'select' ? String(el.value || '') : '',
     options,
@@ -281,8 +296,9 @@ function fieldSnapshot(el, root, questionIndex) {
 }
 function inferStepTitle(text) {
   const lower = fold(text);
-  if (/revise sua candidatura|review/.test(lower)) return 'Review';
   if (/additional questions|perguntas adicionais/.test(lower)) return 'Additional Questions';
+  const lines = String(text || '').split(/\n+/).map((line) => fold(line)).filter(Boolean);
+  if (lines.some((line) => line === 'review' || line === 'revise sua candidatura')) return 'Review';
   if (/resume|curriculo/.test(lower)) return 'Resume';
   if (/education|formacao/.test(lower)) return 'Education';
   if (/work experience|experiencia/.test(lower)) return 'Work Experience';

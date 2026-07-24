@@ -41,6 +41,8 @@ def server_status(client_id: str = 'anonymous', include_clients: bool = False) -
         'auth_mode': 'token' if config.auth_enabled else 'none',
         'tool_profile': get_active_tool_profile().value,
         'exposed_tool_count': get_active_tool_count(),
+        'upload_policy': config.upload_policy,
+        'native_picker_staging': 'automatic',
         'capabilities': {
             'transports': ['http', 'sse', 'stdio'],
             'browser': ['launch', 'close', 'list', 'attach'],

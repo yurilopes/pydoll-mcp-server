@@ -11,6 +11,29 @@ function stepProgressFor(text) {
     || fold(text).match(/step\s+(\d+)\s+of\s+(\d+)/i);
   return match ? { index: Number(match[1]), count: Number(match[2]) } : { index: 0, count: 0 };
 }
+function stepProgressFromDom() {
+  const candidates = [...document.querySelectorAll(
+    '[role="progressbar"], [aria-valuenow][aria-valuemax], [data-test-progress]'
+  )].filter((element) => typeof visible !== 'function' || visible(element));
+  for (const element of candidates) {
+    const index = Number(element.getAttribute('aria-valuenow') || element.getAttribute('data-value') || '0');
+    const count = Number(element.getAttribute('aria-valuemax') || element.getAttribute('data-max') || '0');
+    if (Number.isInteger(index) && index > 0 && Number.isInteger(count) && count >= index && count <= 20) {
+      return { index, count };
+    }
+  }
+  return { index: 0, count: 0 };
+}
+function stepProgressFromTitle(title) {
+  const lower = fold(title);
+  if (/contact info|informacoes de contato/.test(lower)) return { index: 1, count: 0 };
+  if (/resume|curriculo/.test(lower)) return { index: 2, count: 0 };
+  if (/additional questions|perguntas adicionais/.test(lower)) return { index: 3, count: 0 };
+  if (/work experience|experiencia profissional/.test(lower)) return { index: 4, count: 0 };
+  if (/education|formacao/.test(lower)) return { index: 4, count: 0 };
+  if (/revise sua candidatura|review/.test(lower)) return { index: 5, count: 0 };
+  return { index: 0, count: 0 };
+}
 function questionText(value) {
   return fold(value).replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -21,11 +44,10 @@ function containsQuestionPhrase(value, needle) {
 function questionMatchScore(item, needle, answer) {
   const label = questionText(item.field.label);
   const group = questionText(item.field.group_text);
-  if (!containsQuestionPhrase(label, needle) && !containsQuestionPhrase(group, needle)) return -1;
-  let score = 0;
-  if (label === needle) score += 100;
-  else if (containsQuestionPhrase(label, needle)) score += 70;
-  else score += 35;
+  const labelScore = choiceMatchScore(label, needle);
+  const groupScore = choiceMatchScore(group, needle);
+  if (labelScore < 0 && groupScore < 0) return -1;
+  let score = Math.max(labelScore, groupScore);
   if (answer.value !== undefined && answer.value !== null && /^-?\d+(?:\.\d+)?$/.test(String(answer.value))) {
     if (/how many|years? of|experience/.test(label)) score += 25;
   }

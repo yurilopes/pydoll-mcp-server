@@ -39,15 +39,18 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
 
 ## Uploads and Downloads
 
-- **Upload**: only paths inside `artifacts_dir`, `downloads_dir`, or `tmp_dir`.
-- **Upload preparation**: `artifact_prepare_upload` copies allowed files into the
-  controlled client artifact directory before upload. It rejects sources outside
-  runtime directories and explicit allowlists, returns exact allowed directories
-  on denial, and sanitizes filenames.
-- **Native picker note**: Chrome's File System Access API may reject files under
-  protected Windows locations such as `AppData` even when the MCP allowlist
-  permits them. Use a user-controlled directory and add it explicitly to the
-  upload allowlist for native-picker uploads.
+- **Upload**: the default `local` policy accepts the explicit local file path
+  supplied to an upload tool. It still requires a regular file, resolves the
+  path, and enforces the 50 MiB default size limit. Set
+  `PYDOLL_MCP_UPLOAD_POLICY=restricted` to limit sources to runtime directories
+  and explicit allowlists.
+- **Upload preparation**: `artifact_prepare_upload` can copy a local source into
+  the controlled client artifact directory in one call. It sanitizes filenames
+  and keeps the target inside the client artifact directory.
+- **Native picker**: Chrome's File System Access API may reject files under
+  protected Windows locations such as `AppData`. The MCP stages native-picker
+  uploads in a user-controlled temporary directory, preserves the filename,
+  verifies page confirmation, and removes the temporary copy.
 - **Download**: files stored in `downloads_dir/{client_id}/`.
 - **Screenshots**: saved to artifact files by default (`return_base64=false`).
   Base64 is returned only with explicit opt-in. Path writing validated against
@@ -110,7 +113,9 @@ The following are NOT exposed as MCP tools:
 
 - `execute_cdp_cmd` - would allow arbitrary CDP commands
 - OS command execution - not in scope
-- Arbitrary filesystem read/write - blocked by path allowlist
+- No arbitrary filesystem read/write tool is exposed. Uploads consume only the
+  explicit source path supplied to an upload operation and follow the configured
+  upload source policy.
 - CAPTCHA bypass, fraud automation, or security evasion
 
 ## Runtime Cleanup

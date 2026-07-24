@@ -48,5 +48,6 @@ class TestElementClickByTextEnhanced:
         assert 'tag' in params
         assert 'within_element_id' in params
         assert 'nearest_heading' in params
+        assert 'match_index' in params
         assert 'ambiguity_threshold' in params
         assert 'prefer_modal' in params

@@ -34,6 +34,7 @@ class _FakeElement:
 def _configure_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv('PYDOLL_MCP_RUNTIME_DIR', str(tmp_path))
     monkeypatch.setenv('PYDOLL_MCP_AUTH_TOKEN', 'test-token')
+    monkeypatch.setenv('PYDOLL_MCP_UPLOAD_POLICY', 'restricted')
     from pydoll_mcp_server.config import get_config
 
     get_config.cache_clear()
@@ -102,7 +103,24 @@ async def test_upload_files_from_trigger_rejects_path_outside_allowlist(
     )
 
     assert result['error_code'] == 'PERMISSION_DENIED'
-    assert result['recovery_hint'] == 'Use artifact_prepare_upload or configure an explicit upload allowlist.'
+    assert result['recovery_hint'] == 'Set PYDOLL_MCP_UPLOAD_POLICY=local or configure an explicit upload allowlist.'
+
+
+def test_local_upload_policy_accepts_explicit_file_outside_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from pydoll_mcp_server.config import get_config
+    from pydoll_mcp_server.security.upload_policy import validate_upload_path
+
+    source = tmp_path / 'generated-resume.pdf'
+    source.write_bytes(b'%PDF-1.4 local upload')
+    monkeypatch.setenv('PYDOLL_MCP_AUTH_TOKEN', 'test-token')
+    monkeypatch.setenv('PYDOLL_MCP_RUNTIME_DIR', str(tmp_path / 'runtime'))
+    monkeypatch.setenv('PYDOLL_MCP_UPLOAD_POLICY', 'local')
+    get_config.cache_clear()
+
+    assert validate_upload_path(str(source)) is None
 
 
 @pytest.mark.asyncio
@@ -153,7 +171,9 @@ async def test_auto_falls_back_to_desktop_only_for_file_system_access_picker(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from pydoll_mcp_server.security.upload_policy import UploadSource
     from pydoll_mcp_server.tools import upload_trigger
+    from pydoll_mcp_server.tools.upload_paths import NativePickerUpload
 
     resume = _configure_runtime(monkeypatch, tmp_path)
     trigger = _FakeElement({'file_input_count': 0, 'local_file_input_count': 0})
@@ -182,6 +202,17 @@ async def test_auto_falls_back_to_desktop_only_for_file_system_access_picker(
         return True
 
     monkeypatch.setattr(upload_trigger, 'native_picker_is_available', native_picker_available)
+    monkeypatch.setattr(
+        upload_trigger,
+        'prepare_native_picker_upload',
+        AsyncMock(
+            return_value=NativePickerUpload(
+                source=UploadSource(str(resume), resume.resolve(), resume.name, resume.stat().st_size),
+                picker_path=resume,
+                staging_dir=None,
+            )
+        ),
+    )
     monkeypatch.setattr(
         upload_trigger,
         'focus_native_browser_window',

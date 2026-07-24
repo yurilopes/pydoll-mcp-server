@@ -57,6 +57,7 @@ async def test_artifact_import_requires_allowlist(monkeypatch: MonkeyPatch, tmp_
     source.write_text('resume', encoding='utf-8')
     monkeypatch.setenv('PYDOLL_MCP_AUTH_TOKEN', 'test-token')
     monkeypatch.setenv('PYDOLL_MCP_RUNTIME_DIR', str(runtime))
+    monkeypatch.setenv('PYDOLL_MCP_UPLOAD_POLICY', 'restricted')
     get_config.cache_clear()
 
     denied = await artifact_import('client', str(source))

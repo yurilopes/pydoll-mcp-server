@@ -6,6 +6,7 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,6 +50,14 @@ class ServerConfig(BaseSettings):
         default_factory=_default_runtime_dir,
         description='Base directory for runtime data',
     )
+    upload_policy: Literal['local', 'restricted'] = Field(
+        default='local',
+        description='Upload source policy: local accepts explicit local files; restricted uses the path allowlist',
+    )
+    upload_staging_dir: Path | None = Field(
+        default=None,
+        description='Optional user-controlled directory used for native picker staging',
+    )
 
     @model_validator(mode='after')
     def validate_auth(self) -> ServerConfig:
@@ -61,6 +70,8 @@ class ServerConfig(BaseSettings):
             self.allow_no_auth = True
         if env_transport == 'stdio':
             self.allow_no_auth = True
+        if self.upload_policy == 'local' and not _is_loopback_host(self.host):
+            raise ValueError('The local upload policy requires a loopback HTTP host or stdio transport.')
         if not self.allow_no_auth and not self.auth_token:
             raise ValueError(
                 'PYDOLL_MCP_AUTH_TOKEN is required when auth is enabled. '
@@ -91,6 +102,15 @@ class ServerConfig(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         return self.runtime_dir / 'logs'
+
+    @property
+    def native_upload_staging_dir(self) -> Path:
+        if self.upload_staging_dir is not None:
+            return self.upload_staging_dir
+        downloads = Path.home() / 'Downloads'
+        if downloads.is_dir():
+            return downloads / '.pydoll-mcp-upload-staging'
+        return Path.home() / 'Documents' / '.pydoll-mcp-upload-staging'
 
     def ensure_directories(self) -> None:
         for d in [
@@ -140,6 +160,10 @@ class LimitsConfig(BaseSettings):
 @lru_cache
 def get_config() -> ServerConfig:
     return ServerConfig()
+
+
+def _is_loopback_host(host: str) -> bool:
+    return host in {'127.0.0.1', 'localhost', '::1'}
 
 
 @lru_cache

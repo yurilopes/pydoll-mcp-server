@@ -243,11 +243,17 @@ evidence for external trackers.
 `linkedin_easy_apply_submit` refuses to submit unless `confirm_submit=true` is
 provided and the current modal is a verified final submit step.
 The Easy Apply helpers support both visible dialogs and inline LinkedIn forms.
-`linkedin_easy_apply_upload_resume` accepts a permitted local file through its
+`linkedin_easy_apply_upload_resume` accepts an explicit local file through its
 `path` parameter, uploads it with `paths` internally, and reports filename and
 toast verification separately from upload acceptance. It delegates native
 picker handling to the generic upload layer when no `input[type="file"]` is
 available, while preserving LinkedIn-specific snapshot and toast verification.
+
+Uploads use the `local` source policy by default. The agent supplies a concrete
+local file path and does not need to call `artifact_import`, copy the file into
+the runtime directory, or prepare an intermediate artifact. Set
+`PYDOLL_MCP_UPLOAD_POLICY=restricted` to restore runtime-directory and explicit
+allowlist validation for a more constrained deployment.
 
 `upload_files_from_trigger` supports three strategies for portals such as
 Greenhouse, Lever, and Workable:
@@ -256,17 +262,17 @@ Greenhouse, Lever, and Workable:
   finally the Windows native picker when the browser is visible and owned.
 - `intercept` never opts into the desktop fallback and returns a structured
   `UNSUPPORTED` result for a real File System Access picker.
-- `desktop` forces the Windows native picker and accepts one permitted file.
+- `desktop` forces the Windows native picker and accepts one explicit local file.
 
 The Windows fallback requires `pydoll-mcp-server[windows]`, a visible browser,
 and a dialog that can be associated with the browser process. Headless sessions
 return a structured unsupported result instead of opening or controlling a
-native window. All paths are checked against the upload allowlist before the
-trigger is clicked. Chrome may still reject a file below a protected Windows
-location such as the runtime `AppData` directory when the portal uses the File
-System Access API. For that case, use a user-controlled directory such as
-`Downloads` and add it explicitly to `PYDOLL_MCP_UPLOAD_ALLOWLIST`; the default
-allowlist is intentionally unchanged.
+native window. Every source is validated as an explicit regular local file with
+a size limit before the trigger is clicked. For native pickers, the MCP stages
+the validated file in a user-controlled temporary directory when needed,
+preserves its original filename, waits for page confirmation, and removes the
+temporary copy. The staging directory can be overridden with
+`PYDOLL_MCP_UPLOAD_STAGING_DIR`.
 
 `element_find` requires a CSS selector by default or an XPath expression when
 `strategy="xpath"`. Use `element_find_by_role`, `element_find_by_text`, or
@@ -410,7 +416,9 @@ The alpha covers simple iframes, same-origin nested iframes, and open shadow DOM
 - Operating system commands are not exposed.
 - Arbitrary filesystem read or write is not exposed.
 - Navigation to `file://` is blocked completely. Serve local fixtures through loopback HTTP.
-- Screenshots, downloads, and uploads use controlled directories or an allowlist.
+- Screenshots and downloads use controlled directories. Uploads accept one
+  explicit local file by default, validate its type and size, and can be
+  constrained with `PYDOLL_MCP_UPLOAD_POLICY=restricted` and explicit roots.
 - Cookies and storage are redacted by default on read.
 - Sensitive attributes such as tokens, passwords, and cookies are redacted.
 - Logs must redact bearer tokens, cookies, authorization headers, and sensitive fields.
@@ -504,7 +512,9 @@ python -m pytest tests/p2/ -q
 - Closed shadow roots and complex OOPIFs still require dedicated validation.
 - Deep traversal is more expensive than `page_get_tree` and should be used explicitly.
 - Downloads depend on Pydoll's `expect_download` flow and must remain in the controlled runtime dir.
-- Uploads must only use paths allowed by the allowlist.
+- Uploads use the local source policy by default. Set
+  `PYDOLL_MCP_UPLOAD_POLICY=restricted` when every source must be inside the
+  runtime directories or `PYDOLL_MCP_UPLOAD_ALLOWLIST`.
 - `operation_cancel` applies to waits and direct HTTP operations that receive an explicit caller-provided `operation_id`.
 - Direct HTTP supports HTTP and HTTPS proxies. SOCKS proxy sessions return `UNSUPPORTED`
   rather than bypassing the configured browser proxy.

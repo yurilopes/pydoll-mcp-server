@@ -34,6 +34,12 @@ async def set_choice_state(element: WebElement, checked: bool) -> JsonObject:
         if (!{desired} && (type === 'radio' || role === 'radio'))
             return {{error:'radio_cannot_be_unchecked', diagnostic}};
         if (state() === {desired}) return {{checked:state(), verified:true, strategy_used:'already_selected'}};
+        if (ariaChoice && visible(target)) {{
+            diagnostic.strategies_attempted.push('aria');
+            target.click();
+            diagnostic.observed_checked = state();
+            return {{checked:state(), verified:state(), clicked:true, strategy_used:'aria', diagnostic}};
+        }}
         let label = target.closest('label');
         if (!label && target.id) label = document.querySelector('label[for="' + CSS.escape(target.id) + '"]');
         diagnostic.has_associated_label = Boolean(label);

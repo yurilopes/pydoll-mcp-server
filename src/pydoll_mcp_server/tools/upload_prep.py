@@ -16,8 +16,9 @@ from pydoll_mcp_server.config import ServerConfig, get_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_object, get_string
 from pydoll_mcp_server.security.policy import PathAllowlist
+from pydoll_mcp_server.security.upload_policy import upload_allowlist, validate_upload_path
 from pydoll_mcp_server.tools.element_resolver import resolve_element
-from pydoll_mcp_server.tools.files import file_info, upload_allowlist
+from pydoll_mcp_server.tools.files import file_info
 
 
 async def artifact_prepare_upload(
@@ -33,7 +34,9 @@ async def artifact_prepare_upload(
     try:
         resolved = source.resolve(strict=True)
     except OSError:
-        return _denied_response(source_path, allowlist, config, client_id)
+        if config.upload_policy == 'restricted':
+            return _denied_response(source_path, allowlist, config, client_id)
+        return StructuredError(ErrorCode.RESOURCE_NOT_FOUND, f'Upload file does not exist: {source_path}').to_dict()
 
     if not resolved.is_file():
         return StructuredError(
@@ -90,15 +93,10 @@ async def upload_files_enhanced(
 ) -> JsonObject:
     registry = get_registry()
 
-    allowlist = upload_allowlist()
     for p in paths:
-        if not allowlist.is_allowed(p):
-            return StructuredError(
-                ErrorCode.PERMISSION_DENIED,
-                message=f'Upload path not in allowed directories: {p}',
-                retryable=False,
-                recovery_hint='Use artifact_prepare_upload to copy the file into artifacts first.',
-            ).to_dict()
+        validation_error = validate_upload_path(p)
+        if validation_error is not None:
+            return validation_error
 
     try:
         tab_info = registry.get_tab(client_id, tab_id)

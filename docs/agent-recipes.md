@@ -106,32 +106,38 @@ Prefer condition waits over fixed sleeps:
 
 ## Upload a file safely
 
-Use `artifact_prepare_upload` to copy a file into the controlled artifacts
-directory before uploading:
-
-```json
-{
-  "client_id": "agent",
-  "source_path": "path/to/resume.pdf"
-}
-```
-
-The response includes the ready-to-use artifact path. Then find the file input
-and call `upload_files`:
+Upload tools accept the generated file path directly. No shell copy or staging
+tool call is required:
 
 ```json
 {
   "client_id": "agent",
   "tab_id": "tab",
   "element_id": "el_file",
-  "paths": ["artifacts/agent/resume.pdf"],
+  "paths": ["C:/path/to/resume.pdf"],
   "expect_filename_visible": true
 }
 ```
 
+For custom upload buttons or portals using File System Access API, resolve the
+trigger and call `upload_files_from_trigger` with the same source path. The MCP
+uses the original file for direct inputs and performs temporary native-picker
+staging internally only when required.
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "trigger_element_id": "el_upload",
+  "paths": ["C:/path/to/resume.pdf"],
+  "picker_strategy": "auto",
+  "expected_filenames": ["resume.pdf"]
+}
+```
+
 Check `file_upload_state` or `visible_in_page` after upload if the page moves
-file state out of the native input. Use `artifact_import` for lower-level file
-copies from allowed directories.
+file state out of the native input. Use `artifact_prepare_upload` only when a
+stable artifact copy is explicitly useful for later operations.
 
 ## Complete a multi-step form flow
 

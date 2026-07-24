@@ -44,6 +44,8 @@ def main() -> None:
     args = parser.parse_args()
 
     os.environ['PYDOLL_MCP_TOOL_PROFILE'] = args.tool_profile
+    os.environ['PYDOLL_MCP_TRANSPORT'] = args.transport
+    os.environ['PYDOLL_MCP_HOST'] = args.host
 
     from pydoll_mcp_server.logging import get_logger
 
@@ -51,7 +53,6 @@ def main() -> None:
     logger.set_level(args.log_level)
 
     if args.transport == 'stdio':
-        os.environ.setdefault('PYDOLL_MCP_TRANSPORT', 'stdio')
         logger.info(f'Starting Pydoll MCP Server via stdio with tool profile {args.tool_profile}')
         run_stdio()
         return

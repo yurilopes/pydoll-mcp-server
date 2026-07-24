@@ -22,6 +22,14 @@ class TestServerConfig:
         config = ServerConfig(auth_token='test-token')
         assert config.host == '127.0.0.1'
 
+    def test_default_upload_policy_is_local(self) -> None:
+        config = ServerConfig(auth_token='test-token')
+        assert config.upload_policy == 'local'
+
+    def test_local_upload_policy_rejects_non_loopback_host(self) -> None:
+        with pytest.raises(ValueError, match='loopback'):
+            ServerConfig(auth_token='test-token', host='0.0.0.0')
+
     def test_default_port(self) -> None:
         config = ServerConfig(auth_token='test-token')
         assert config.port == 8765

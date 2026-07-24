@@ -243,9 +243,9 @@ _DESCRIPTION_OVERRIDES = {
         'Use immediately after a submit action.'
     ),
     'upload_files_from_trigger': (
-        'Upload permitted files through a custom browser trigger. '
+        'Upload an explicit local file through a custom browser trigger without manual staging. '
         'Use auto for input, intercepted chooser, or a validated Windows native picker fallback; '
-        'verify the returned strategy.'
+        'verify the returned strategy and native staging evidence.'
     ),
     'linkedin_jobs_search': (
         'Build and open a LinkedIn Jobs search with location, remote, Easy Apply, '

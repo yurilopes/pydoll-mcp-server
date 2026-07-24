@@ -7,25 +7,32 @@ from typing import Annotated
 
 from pydantic import Field
 from pydoll.exceptions import PydollException
-from pydoll.protocol.input.types import MouseButton
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import (
     InvalidScriptResponseError,
     extract_script_array,
-    extract_script_object,
 )
 from pydoll_mcp_server.dom.element_cache import get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_float, require_json_object
-from pydoll_mcp_server.tools.element_resolver import resolve_element
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_float, get_string, require_json_object
+from pydoll_mcp_server.tools.choice_semantic_verification import wait_for_choice_state
+from pydoll_mcp_server.tools.mouse_actions import element_click_center, mouse_click
+
+__all__ = ['element_click_by_text', 'element_click_center', 'mouse_click']
 
 
 async def element_click_by_text(
     client_id: str,
     tab_id: str,
     text: Annotated[str, Field(description='Visible text of the intended actionable control.')],
+    match_index: Annotated[
+        int | None,
+        Field(
+            description='Optional zero-based occurrence among filtered matches. Use only when identical text is intentional.'
+        ),
+    ] = None,
     exact: Annotated[bool, Field(description='Require exact normalized text when true.')] = True,
     timeout: float | None = None,
     role: Annotated[str, Field(description='Optional ARIA role filter such as button or link.')] = '',
@@ -48,6 +55,8 @@ async def element_click_by_text(
         Field(description='Minimum score gap required to accept a close candidate match.'),
     ] = 25,
 ) -> JsonObject:
+    if match_index is not None and match_index < 0:
+        return StructuredError(ErrorCode.INVALID_INPUT, 'match_index must be zero or greater').to_dict()
     safe_threshold = max(1, min(ambiguity_threshold, 1000))
     within_selector = ''
     if within_element_id:
@@ -62,6 +71,7 @@ async def element_click_by_text(
     candidates_payload = json.dumps(
         {
             'text': text,
+            'match_index': match_index,
             'exact': exact,
             'role': role,
             'tag': tag,
@@ -118,6 +128,25 @@ async def element_click_by_text(
     click = await _click_candidate(client_id, tab_id, chosen, timeout)
     if not click.get('success'):
         return click
+    if get_string(chosen, 'role') in {'radio', 'checkbox'}:
+        verified = await wait_for_choice_state(
+            client_id,
+            tab_id,
+            text=text,
+            role=get_string(chosen, 'role'),
+            match_index=match_index,
+            selector=get_string(chosen, 'selector_hint'),
+            timeout=timeout,
+        )
+        if not verified:
+            return StructuredError(
+                ErrorCode.STALE_ELEMENT,
+                f'Choice click was not verified after selecting: {text}',
+                details={'chosen': chosen, 'click': click},
+                retryable=True,
+                recovery_hint='Re-resolve the choice group and retry after the page finishes rendering.',
+            ).to_dict()
+        click['verified'] = True
     return {
         'success': True,
         'clicked': True,
@@ -125,77 +154,6 @@ async def element_click_by_text(
         'chosen': chosen,
         'rejected': _rejected(candidates, chosen),
     }
-
-
-async def element_click_center(
-    client_id: str,
-    tab_id: str,
-    element_id: str,
-    button: str = 'left',
-    click_count: int = 1,
-    timeout: float | None = None,
-) -> JsonObject:
-    try:
-        tab_info = get_registry().get_tab(client_id, tab_id)
-    except StructuredError as exc:
-        return exc.to_dict()
-    element = await resolve_element(tab_info, element_id)
-    if element is None:
-        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
-    try:
-        result = await element.execute_script(
-            """const r=this.getBoundingClientRect();return {
-            x:r.x,y:r.y,width:r.width,height:r.height,visible:r.width>0&&r.height>0};""",
-            return_by_value=True,
-        )
-        bounds = extract_script_object(result)
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Element bounds failed: {exc}', retryable=True).to_dict()
-    if not bounds.get('visible'):
-        return StructuredError(ErrorCode.INVALID_INPUT, 'Element is not visible.').to_dict()
-    x = get_float(bounds, 'x') + get_float(bounds, 'width') / 2
-    y = get_float(bounds, 'y') + get_float(bounds, 'height') / 2
-    click = await mouse_click(client_id, tab_id, x, y, button, click_count, timeout)
-    if not click.get('success'):
-        return click
-    click['element_id'] = element_id
-    click['bounds'] = bounds
-    return click
-
-
-async def mouse_click(
-    client_id: str,
-    tab_id: str,
-    x: float,
-    y: float,
-    button: str = 'left',
-    click_count: int = 1,
-    timeout: float | None = None,
-) -> JsonObject:
-    if x < 0 or y < 0:
-        return StructuredError(ErrorCode.INVALID_INPUT, 'Mouse coordinates must be non-negative.').to_dict()
-    mouse_button = _mouse_button(button)
-    if mouse_button is None:
-        return StructuredError(ErrorCode.INVALID_INPUT, f'Unsupported mouse button: {button}').to_dict()
-    safe_click_count = max(1, min(click_count, 3))
-    try:
-        tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
-        async with tab_operation_lock(tab_id):
-            await tab.mouse.click(x, y, button=mouse_button, click_count=safe_click_count)
-        return {
-            'success': True,
-            'clicked': True,
-            'mode_used': 'mouse',
-            'x': x,
-            'y': y,
-            'button': mouse_button.value,
-            'click_count': safe_click_count,
-            'timeout': timeout or 0,
-        }
-    except StructuredError as exc:
-        return exc.to_dict()
-    except PydollException as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Mouse click failed: {exc}', retryable=True).to_dict()
 
 
 def _choose_candidate(candidates: JsonArray) -> JsonObject | None:
@@ -222,17 +180,6 @@ def _rejected(candidates: JsonArray, chosen: JsonObject) -> JsonArray:
             reason = 'ambiguous_ancestor'
         rejected.append({'candidate': candidate, 'reason': reason})
     return rejected
-
-
-def _mouse_button(button: str) -> MouseButton | None:
-    normalized = button.lower()
-    if normalized == 'left':
-        return MouseButton.LEFT
-    if normalized == 'right':
-        return MouseButton.RIGHT
-    if normalized == 'middle':
-        return MouseButton.MIDDLE
-    return None
 
 
 async def _click_candidate(
@@ -400,6 +347,10 @@ for (const el of allEls) {
     });
 }
 
+if (Number.isInteger(opts.match_index)) {
+    const indexed = results[opts.match_index];
+    return indexed ? [indexed] : [];
+}
 results.sort((a, b) => b.score - a.score);
 return results.slice(0, opts.max_candidates);
 """

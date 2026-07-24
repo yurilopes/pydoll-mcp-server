@@ -67,13 +67,20 @@ def _redact_array(values: JsonArray, redact_all: bool) -> JsonArray:
 
 
 class PathAllowlist:
-    def __init__(self, allowed_dirs: list[str]) -> None:
+    def __init__(self, allowed_dirs: list[str], *, allow_any: bool = False) -> None:
         self._allowed: list[Path] = [Path(d).resolve() for d in allowed_dirs]
+        self._allow_any = allow_any
+
+    @property
+    def allows_any(self) -> bool:
+        return self._allow_any
 
     def add(self, directory: str) -> None:
         self._allowed.append(Path(directory).resolve())
 
     def is_allowed(self, path: str) -> bool:
+        if self._allow_any:
+            return True
         try:
             resolved = Path(path).resolve(strict=False)
         except OSError:

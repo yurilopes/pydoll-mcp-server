@@ -17,10 +17,10 @@ from pydoll_mcp_server.json_types import (
     require_json_object,
 )
 from pydoll_mcp_server.tools.linkedin_runtime import (
-    click_resolved_action as _click_resolved_action,
+    click_linkedin_choice as _click_linkedin_choice,
 )
 from pydoll_mcp_server.tools.linkedin_runtime import (
-    click_selector as _click_selector,
+    click_resolved_action as _click_resolved_action,
 )
 from pydoll_mcp_server.tools.linkedin_runtime import (
     execute_mutating_script as _execute_mutating_script,
@@ -103,13 +103,33 @@ async def linkedin_easy_apply_wait_ready(
     """Wait for an Easy Apply surface, blocking prompt, error, or confirmation."""
     deadline = time.monotonic() + max(1, timeout_ms) / 1000
     last_snapshot: JsonObject = {}
+    title_signature = ''
+    stable_title_reads = 0
     while time.monotonic() < deadline:
         snapshot = await linkedin_easy_apply_snapshot(client_id, tab_id)
         last_snapshot = snapshot
         if not get_bool(snapshot, 'success'):
             return snapshot
         if _snapshot_ready(snapshot):
-            return snapshot
+            has_rich_state = bool(
+                snapshot.get('step_index')
+                or snapshot.get('step_count')
+                or get_object(snapshot, 'primary_action', {})
+                or snapshot.get('fields')
+                or snapshot.get('questions')
+                or snapshot.get('inline_errors')
+                or snapshot.get('pending_required')
+            )
+            if has_rich_state:
+                return snapshot
+            current_signature = f'{get_string(snapshot, "surface")}:{get_string(snapshot, "step_title")}'
+            if current_signature and current_signature == title_signature:
+                stable_title_reads += 1
+            else:
+                title_signature = current_signature
+                stable_title_reads = 1
+            if stable_title_reads >= 2:
+                return snapshot
         await asyncio.sleep(0.25)
     return {
         'success': False,
@@ -163,24 +183,32 @@ async def linkedin_easy_apply_fill_questions(
     unfilled = get_array(result, 'unfilled', [])
     for action_value in get_array(result, 'radio_actions', []):
         action = require_json_object(action_value, 'radio action')
-        selector = get_string(action, 'selector')
-        click = await _click_selector(client_id, tab_id, selector, 10000, allow_hidden_choice_fallback=True)
+        question_contains = get_string(action, 'question_contains')
+        option_text = get_string(action, 'option_text')
+        click = await _click_linkedin_choice(
+            client_id,
+            tab_id,
+            question_contains,
+            option_text,
+            timeout_ms=10000,
+        )
         if get_bool(click, 'success'):
             filled.append(
                 {
-                    'question_contains': get_string(action, 'question_contains'),
-                    'matched_label': get_string(action, 'matched_label'),
-                    'option_text': get_string(action, 'option_text'),
+                    'question_contains': question_contains,
+                    'matched_label': get_string(action, 'matched_label', get_string(click, 'matched_label')),
+                    'option_text': option_text,
                     'verified': True,
+                    'attempts': len(get_array(click, 'attempts', [])),
                 }
             )
         else:
             unfilled.append(
                 {
-                    'question_contains': get_string(action, 'question_contains'),
+                    'question_contains': question_contains,
                     'matched_label': get_string(action, 'matched_label'),
-                    'option_text': get_string(action, 'option_text'),
-                    'reason': 'click_failed',
+                    'option_text': option_text,
+                    'reason': get_string(click, 'reason', 'click_failed'),
                     'click_error': click,
                 }
             )

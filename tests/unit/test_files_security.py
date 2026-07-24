@@ -54,6 +54,7 @@ def _reset_config(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
 
     monkeypatch.setenv('PYDOLL_MCP_AUTH_TOKEN', 'test-token')
     monkeypatch.setenv('PYDOLL_MCP_RUNTIME_DIR', str(tmp_path))
+    monkeypatch.setenv('PYDOLL_MCP_UPLOAD_POLICY', 'restricted')
     get_config.cache_clear()
 
 

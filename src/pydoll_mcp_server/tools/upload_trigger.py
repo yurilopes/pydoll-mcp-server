@@ -41,9 +41,12 @@ from pydoll_mcp_server.json_types import (
     JsonObject,
     get_bool,
     get_object,
+    get_string,
     require_json_object,
 )
+from pydoll_mcp_server.security.upload_policy import UploadPathError
 from pydoll_mcp_server.tools.element_resolver import resolve_element
+from pydoll_mcp_server.tools.upload_paths import NativePickerUpload, prepare_native_picker_upload
 from pydoll_mcp_server.tools.upload_trigger_helpers import (
     PickerStrategy,
     direct_input_available,
@@ -201,23 +204,37 @@ async def upload_files_from_trigger(
                 if not should_try_desktop_fallback(intercept_result):
                     return intercept_result
 
-            desktop_result = await upload_with_desktop(
-                tab_info.pydoll_tab,
-                browser_info,
-                trigger,
-                paths[0],
-                timeout_ms,
-                picker_strategy,
-            )
-            set_strategy_requested(desktop_result, picker_strategy)
-            set_surface_diagnostics(desktop_result, surface)
-            attempts.append(dict(desktop_result))
-            if get_bool(desktop_result, 'success'):
-                result = await finish_upload_result(trigger, desktop_result, expected, timeout_ms)
-                result['strategy_attempts'] = attempts
-                return result
-            desktop_result['strategy_attempts'] = attempts
-            return desktop_result
+            native_stage: NativePickerUpload | None = None
+            try:
+                picker_path = paths[0]
+                if native_picker_is_available(browser_info):
+                    native_stage = await prepare_native_picker_upload(paths[0])
+                    picker_path = str(native_stage.picker_path)
+                desktop_result = await upload_with_desktop(
+                    tab_info.pydoll_tab,
+                    browser_info,
+                    trigger,
+                    picker_path,
+                    timeout_ms,
+                    picker_strategy,
+                )
+                set_strategy_requested(desktop_result, picker_strategy)
+                set_surface_diagnostics(desktop_result, surface)
+                if native_stage is not None:
+                    desktop_result['source_path'] = native_stage.source.requested_path
+                    desktop_result['native_picker_staged'] = native_stage.staged
+                attempts.append(dict(desktop_result))
+                if get_bool(desktop_result, 'success'):
+                    result = await finish_upload_result(trigger, desktop_result, expected, timeout_ms)
+                    result['strategy_attempts'] = attempts
+                    return result
+                desktop_result['strategy_attempts'] = attempts
+                return desktop_result
+            finally:
+                if native_stage is not None:
+                    await native_stage.cleanup()
+    except UploadPathError as exc:
+        return exc.to_dict()
     except (PydollException, InvalidScriptResponseError, OSError, TypeError, ValueError) as exc:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -302,23 +319,37 @@ async def upload_with_desktop(
     if not native_picker_is_available(browser):
         return await select_native_file(browser, path, timeout_ms=timeout_ms)
     await bring_tab_to_front(tab)
-    dialog_is_open = await native_picker_dialog_present(browser, timeout_ms=min(250, timeout_ms))
-    if not dialog_is_open:
-        focus = await focus_native_browser_window(browser, timeout_ms=min(timeout_ms, 5000))
-        if not get_bool(focus, 'success'):
-            return focus
-        click = await _click_trigger(trigger)
-        if not get_bool(click, 'success'):
-            return click
-    native = await select_native_file(browser, path, timeout_ms=timeout_ms)
-    if not get_bool(native, 'success'):
-        return native
-    native['uploaded'] = True
-    native['strategy_requested'] = strategy_requested
-    native['strategy_used'] = 'desktop_picker'
-    native['file_input_detected'] = False
-    native['file_chooser_event_seen'] = False
-    return native
+    deadline = time.monotonic() + max(1, timeout_ms) / 1000
+    attempt_budget = max(1000, timeout_ms // 2)
+    last_result: JsonObject = {}
+    for attempt in range(2):
+        remaining = max(1, int((deadline - time.monotonic()) * 1000))
+        dialog_is_open = await native_picker_dialog_present(browser, timeout_ms=min(250, remaining))
+        if not dialog_is_open:
+            focus = await focus_native_browser_window(browser, timeout_ms=min(remaining, 5000))
+            if not get_bool(focus, 'success'):
+                return focus
+            click = await _click_trigger(trigger)
+            if not get_bool(click, 'success'):
+                return click
+        native = await select_native_file(
+            browser,
+            path,
+            timeout_ms=min(remaining, attempt_budget if attempt == 0 else remaining),
+        )
+        last_result = native
+        if get_bool(native, 'success'):
+            native['uploaded'] = True
+            native['strategy_requested'] = strategy_requested
+            native['strategy_used'] = 'desktop_picker'
+            native['file_input_detected'] = False
+            native['file_chooser_event_seen'] = False
+            native['native_picker_attempts'] = attempt + 1
+            return native
+        details = get_object(native, 'details', {})
+        if get_string(details, 'reason') != 'native_picker_timeout' or attempt == 1:
+            return native
+    return last_result
 
 
 async def _click_trigger(trigger: UploadTriggerElement) -> JsonObject:

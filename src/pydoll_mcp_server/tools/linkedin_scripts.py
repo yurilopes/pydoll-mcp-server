@@ -59,14 +59,17 @@ def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> st
   const surfaceText = rootText(surface.root);
   const progress = stepProgressFor(surfaceText);
   const localProgress = stepProgressFor(text);
-  const stepIndex = progress.index || localProgress.index;
-  const stepCount = progress.count || localProgress.count;
   const headingText = [...root.querySelectorAll('h1, h2, h3, h4, [role="heading"]')]
     .filter((heading) => visible(heading))
     .map((heading) => norm(heading.innerText || '')).filter(Boolean).join(' ');
   const stepTitle = inferStepTitle(headingText || text);
-  const fieldElements = [...root.querySelectorAll('input, textarea, select, [contenteditable="true"]')]
-    .filter((el) => visible(el) || fold(el.getAttribute('type') || '') === 'radio');
+  const domProgress = stepProgressFromDom();
+  const titleProgress = stepProgressFromTitle(stepTitle);
+  const stepIndex = progress.index || localProgress.index || domProgress.index || titleProgress.index;
+  const stepCount = progress.count || localProgress.count || domProgress.count || titleProgress.count;
+  const fieldElements = [...root.querySelectorAll(
+    'input, textarea, select, [contenteditable="true"], [role="radio"], [role="checkbox"]'
+  )].filter((el) => visible(el) || ['radio', 'checkbox'].includes(choiceType(el)));
   const fields = fieldElements.map((el, index) => fieldSnapshot(el, root, index));
   const questionMap = new Map();
   for (const field of fields) {{
@@ -194,7 +197,13 @@ def resolve_action_script(action: str) -> str:
         native_picker_likely: typeof window.showOpenFilePicker === 'function',
       }};
   }}
-  const controls = visibleControls(root)
+  let actionRoot = root;
+  if (opts.action === 'close') {{
+    actionRoot = root.closest(
+      '[role="dialog"], dialog, [aria-modal="true"], .artdeco-modal, .jobs-easy-apply-modal'
+    ) || root;
+  }}
+  const controls = visibleControls(actionRoot)
     .filter((control) => enabled(control))
     .filter((control) => ['button', 'a', 'input', 'label'].includes(control.tagName.toLowerCase())
       || ['button', 'link', 'radio', 'checkbox', 'option'].includes(fold(control.getAttribute('role') || '')));
@@ -206,7 +215,15 @@ def resolve_action_script(action: str) -> str:
   if (opts.action === 'save') matcher = (control) => isSaveLabel(controlLabel(control));
   if (opts.action === 'discard') matcher = (control) => isDiscardLabel(controlLabel(control));
   if (opts.action === 'close') matcher = (control) => isCloseLabel(controlLabel(control));
-  const matches = controls.filter(matcher);
+  let matches = controls.filter(matcher);
+  if (opts.action === 'close' && !matches.length) {{
+    const structural = [...actionRoot.querySelectorAll(
+      '[data-test-modal-close-btn], .artdeco-modal__dismiss, [class*="modal-close"], [class*="modal__dismiss"]'
+    )].filter((control) => visible(control) && enabled(control));
+    matches = structural.filter((control) => isCloseLabel(controlLabel(control))
+      || /modal-close|modal__dismiss/i.test(String(control.className || ''))
+      || control.hasAttribute('data-test-modal-close-btn'));
+  }}
   matches.sort((left, right) => {{
     const leftTag = left.tagName.toLowerCase();
     const rightTag = right.tagName.toLowerCase();
@@ -273,8 +290,9 @@ def fill_questions_script(answers: list[JsonObject]) -> str:
   const unfilled = [];
   const ambiguous = [];
   const radioActions = [];
-  const controls = [...root.querySelectorAll('input, textarea, select, [contenteditable="true"]')]
-    .filter((el) => visible(el) || ['radio', 'checkbox'].includes(fold(el.getAttribute('type') || '')));
+  const controls = [...root.querySelectorAll(
+    'input, textarea, select, [contenteditable="true"], [role="radio"], [role="checkbox"]'
+  )].filter((el) => visible(el) || ['radio', 'checkbox'].includes(choiceType(el)));
   const metadata = controls.map((el) => {{
     const questionRoot = questionRootFor(el, root);
     return {{ el, field: fieldSnapshot(el, root, 0), questionRoot }};

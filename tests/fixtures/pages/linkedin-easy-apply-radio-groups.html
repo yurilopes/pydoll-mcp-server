@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LinkedIn Easy Apply Radio Groups</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    [role="dialog"] { border: 1px solid #bbb; padding: 20px; width: 760px; }
+    .question-block { margin: 18px 0; }
+    .question-text { font-weight: 600; margin: 0 0 8px; }
+    fieldset { border: 0; padding: 0; margin: 0; }
+    [role="radio"] {
+      border: 1px solid #888; display: inline-block; margin-right: 12px;
+      padding: 6px 14px; cursor: pointer;
+    }
+    [role="radio"][aria-checked="true"] { background: #d9f2d9; }
+    button { margin-top: 18px; padding: 8px 14px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <div id="easy-apply" role="dialog" aria-modal="true" aria-label="Easy Apply">
+      <section id="questions-step">
+        <p>3 of 4 pages</p>
+        <h2>Additional Questions</h2>
+        <div id="question-list"></div>
+        <button id="next-button" type="button" disabled>Next</button>
+      </section>
+      <section id="review-step" class="hidden">
+        <p>4 of 4 pages</p>
+        <h2>Review</h2>
+        <div id="review-answers"></div>
+        <button id="submit-button" type="button">Submit application</button>
+      </section>
+    </div>
+  </main>
+  <script>
+    const questionData = [
+      'Are you comfortable working in a remote setting?',
+      'Are you willing to undergo a background check, in accordance with local law/regulations?',
+      'Are you willing to take a drug test, in accordance with local law/regulations?',
+      'PLEASE REVIEW - So we can focus on qualified applications, please only apply if you meet the noted criteria. Send your profile for expedited review. Include work eligibility.'
+    ];
+    const answers = Array(questionData.length).fill('');
+    const options = ['Yes', 'No'];
+    const list = document.getElementById('question-list');
+    const next = document.getElementById('next-button');
+
+    function renderQuestions() {
+      list.innerHTML = questionData.map((question, questionIndex) => `
+        <div class="question-block">
+          <p class="question-text">${question}*</p>
+          <fieldset aria-required="true">
+            ${options.map((option) => `
+              <div role="radio" tabindex="0" aria-checked="${answers[questionIndex] === option}"
+                data-question-index="${questionIndex}" data-option="${option}">${option}</div>
+            `).join('')}
+          </fieldset>
+        </div>
+      `).join('');
+      list.querySelectorAll('[role="radio"]').forEach((radio) => {
+        radio.addEventListener('click', () => {
+          answers[Number(radio.dataset.questionIndex)] = radio.dataset.option;
+          renderQuestions();
+          next.disabled = answers.some((answer) => !answer);
+        });
+      });
+      next.disabled = answers.some((answer) => !answer);
+    }
+
+    next.addEventListener('click', () => {
+      if (answers.some((answer) => !answer)) return;
+      document.getElementById('questions-step').classList.add('hidden');
+      document.getElementById('review-step').classList.remove('hidden');
+      document.getElementById('review-answers').innerHTML = questionData
+        .map((question, index) => `<p>${question}</p><p>${answers[index]}</p>`).join('');
+    });
+
+    window.getRadioFixtureAnswers = () => answers.slice();
+    renderQuestions();
+  </script>
+</body>
+</html>

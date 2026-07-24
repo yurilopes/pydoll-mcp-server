@@ -14,6 +14,7 @@ from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, e
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_bool, get_object, get_string
 from pydoll_mcp_server.tools.elements import element_click, element_find
+from pydoll_mcp_server.tools.linkedin_choice_scripts import resolve_choice_script
 from pydoll_mcp_server.tools.linkedin_scripts import action_state_script, resolve_action_script, set_choice_state_script
 from pydoll_mcp_server.tools.upload_trigger import upload_files_from_trigger
 
@@ -156,6 +157,84 @@ async def click_selector(
         set_choice_state_script(selector),
         'LinkedIn hidden choice fallback failed',
     )
+
+
+async def click_linkedin_choice(
+    client_id: str,
+    tab_id: str,
+    question_contains: str,
+    option_text: str,
+    timeout_ms: int = 10000,
+) -> JsonObject:
+    """Resolve and click a LinkedIn choice again after each React re-render."""
+    deadline = time.monotonic() + max(1, timeout_ms) / 1000
+    attempts: JsonArray = []
+    while time.monotonic() < deadline and len(attempts) < 3:
+        resolution = await execute_script(
+            client_id,
+            tab_id,
+            resolve_choice_script(question_contains, option_text),
+            'LinkedIn radio resolution failed',
+        )
+        if not get_bool(resolution, 'success'):
+            reason = get_string(resolution, 'reason')
+            attempts.append({'resolution': resolution})
+            if reason in {'no_match', 'ambiguous_question', 'ambiguous_option', 'option_not_found'}:
+                return {
+                    'success': False,
+                    'reason': reason,
+                    'attempts': attempts,
+                    'candidates': get_array(resolution, 'candidates', []),
+                }
+            await asyncio.sleep(0.1)
+            continue
+        if get_bool(resolution, 'selected'):
+            return {
+                'success': True,
+                'selected': True,
+                'verified': True,
+                'strategy_used': 'already_selected',
+                'attempts': attempts,
+                'resolution': resolution,
+            }
+        selector = get_string(resolution, 'selector')
+        click = await click_selector(
+            client_id,
+            tab_id,
+            selector,
+            max(1, int((deadline - time.monotonic()) * 1000)),
+            allow_hidden_choice_fallback=True,
+        )
+        verify = await execute_script(
+            client_id,
+            tab_id,
+            resolve_choice_script(question_contains, option_text),
+            'LinkedIn radio verification failed',
+        )
+        attempt: JsonObject = {'resolution': resolution, 'click': click, 'verification': verify}
+        attempts.append(attempt)
+        if get_bool(click, 'success') and get_bool(verify, 'success') and get_bool(verify, 'selected'):
+            return {
+                'success': True,
+                'clicked': True,
+                'selected': True,
+                'verified': True,
+                'strategy_used': get_string(click, 'strategy_used', 'native'),
+                'attempts': attempts,
+                'resolution': verify,
+            }
+        await asyncio.sleep(0.1)
+    return StructuredError(
+        ErrorCode.STALE_ELEMENT,
+        'LinkedIn radio control was replaced before selection could be verified',
+        retryable=True,
+        details={
+            'question_contains': question_contains,
+            'option_text': option_text,
+            'attempts': attempts,
+        },
+        recovery_hint='Re-read the Easy Apply snapshot and retry the question after LinkedIn finishes rendering.',
+    ).to_dict()
 
 
 async def upload_with_file_chooser(
@@ -309,7 +388,6 @@ def snapshot_ready(snapshot: JsonObject) -> bool:
         return bool(
             snapshot.get('step_index')
             or snapshot.get('step_count')
-            or get_string(snapshot, 'step_title')
             or get_object(snapshot, 'primary_action', {})
             or snapshot.get('fields')
             or snapshot.get('questions')

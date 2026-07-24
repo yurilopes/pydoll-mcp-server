@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pydoll_mcp_server.json_types import get_array, get_object, get_string
+from pydoll_mcp_server.json_types import get_array, get_object, get_string, require_json_object
 from tests.integration.test_browser_smoke import launch_and_goto_fixture, register_smoke_tab, stop_smoke_browser
 
 pytestmark = [pytest.mark.browser_smoke, pytest.mark.browser, pytest.mark.slow]
@@ -74,6 +74,86 @@ async def test_inline_easy_apply_snapshot_fill_and_submit(monkeypatch: pytest.Mo
         assert submitted.get('success') is True, submitted
         assert submitted.get('submitted') is True
         assert submitted.get('confirmation_text') == 'Application submitted'
+    finally:
+        await stop_smoke_browser(browser)
+
+
+@pytest.mark.asyncio
+async def test_radio_groups_with_preceding_questions_survive_re_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydoll_mcp_server.tools.form_choice import form_select_choice
+    from pydoll_mcp_server.tools.linkedin import (
+        linkedin_easy_apply_click_next,
+        linkedin_easy_apply_fill_questions,
+        linkedin_easy_apply_snapshot,
+    )
+    from pydoll_mcp_server.tools.semantic_actions import element_click_by_text
+
+    monkeypatch.setenv('PYDOLL_MCP_AUTH_TOKEN', 'test-token')
+    browser, tab = await launch_and_goto_fixture('linkedin-easy-apply-radio-groups.html')
+    try:
+        info = await register_smoke_tab(browser, tab, 'linkedin-radio-groups-smoke')
+        initial = await linkedin_easy_apply_snapshot('linkedin-radio-groups-smoke', info.tab_id)
+        assert initial.get('success') is True
+        assert initial.get('step_title') == 'Additional Questions'
+        assert initial.get('is_review_step') is False
+        initial_questions = get_array(initial, 'questions', [])
+        assert len(initial_questions) == 4
+        assert len(get_array(initial, 'pending_required', [])) == 4
+        first_question = require_json_object(initial_questions[0], 'first question')
+        assert first_question['input_type'] == 'radio'
+        assert first_question['options'] == ['Yes', 'No']
+        assert get_string(first_question, 'label').startswith('Are you comfortable working in a remote setting')
+
+        ordinal_click = await element_click_by_text(
+            'linkedin-radio-groups-smoke',
+            info.tab_id,
+            'Yes',
+            role='radio',
+            match_index=2,
+        )
+        assert ordinal_click.get('success') is True, ordinal_click
+        ordinal_snapshot = await linkedin_easy_apply_snapshot('linkedin-radio-groups-smoke', info.tab_id)
+        ordinal_questions = get_array(ordinal_snapshot, 'questions', [])
+        assert get_string(require_json_object(ordinal_questions[2], 'third question'), 'selected_option') == 'Yes'
+
+        generic_choice = await form_select_choice(
+            'linkedin-radio-groups-smoke',
+            info.tab_id,
+            'remote setting',
+            'Yes',
+        )
+        assert generic_choice.get('success') is True, generic_choice
+        assert generic_choice.get('verified') is True
+
+        filled = await linkedin_easy_apply_fill_questions(
+            'linkedin-radio-groups-smoke',
+            info.tab_id,
+            [
+                {'question_contains': 'remote setting', 'option_text': 'Yes'},
+                {'question_contains': 'background check', 'option_text': 'Yes'},
+                {'question_contains': 'drug test', 'option_text': 'No'},
+                {'question_contains': 'work eligibility', 'option_text': 'No'},
+            ],
+        )
+        assert filled.get('success') is True, filled
+        assert filled.get('unfilled') == []
+        assert filled.get('ambiguous') == []
+        snapshot = get_object(filled, 'snapshot')
+        assert snapshot.get('pending_required') == []
+        selected = [
+            get_string(require_json_object(question, 'question'), 'selected_option')
+            for question in get_array(snapshot, 'questions', [])
+        ]
+        assert selected == ['Yes', 'Yes', 'No', 'No']
+
+        review = await linkedin_easy_apply_click_next(
+            'linkedin-radio-groups-smoke',
+            info.tab_id,
+            expected_current_step=3,
+        )
+        assert review.get('success') is True, review
+        assert review.get('step_index') == 4
+        assert review.get('is_review_step') is True
     finally:
         await stop_smoke_browser(browser)
 
