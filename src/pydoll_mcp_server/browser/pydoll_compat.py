@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import unicodedata
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TypeGuard
@@ -49,7 +50,7 @@ async def get_tab_title(tab: Tab) -> str:
 
 async def get_element_text(element: WebElement) -> str:
     text = await element.text
-    return str(text) if text else ''
+    return unicodedata.normalize('NFC', str(text)) if text else ''
 
 
 def get_element_attribute(element: WebElement, name: str) -> str | None:

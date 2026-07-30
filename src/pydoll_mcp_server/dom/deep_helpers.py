@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 from pydoll.elements.web_element import WebElement
@@ -110,6 +111,10 @@ def cache_deep_nodes(tab_info: TabInfo, raw_elements: list[DeepRawElement]) -> l
             text_summary=raw['text'][:100],
             bounding_box=raw['bounding_box'],
             tag_name=raw['tag'],
+            role=raw.get('role', ''),
+            label_summary=raw.get('label', '')[:160],
+            match_index=raw.get('match_index', 0),
+            fingerprint=json.dumps(raw.get('fingerprint', {}), ensure_ascii=False, sort_keys=True),
             pydoll_element=raw.get('pydoll_element'),
         )
         cache.store(entry)
@@ -125,6 +130,10 @@ def cache_deep_nodes(tab_info: TabInfo, raw_elements: list[DeepRawElement]) -> l
                 'attrs': attrs,
                 'selector_hint': entry.selector_hint,
                 'xpath_hint': entry.xpath_hint,
+                'match_index': entry.match_index,
+                'role': entry.role,
+                'label': entry.label_summary,
+                'fingerprint': raw.get('fingerprint', {}),
                 'frame_path': frame_values,
                 'shadow_path': shadow_values,
                 'bounding_box': bounds,

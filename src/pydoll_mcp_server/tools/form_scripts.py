@@ -9,6 +9,7 @@ def fill_script(payload: str) -> str:
     const value = String(payload.value ?? '');
     const events = payload.events || [];
     const tag = this.tagName || '';
+    if (payload.mode === 'blur' && typeof this.focus === 'function') this.focus();
     function nativeSet(el, proto, prop, next) {{
         const descriptor = Object.getOwnPropertyDescriptor(proto, prop);
         if (descriptor && descriptor.set) descriptor.set.call(el, next);

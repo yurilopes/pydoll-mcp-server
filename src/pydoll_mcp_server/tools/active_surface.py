@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import time
-import uuid
 from typing import Annotated
 
 from pydantic import Field
@@ -12,9 +11,10 @@ from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
-from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
+from pydoll_mcp_server.dom.element_cache import cache_observed_element, get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_object, get_string, require_json_object
+from pydoll_mcp_server.security.site_signals import inspect_site_diagnostics
 from pydoll_mcp_server.tools.surface_scripts import surface_script
 
 VALID_SCOPES = frozenset({'auto', 'modal', 'dialog', 'form', 'main', 'viewport', 'active_element_context'})
@@ -51,6 +51,8 @@ async def page_get_active_surface(
     except StructuredError as exc:
         return exc.to_dict()
 
+    diagnostics = await inspect_site_diagnostics(tab_info.pydoll_tab, scope)
+
     payload = json.dumps(
         {
             'scope': scope,
@@ -71,9 +73,12 @@ async def page_get_active_surface(
             retryable=True,
         ).to_dict()
 
-    return _build_response(
+    response = _build_response(
         client_id, tab_id, tab_info.document_generation, data, scope, safe_max_fields, safe_max_controls
     )
+    response['security_controls'] = get_array(diagnostics, 'security_controls', [])
+    response['site_diagnostics'] = diagnostics
+    return response
 
 
 def _build_response(
@@ -203,34 +208,8 @@ def _deserialize_controls(
 
 
 def _cache_field_entry(client_id: str, tab_id: str, generation: int, field: JsonObject) -> str:
-    element_id = f'el_{uuid.uuid4().hex[:12]}'
-    cache = get_element_cache()
-    cache.store(
-        ElementCacheEntry(
-            element_id=element_id,
-            tab_id=tab_id,
-            document_generation=generation,
-            tag_name=get_string(field, 'tag', ''),
-            text_summary=get_string(field, 'label', '')[:100],
-            selector_hint=get_string(field, 'selector_hint', ''),
-            xpath_hint=get_string(field, 'xpath_hint', ''),
-        )
-    )
-    return element_id
+    return cache_observed_element(get_element_cache(), tab_id, generation, field)
 
 
 def _cache_control_entry(client_id: str, tab_id: str, generation: int, control: JsonObject) -> str:
-    element_id = f'el_{uuid.uuid4().hex[:12]}'
-    cache = get_element_cache()
-    cache.store(
-        ElementCacheEntry(
-            element_id=element_id,
-            tab_id=tab_id,
-            document_generation=generation,
-            tag_name=get_string(control, 'tag', ''),
-            text_summary=get_string(control, 'name', '')[:100],
-            selector_hint=get_string(control, 'selector_hint', ''),
-            xpath_hint=get_string(control, 'xpath_hint', ''),
-        )
-    )
-    return element_id
+    return cache_observed_element(get_element_cache(), tab_id, generation, control)

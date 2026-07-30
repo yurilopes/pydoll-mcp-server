@@ -22,6 +22,7 @@ from pydoll_mcp_server.dom.deep_helpers import (
 )
 from pydoll_mcp_server.dom.deep_scripts import DEEP_FIND_JS, DEEP_TREE_JS
 from pydoll_mcp_server.dom.models import DeepRawElement, parse_deep_element
+from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_bool
 
@@ -61,6 +62,7 @@ async def page_get_tree_deep(
             .replace('__MAX_NODES__', str(max_nodes))
             .replace('__INCLUDE_SHADOW__', 'true' if include_shadow else 'false')
             .replace('__INCLUDE_IFRAMES__', 'true' if include_iframes else 'false')
+            .replace('__REFERENCE_HELPERS__', ELEMENT_REFERENCE_HELPERS)
         )
         response = await asyncio.wait_for(
             pydoll_tab.execute_script(script, return_by_value=True),
@@ -178,6 +180,7 @@ async def element_find_deep(
             .replace('__MAX_NODES__', str(max_nodes))
             .replace('__INCLUDE_SHADOW__', 'true')
             .replace('__INCLUDE_IFRAMES__', 'true')
+            .replace('__REFERENCE_HELPERS__', ELEMENT_REFERENCE_HELPERS)
         )
         response = await asyncio.wait_for(
             pydoll_tab.execute_script(script, return_by_value=True),

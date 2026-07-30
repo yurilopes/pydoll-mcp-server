@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Generic Application Hardening</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .accordion { border: 1px solid #bbb; margin: 8px 0; padding: 8px; }
+    .panel { padding: 8px; }
+    #security { border: 1px solid #d66; margin-top: 20px; padding: 12px; }
+    #custom-host { display: block; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Generic Application</h1>
+  <section id="accordions" aria-label="Repeated accordions">
+    <div class="accordion"><button data-testid="accordion-header" type="button">First section</button><div class="panel">First content</div></div>
+    <div class="accordion"><button data-testid="accordion-header" type="button">Second section</button><div class="panel">Second content</div></div>
+    <div class="accordion"><button data-testid="accordion-header" type="button">Third section</button><div class="panel">Third content</div></div>
+    <div class="accordion"><button data-testid="accordion-header" type="button">Fourth section</button><div class="panel">Fourth content</div></div>
+  </section>
+
+  <form id="react-form" aria-label="Reactive form">
+    <label for="react-name">Full name</label>
+    <input id="react-name" name="full_name" required>
+    <button id="dependent-submit" type="button" disabled>Continue</button>
+  </form>
+
+  <section id="security" aria-label="Additional verification">
+    <h2>Additional verification</h2>
+    <label for="otp-control">One-time verification code</label>
+    <input id="otp-control" name="otp" autocomplete="one-time-code">
+    <iframe title="reCAPTCHA verification" src="https://www.google.com/recaptcha/api2/anchor"></iframe>
+  </section>
+
+  <custom-address id="custom-address"></custom-address>
+
+  <script>
+    const form = document.getElementById('react-form');
+    const submit = document.getElementById('dependent-submit');
+    const nameInput = document.getElementById('react-name');
+    function replaceReactInput() {
+      const current = document.getElementById('react-name');
+      const replacement = current.cloneNode(true);
+      replacement.value = current.value;
+      current.replaceWith(replacement);
+      replacement.addEventListener('input', () => {
+        submit.disabled = replacement.value.trim() === '';
+      });
+      replacement.addEventListener('blur', () => {
+        submit.disabled = replacement.value.trim() === '';
+      });
+    }
+    nameInput.addEventListener('input', () => {
+      submit.disabled = nameInput.value.trim() === '';
+      replaceReactInput();
+    });
+    submit.addEventListener('click', () => {
+      submit.textContent = 'Continued';
+      submit.dataset.completed = 'true';
+    });
+
+    class CustomAddress extends HTMLElement {
+      connectedCallback() {
+        const root = this.attachShadow({mode: 'open'});
+        root.innerHTML = '<label>Street <input id="street-input"></label><button id="street-next" type="button">Save address</button>';
+      }
+    }
+    customElements.define('custom-address', CustomAddress);
+  </script>
+</body>
+</html>

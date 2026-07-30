@@ -10,6 +10,7 @@ from pydoll_mcp_server.diagnostics.trace import TraceEvent, get_trace_manager
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.server_state import SCHEMA_VERSION, get_server_state
+from pydoll_mcp_server.tool_metadata import PUBLIC_TOOL_NAMES, tool_names_for_profile
 from pydoll_mcp_server.tool_runtime import get_active_tool_count, get_active_tool_profile
 from pydoll_mcp_server.version import get_version
 
@@ -29,7 +30,11 @@ def health_check(include_runtime: bool = False) -> JsonObject:
     return result
 
 
-def server_status(client_id: str = 'anonymous', include_clients: bool = False) -> JsonObject:
+def server_status(
+    client_id: str = 'anonymous',
+    include_clients: bool = False,
+    include_tool_names: bool = False,
+) -> JsonObject:
     registry = get_registry()
     config = get_config()
     state = get_server_state()
@@ -43,54 +48,13 @@ def server_status(client_id: str = 'anonymous', include_clients: bool = False) -
         'exposed_tool_count': get_active_tool_count(),
         'upload_policy': config.upload_policy,
         'native_picker_staging': 'automatic',
-        'capabilities': {
-            'transports': ['http', 'sse', 'stdio'],
-            'browser': ['launch', 'close', 'list', 'attach'],
-            'page': [
-                'navigation',
-                'tree',
-                'deep_tree',
-                'interactive_summary',
-                'screenshot',
-                'snapshot',
-                'pdf',
-                'active_surface',
-            ],
-            'elements': [
-                'find',
-                'find_deep',
-                'semantic_find',
-                'click_by_text',
-                'mouse_click',
-                'interact',
-                'state',
-                'click_effects',
-                'text_candidates',
-                'stale_resolution',
-            ],
-            'forms': [
-                'framework_safe_fill',
-                'combobox',
-                'form_snapshot',
-                'form_errors',
-                'form_fill_fields',
-                'primary_action',
-            ],
-            'waits': [
-                'url',
-                'function',
-                'text',
-                'selector',
-                'network_idle',
-                'element_value',
-                'submission_confirmation',
-            ],
-            'artifacts': ['upload', 'upload_state', 'artifact_paths', 'artifact_import', 'artifact_prepare_upload'],
-            'diagnostics': ['health', 'status', 'diagnostics_snapshot', 'trace'],
-            'inspection': ['network', 'console'],
-            'security': ['auth', 'redaction', 'path_allowlist', 'no_free_cdp'],
-        },
+        'capabilities': _dynamic_capabilities(),
     }
+    if include_tool_names:
+        tool_names: JsonArray = []
+        for name in sorted(tool_names_for_profile(get_active_tool_profile(), PUBLIC_TOOL_NAMES)):
+            tool_names.append(name)
+        result['tool_names'] = tool_names
     try:
         browser_values: JsonArray = []
         for browser in registry.list_browsers(client_id):
@@ -105,6 +69,77 @@ def server_status(client_id: str = 'anonymous', include_clients: bool = False) -
         result['clients'] = client_values
     result['resources'] = state.summary()
     return result
+
+
+def _dynamic_capabilities() -> JsonObject:
+    exposed = tool_names_for_profile(get_active_tool_profile(), PUBLIC_TOOL_NAMES)
+
+    def has(name: str) -> bool:
+        return name in exposed
+
+    def names(values: dict[str, str]) -> JsonArray:
+        return [label for name, label in values.items() if has(name)]
+
+    return {
+        'transports': ['http', 'sse', 'stdio'],
+        'browser': names({'browser_launch': 'launch', 'browser_close': 'close', 'browser_list': 'list'}),
+        'page': names(
+            {
+                'page_goto': 'navigation',
+                'page_snapshot': 'snapshot',
+                'page_get_tree': 'tree',
+                'page_get_tree_deep': 'deep_tree',
+                'page_get_interactive_summary': 'interactive_summary',
+                'page_screenshot': 'screenshot',
+                'page_get_active_surface': 'active_surface',
+            }
+        ),
+        'elements': names(
+            {
+                'element_find': 'find',
+                'element_find_deep': 'find_deep',
+                'element_click_by_text': 'click_by_text',
+                'mouse_click': 'mouse_click',
+                'element_click': 'interact',
+                'element_get_state': 'state',
+                'element_resolve_again': 'stale_resolution',
+            }
+        ),
+        'forms': names(
+            {
+                'element_fill': 'framework_safe_fill',
+                'form_snapshot': 'form_snapshot',
+                'form_errors': 'form_errors',
+                'form_fill_fields': 'form_fill_fields',
+                'page_click_primary_action': 'primary_action',
+            }
+        ),
+        'waits': names(
+            {
+                'page_wait_for_url': 'url',
+                'page_wait_for_function': 'function',
+                'page_wait_for_text': 'text',
+                'page_wait_for_selector': 'selector',
+                'page_wait_for_network_idle': 'network_idle',
+                'element_wait_value': 'element_value',
+                'submission_wait_for_confirmation': 'submission_confirmation',
+            }
+        ),
+        'artifacts': names(
+            {
+                'upload_files': 'upload',
+                'file_upload_state': 'upload_state',
+                'artifact_get_paths': 'artifact_paths',
+                'artifact_import': 'artifact_import',
+                'artifact_prepare_upload': 'artifact_prepare_upload',
+            }
+        ),
+        'diagnostics': names(
+            {'health_check': 'health', 'server_status': 'status', 'diagnostics_snapshot': 'diagnostics'}
+        ),
+        'inspection': names({'network_list': 'network', 'console_list': 'console'}),
+        'security': ['auth', 'redaction', 'path_allowlist', 'no_free_cdp'],
+    }
 
 
 async def diagnostics_snapshot(client_id: str = 'anonymous', include_clients: bool = False) -> JsonObject:

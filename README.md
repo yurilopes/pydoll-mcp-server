@@ -96,6 +96,10 @@ The same setting can be provided through `PYDOLL_MCP_TOOL_PROFILE`; an explicit
 automation, `linkedin` for LinkedIn job search and Easy Apply, and `full` only
 when compatibility with advanced tools or low-level diagnostics is required.
 `server_status` reports the active `tool_profile` and `exposed_tool_count`.
+Pass `include_tool_names=true` when an agent needs the exact names exposed by
+the running server. The result also filters `capabilities` dynamically, so an
+agent profile does not advertise JavaScript, mouse, network, or deep traversal
+operations that are intentionally outside that profile.
 
 The curated profiles establish preferred contracts without removing anything
 from `full`: `page_snapshot` is the initial observation, `page_get_active_surface`
@@ -105,6 +109,30 @@ wait tools are preferred over the generic `page_wait`. LinkedIn workflows
 should use the `linkedin_easy_apply_*` tools instead of rebuilding the flow
 from generic form actions. Final LinkedIn submission still requires
 `confirm_submit=true`.
+
+Generic application hardening applies to the existing browser tools. Page
+observations cache client- and tab-scoped references with structural selectors,
+positional hints, fingerprints, bounds, labels, and frame or shadow paths.
+Mutating tools re-resolve those references while holding the tab lock, so a
+React-style rerender does not silently redirect an action to the first matching
+element. Ambiguous recovery returns `AMBIGUOUS_ELEMENT` with usable candidates.
+
+Use `mode="auto"` for `element_fill` and `form_fill_fields`. It dispatches
+framework-compatible events first, validates the resulting state, and makes at
+most one real-keyboard fallback for an ordinary field. `framework_safe`,
+`keyboard`, and `blur` are available when a portal requires a deliberate mode;
+keyboard fallback is refused for CAPTCHA, OTP, payment, biometric, identity,
+and password controls. Click results separate `mcp_action`, `page_effect`, and
+`site_diagnostics`; `clicked=true` means only that an event was sent. A
+requested effect that is not observed returns `NO_EFFECT` with its evidence.
+
+`page_snapshot` and `page_get_active_surface` report passive
+`security_controls` for visible CAPTCHA, 2FA or OTP, payment, biometric, and
+identity-verification signals. These controls are never automated. The agent
+must ask the user to complete them and then re-observe the page before
+continuing. Text returned through the MCP is normalized to Unicode NFC while
+comparison helpers ignore case and diacritics without changing the text sent
+back to the agent.
 
 Endpoints:
 

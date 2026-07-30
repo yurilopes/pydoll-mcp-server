@@ -12,6 +12,7 @@ from pydoll_mcp_server.dom.deep_traversal import element_find_deep, page_get_tre
 from pydoll_mcp_server.dom.tree import build_page_tree, page_get_text, page_screenshot
 from pydoll_mcp_server.security.proxy import proxy_validate
 from pydoll_mcp_server.tool_metadata import (
+    PUBLIC_TOOL_NAMES,
     TOOL_METADATA,
     ToolMetadata,
     ToolProfile,
@@ -329,12 +330,19 @@ def get_tool_specs(profile: ToolProfile | str = ToolProfile.FULL) -> tuple[ToolS
         raise RuntimeError('The MCP catalog contains duplicate public tool names.')
     catalog_names = set(all_names)
     metadata_names = set(TOOL_METADATA)
+    if catalog_names != set(PUBLIC_TOOL_NAMES):
+        raise RuntimeError('Public catalog does not match registered tool names.')
     missing_metadata = catalog_names - metadata_names
     extra_metadata = metadata_names - catalog_names
     if missing_metadata or extra_metadata:
         missing = ', '.join(sorted(missing_metadata)) or 'none'
         extra = ', '.join(sorted(extra_metadata)) or 'none'
         raise RuntimeError(f'Tool metadata mismatch. Missing: {missing}; extra: {extra}.')
+    for candidate_profile in ToolProfile:
+        profile_unknown = tool_names_for_profile(candidate_profile, all_names) - catalog_names
+        if profile_unknown:
+            names = ', '.join(sorted(profile_unknown))
+            raise RuntimeError(f'Tool profile {candidate_profile.value} contains unknown tools: {names}')
     selected_names = tool_names_for_profile(selected_profile, all_names)
     unknown_names = selected_names - catalog_names
     if unknown_names:

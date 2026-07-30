@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.tools.surface_group_scripts import GROUPED_FIELDS_SCRIPT
 from pydoll_mcp_server.tools.surface_selection_scripts import SURFACE_SELECTION_SCRIPT
 
@@ -17,6 +18,7 @@ const textMaxChars = opts.text_max_chars;
 const IS_SENSITIVE = new Set(['password','ssn','credit','card','token','secret','pin']);
 const FIELD_ROLES = new Set(['textbox','combobox','radio','checkbox','switch']);
 const ACTION_ROLES = new Set(['button','link','tab','menuitem']);
+{ELEMENT_REFERENCE_HELPERS}
 
 function norm(v) {{ return (v || '').trim().replace(/\\s+/g, ' '); }}
 function clipText(v) {{
@@ -34,16 +36,10 @@ function inViewport(el) {{
     return rect.right >= 0 && rect.bottom >= 0 && rect.left <= innerWidth && rect.top <= innerHeight;
 }}
 function selectorHint(el) {{
-    if (el.id) return '#' + CSS.escape(el.id);
-    if (el.getAttribute('data-testid')) return '[data-testid="' + el.getAttribute('data-testid') + '"]';
-    if (el.name && el.value && ['radio','checkbox'].includes(el.type || '')) return el.tagName.toLowerCase() + '[name="' + el.name.replace(/"/g, '\\\\"') + '"][value="' + el.value.replace(/"/g, '\\\\"') + '"]';
-    if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name.replace(/"/g, '\\\\"') + '"]';
-    return '';
+    return structuralSelector(el);
 }}
 function xpathHint(el) {{
-    if (el.id) return '//*[@id="' + el.id.replace(/"/g, '&quot;') + '"]';
-    if (el.name && el.value && ['radio','checkbox'].includes(el.type || '')) return '//' + el.tagName.toLowerCase() + '[@name="' + el.name.replace(/"/g, '&quot;') + '" and @value="' + el.value.replace(/"/g, '&quot;') + '"]';
-    return '';
+    return structuralXPath(el);
 }}
 function isSensitive(el) {{
     const str = (el.name + el.getAttribute('autocomplete') + el.placeholder + (el.getAttribute('aria-label') || '')).toLowerCase();
@@ -82,6 +78,8 @@ function fieldMeta(el) {{
         hidden_or_collapsed_options_count: optionCount,
         selector_hint: selectorHint(el),
         xpath_hint: xpathHint(el),
+        match_index: referenceMatchIndex(el),
+        fingerprint: referenceFingerprint(el),
         errors: []
     }};
 }}
@@ -98,7 +96,9 @@ function controlMeta(el) {{
         truncated: clippedText.truncated,
         enabled: !el.disabled && el.getAttribute('aria-disabled') !== 'true',
         selector_hint: selectorHint(el),
-        xpath_hint: xpathHint(el)
+        xpath_hint: xpathHint(el),
+        match_index: referenceMatchIndex(el),
+        fingerprint: referenceFingerprint(el)
     }};
 }}
 function actionMeta(el) {{
@@ -113,6 +113,8 @@ function actionMeta(el) {{
         enabled: true,
         selector_hint: selectorHint(el),
         xpath_hint: xpathHint(el),
+        match_index: referenceMatchIndex(el),
+        fingerprint: referenceFingerprint(el),
         type: el.type || ''
     }};
 }}
@@ -135,7 +137,9 @@ function containerMeta(el) {{
         text_length: clippedText.text_length,
         truncated: clippedText.truncated,
         selector_hint: selectorHint(el),
-        xpath_hint: xpathHint(el)
+        xpath_hint: xpathHint(el),
+        match_index: referenceMatchIndex(el),
+        fingerprint: referenceFingerprint(el)
     }};
 }}
 function isFieldElement(el) {{

@@ -12,8 +12,15 @@ from pydoll.exceptions import PydollException
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
+from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, normalize_json_value
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_string, normalize_json_value
+from pydoll_mcp_server.tools.form_input_modes import (
+    keyboard_fallback_allowed,
+    keyboard_fill,
+    read_filled_state,
+    wait_expected_enabled,
+)
 
 
 class FormFillField(TypedDict, total=False):
@@ -26,6 +33,7 @@ class FormFillField(TypedDict, total=False):
     value: str | int | float | bool | None
     checked: bool
     option_text: str
+    mode: str
 
 
 async def form_fill_fields(
@@ -46,7 +54,24 @@ async def form_fill_fields(
     ] = 'auto',
     validate: Annotated[bool, Field(description='Run validation and return validation_errors after filling.')] = True,
     include_values: Annotated[bool, Field(description='Include values in field evidence when true.')] = False,
+    mode: Annotated[
+        str,
+        Field(
+            description='Default fill mode: auto, framework_safe, keyboard, or blur.',
+            json_schema_extra={'enum': ['auto', 'framework_safe', 'keyboard', 'blur']},
+        ),
+    ] = 'auto',
+    validation_timeout: Annotated[
+        float,
+        Field(description='Timeout for dependent validation and enabled controls.'),
+    ] = 3.0,
+    expected_enabled_element_id: Annotated[
+        str,
+        Field(description='Optional cached control expected to become enabled after filling.'),
+    ] = '',
 ) -> JsonObject:
+    if mode not in {'auto', 'framework_safe', 'keyboard', 'blur'}:
+        return StructuredError(ErrorCode.INVALID_INPUT, f'Unsupported fill mode: {mode}').to_dict()
     try:
         tab_info = get_registry().get_tab(client_id, tab_id)
     except StructuredError as exc:
@@ -66,13 +91,54 @@ async def form_fill_fields(
             'scope': scope,
             'validate': validate,
             'include_values': include_values,
+            'mode': mode,
         }
     )
 
+    fallback_used = False
+    dependent_control_enabled: bool | None = None
     try:
         async with tab_operation_lock(tab_id):
             result = await tab_info.pydoll_tab.execute_script(_fill_script(payload), return_by_value=True)
             data = extract_script_object(result)
+            if expected_enabled_element_id:
+                dependent_control_enabled = await wait_expected_enabled(
+                    tab_info,
+                    expected_enabled_element_id,
+                    min(max(validation_timeout, 0.1), 30.0),
+                )
+            keyboard_requests: list[JsonObject] = []
+            for item in get_array(data, 'filled', []):
+                if isinstance(item, dict) and (
+                    str(item.get('mode_requested', mode)) == 'keyboard' or mode == 'keyboard'
+                ):
+                    keyboard_requests.append(item)
+            if mode == 'auto' and dependent_control_enabled is False:
+                keyboard_requests = []
+                for item in get_array(data, 'filled', [])[:1]:
+                    if isinstance(item, dict):
+                        keyboard_requests.append(item)
+            for item_value in keyboard_requests:
+                selector = str(item_value.get('selector_hint', ''))
+                if not selector:
+                    continue
+                element = await tab_info.pydoll_tab.query(selector, timeout=1, find_all=False, raise_exc=False)
+                if element is None or not await keyboard_fallback_allowed(element):
+                    continue
+                request_value = str(item_value.get('requested_value', ''))
+                await keyboard_fill(tab_info.pydoll_tab, element, request_value)
+                state = await read_filled_state(element)
+                item_value['mode_used'] = 'keyboard'
+                item_value['fallback_used'] = True
+                item_value['verified'] = get_string(state, 'value', '') == request_value
+                item_value['field_valid'] = item_value['verified']
+                fallback_used = True
+            if expected_enabled_element_id and fallback_used:
+                dependent_control_enabled = await wait_expected_enabled(
+                    tab_info,
+                    expected_enabled_element_id,
+                    min(max(validation_timeout, 0.1), 30.0),
+                )
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -87,6 +153,8 @@ async def form_fill_fields(
 
     for item in get_array(data, 'filled', []):
         if isinstance(item, dict):
+            if 'field_valid' not in item:
+                item['field_valid'] = bool(item.get('verified', item.get('selected', item.get('checked', True))))
             filled.append(item)
     for item in get_array(data, 'unfilled', []):
         if isinstance(item, dict):
@@ -110,6 +178,11 @@ async def form_fill_fields(
         warnings.append(f'{len(ambiguous)} field(s) had ambiguous matches.')
     if unfilled:
         warnings.append(f'{len(unfilled)} field(s) could not be filled.')
+    if dependent_control_enabled is False:
+        warnings.append('The expected dependent control remained disabled after validation.')
+
+    used_modes = {str(item.get('mode_used', mode)) for item in filled if isinstance(item, dict)}
+    mode_used = next(iter(used_modes)) if len(used_modes) == 1 else ('mixed' if used_modes else mode)
 
     return {
         'success': len(unfilled) == 0 and len(ambiguous) == 0,
@@ -117,7 +190,14 @@ async def form_fill_fields(
         'unfilled': unfilled,
         'ambiguous': ambiguous,
         'validation_errors': validation_errors,
+        'security_controls': get_array(data, 'security_controls', []),
         'pending_required': data.get('pending_required', []),
+        'mode_requested': mode,
+        'mode_used': mode_used,
+        'fallback_used': fallback_used,
+        'field_valid': len(validation_errors) == 0 and not data.get('pending_required', []),
+        'dependent_control_enabled': dependent_control_enabled,
+        'validation_timeout': min(max(validation_timeout, 0.1), 30.0),
         'warnings': list(warnings),
         'evidence': evidence,
     }
@@ -132,9 +212,13 @@ def _fill_script(payload_json: str) -> str:
         'const opts = '
         + payload_json
         + """;
-const results = { filled: [], unfilled: [], ambiguous: [], validation_errors: [], pending_required: [] };
+const results = { filled: [], unfilled: [], ambiguous: [], validation_errors: [], pending_required: [], security_controls: [] };
 
-function norm(v) { return (v || '').trim().replace(/\\s+/g, ' '); }
+function norm(v) { return String(v || '').normalize('NFC').trim().replace(/\\s+/g, ' '); }
+function fold(v) { return norm(v).normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase(); }
+"""
+        + ELEMENT_REFERENCE_HELPERS
+        + """
 function visible(el) {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
@@ -157,16 +241,16 @@ function findField(request) {
             || el.getAttribute('aria-label')
             || el.placeholder || el.name || ''
         );
-        const upperLabel = label.toLowerCase();
-        if (request.label_contains && upperLabel.includes(request.label_contains.toLowerCase()))
+        const foldedLabel = fold(label);
+        if (request.label_contains && foldedLabel.includes(fold(request.label_contains)))
             score += 100;
         if (request.question_contains) {
             const parent = el.closest('.form-group, fieldset, .field, div');
-            const parentText = parent ? norm(parent.innerText || '').toLowerCase() : '';
-            if (parentText.includes(request.question_contains.toLowerCase())) score += 50;
+            const parentText = parent ? fold(parent.innerText || '') : '';
+            if (parentText.includes(fold(request.question_contains))) score += 50;
         }
         if (request.placeholder_contains
-            && (el.placeholder || '').toLowerCase().includes(request.placeholder_contains.toLowerCase()))
+            && fold(el.placeholder || '').includes(fold(request.placeholder_contains)))
             score += 80;
         if (request.selector && (el.matches(request.selector) || el.id === request.selector))
             score += 200;
@@ -190,7 +274,7 @@ function findField(request) {
 function setValue(el, request) {
     const tag = el.tagName;
     const type = (el.type || '').toLowerCase();
-    const value = request.value;
+    const value = String(request.value ?? '');
 
     if (tag === 'INPUT' && type === 'checkbox') {
         const shouldCheck = request.checked === true
@@ -206,8 +290,8 @@ function setValue(el, request) {
         );
         for (const radio of radioGroup) {
             const radioText = norm(radio.closest('label')?.innerText || radio.value || '');
-            const match = radioText.toLowerCase() === (request.option_text || value || '').toLowerCase()
-                || (radio.value || '').toLowerCase() === (value || '').toLowerCase();
+            const match = fold(radioText) === fold(request.option_text || value || '')
+                || fold(radio.value || '') === fold(value || '');
             if (match && visible(radio)) {
                 radio.checked = true;
                 radio.dispatchEvent(new Event('change', { bubbles: true }));
@@ -222,8 +306,8 @@ function setValue(el, request) {
         for (const opt of el.options) {
             const optText = norm(opt.text || '');
             const optVal = (opt.value || '');
-            const target = (request.option_text || value || '').toLowerCase();
-            if (optText.toLowerCase() === target || optVal.toLowerCase() === target) {
+            const target = fold(request.option_text || value || '');
+            if (fold(optText) === target || fold(optVal) === target) {
                 el.value = opt.value;
                 el.dispatchEvent(new Event('change', { bubbles: true }));
                 return { selected: optText };
@@ -269,6 +353,13 @@ for (const request of opts.fields) {
         continue;
     }
     const el = match.el;
+    const context = norm(el.closest('label, fieldset, .form-group, .field, div')?.innerText || '') + ' '
+        + [el.getAttribute('name'), el.getAttribute('aria-label'), el.getAttribute('placeholder')].filter(Boolean).join(' ');
+    if (/captcha|recaptcha|hcaptcha|turnstile|one[- ]time|otp|2fa|two[- ]factor|payment|credit card|cvv|cvc|biometric|identity verification/i.test(context)) {
+        results.security_controls.push({ label: match.label, kind: 'security_control', automation_allowed: false });
+        results.unfilled.push({ label: match.label, tag: el.tagName.toLowerCase(), type: el.type || '', reason: 'security_control_present' });
+        continue;
+    }
     const result = setValue(el, request);
     if (result.error) {
         results.unfilled.push({
@@ -284,6 +375,11 @@ for (const request of opts.fields) {
         tag: el.tagName.toLowerCase(),
         type: el.type || '',
         value_length: (request.value || '').length,
+        requested_value: String(request.value ?? ''),
+        selector_hint: structuralSelector(el),
+        mode_requested: request.mode || opts.mode || 'auto',
+        mode_used: request.mode === 'keyboard' || opts.mode === 'keyboard' ? 'keyboard' : 'framework_safe',
+        fallback_used: false,
         ...result,
     });
 }

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import time
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from pydoll.elements.web_element import WebElement
+
+from pydoll_mcp_server.json_types import JsonObject, get_array, get_int, get_object, get_string
 
 
 @dataclass
@@ -20,6 +25,10 @@ class ElementCacheEntry:
     text_summary: str = ''
     bounding_box: dict[str, float] = field(default_factory=lambda: {})
     tag_name: str = ''
+    role: str = ''
+    label_summary: str = ''
+    fingerprint: str = ''
+    match_index: int = 0
     cached_at: float = 0.0
     pydoll_element: WebElement | None = field(default=None, repr=False)
 
@@ -68,6 +77,12 @@ class ElementCache:
             return None
         return entry
 
+    def get_for_tab(self, element_id: str, tab_id: str) -> ElementCacheEntry | None:
+        entry = self.get(element_id)
+        if entry is None or entry.tab_id != tab_id:
+            return None
+        return entry
+
     def invalidate_tab(self, tab_id: str) -> None:
         to_remove = [eid for eid, e in self._entries.items() if e.tab_id == tab_id]
         for eid in to_remove:
@@ -96,3 +111,49 @@ def get_element_cache() -> ElementCache:
     if _cache is None:
         _cache = ElementCache()
     return _cache
+
+
+def cache_observed_element(
+    cache: ElementCache,
+    tab_id: str,
+    document_generation: int,
+    observation: JsonObject,
+    *,
+    pydoll_element: WebElement | None = None,
+    frame_path: list[str] | None = None,
+    shadow_path: list[str] | None = None,
+) -> str:
+    """Store one observation while keeping all reference metadata in one shape."""
+
+    element_id = get_string(observation, 'element_id', '') or f'el_{uuid.uuid4().hex[:12]}'
+    fingerprint_value = observation.get('fingerprint', {})
+    fingerprint = json.dumps(fingerprint_value, ensure_ascii=False, sort_keys=True)
+    bounds = get_object(observation, 'bounds', get_object(observation, 'bounding_box', {}))
+    bounding_box = {
+        key: float(value)
+        for key, value in bounds.items()
+        if key in {'x', 'y', 'width', 'height'} and isinstance(value, int | float) and not isinstance(value, bool)
+    }
+    entry = ElementCacheEntry(
+        element_id=element_id,
+        tab_id=tab_id,
+        document_generation=document_generation,
+        frame_path=list(frame_path or _string_list(get_array(observation, 'frame_path', []))),
+        shadow_path=list(shadow_path or _string_list(get_array(observation, 'shadow_path', []))),
+        selector_hint=get_string(observation, 'selector_hint', ''),
+        xpath_hint=get_string(observation, 'xpath_hint', ''),
+        text_summary=get_string(observation, 'text', get_string(observation, 'label', ''))[:160],
+        bounding_box=bounding_box,
+        tag_name=get_string(observation, 'tag', ''),
+        role=get_string(observation, 'role', ''),
+        label_summary=get_string(observation, 'label', get_string(observation, 'name', ''))[:160],
+        fingerprint=fingerprint,
+        match_index=get_int(observation, 'match_index', 0),
+        pydoll_element=pydoll_element,
+    )
+    cache.store(entry)
+    return element_id
+
+
+def _string_list(value: Sequence[object]) -> list[str]:
+    return [item for item in value if isinstance(item, str)]

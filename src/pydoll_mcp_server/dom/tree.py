@@ -7,6 +7,7 @@ from pydoll_mcp_server.browser.script_utils import extract_script_string, extrac
 from pydoll_mcp_server.config import get_config, get_limits_config
 from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
 from pydoll_mcp_server.dom.models import RawTreeNode, json_from_tree_node, parse_tree_result
+from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.security.paths import validate_artifact_path
@@ -16,6 +17,7 @@ TREE_BUILDER_JS = """
     const includeInvisible = %INCLUDE_INVISIBLE%;
     const includeHead = %INCLUDE_HEAD%;
     const blockedHeadTags = new Set(['head', 'script', 'style', 'meta', 'link', 'noscript', 'template']);
+    %REFERENCE_HELPERS%
     function isVisibleElement(node, tag) {
         if (tag === 'html' || tag === 'body') return true;
         const rect = node.getBoundingClientRect();
@@ -69,6 +71,13 @@ TREE_BUILDER_JS = """
             if (['iframe', 'frame'].includes(info.tag)) {
                 info.isFrame = true;
             }
+            const reference = elementReference(node);
+            info.selector_hint = reference.selector_hint;
+            info.xpath_hint = reference.xpath_hint;
+            info.match_index = reference.match_index;
+            info.role = reference.role;
+            info.label = reference.label;
+            info.fingerprint = reference.fingerprint;
         }
         collected.count++;
         info.elementId = 'el_' + Math.random().toString(36).substring(2, 14);
@@ -126,6 +135,7 @@ async def build_page_tree(
             .replace('%MAX_NODES%', str(max_nodes))
             .replace('%INCLUDE_INVISIBLE%', str(include_invisible).lower())
             .replace('%INCLUDE_HEAD%', str(include_head).lower())
+            .replace('%REFERENCE_HELPERS%', ELEMENT_REFERENCE_HELPERS)
         )
         result = await pydoll_tab.execute_script(js, return_by_value=True)
         raw_value = extract_script_value(result)
@@ -154,8 +164,12 @@ async def build_page_tree(
                 tag_name=node['tag'],
                 text_summary=node['text'][:100],
                 bounding_box=node['bounds'],
-                selector_hint=_build_selector_hint(node),
-                xpath_hint=_build_xpath_hint(node),
+                selector_hint=node.get('selector_hint', _build_selector_hint(node)),
+                xpath_hint=node.get('xpath_hint', _build_xpath_hint(node)),
+                role=node.get('role', ''),
+                label_summary=node.get('label', '')[:160],
+                match_index=node.get('match_index', 0),
+                fingerprint=_fingerprint_text(node),
             )
             serialized = json_from_tree_node(node)
             serialized['actionable'] = actionable
@@ -193,6 +207,13 @@ def _assess_actionable(node: RawTreeNode) -> tuple[bool, str]:
     if tag in ('button', 'a', 'input', 'select', 'textarea'):
         return True, 'low'
     return False, 'none'
+
+
+def _fingerprint_text(node: RawTreeNode) -> str:
+    import json
+
+    fingerprint = node.get('fingerprint', {})
+    return json.dumps(fingerprint, ensure_ascii=False, sort_keys=True)
 
 
 def _build_selector_hint(node: RawTreeNode) -> str:

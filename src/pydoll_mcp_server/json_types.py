@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import TypeAlias, TypeGuard
 
 JsonScalar: TypeAlias = str | int | float | bool | None
@@ -27,8 +28,10 @@ def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
 
 
 def normalize_json_value(value: object, context: str = 'value') -> JsonValue:
-    if value is None or isinstance(value, str | bool | int | float):
+    if value is None or isinstance(value, bool | int | float):
         return value
+    if isinstance(value, str):
+        return unicodedata.normalize('NFC', value)
     if _is_object_list(value) or _is_object_tuple(value):
         return [normalize_json_value(item, f'{context}[]') for item in value]
     if _is_object_dict(value):
@@ -39,6 +42,20 @@ def normalize_json_value(value: object, context: str = 'value') -> JsonValue:
             result[key] = normalize_json_value(item, f'{context}.{key}')
         return result
     raise InvalidJsonValueError(f'{context} is not JSON serializable: {type(value).__name__}')
+
+
+def normalize_visible_text(value: str) -> str:
+    """Normalize visible text without changing its linguistic content."""
+
+    return unicodedata.normalize('NFC', value)
+
+
+def fold_visible_text(value: str) -> str:
+    """Return a comparison form that ignores case and combining marks."""
+
+    normalized = normalize_visible_text(value).casefold()
+    decomposed = unicodedata.normalize('NFD', normalized)
+    return ''.join(char for char in decomposed if unicodedata.category(char) != 'Mn')
 
 
 def require_json_object(value: object, context: str = 'value') -> JsonObject:

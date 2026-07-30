@@ -19,6 +19,7 @@ from pydoll_mcp_server.dom.deep_traversal import page_get_tree_deep
 from pydoll_mcp_server.dom.tree import build_page_tree, page_get_text
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_string, require_json_object
+from pydoll_mcp_server.security.site_signals import inspect_site_diagnostics
 from pydoll_mcp_server.server_state import SCHEMA_VERSION
 from pydoll_mcp_server.tools.page_summary import page_get_interactive_summary
 
@@ -61,6 +62,9 @@ async def page_snapshot(
         'errors': get_array(tree, 'errors', []),
         'created_at': time.time(),
     }
+    diagnostics = await inspect_site_diagnostics(tab_info.pydoll_tab, 'document')
+    snapshot['security_controls'] = get_array(diagnostics, 'security_controls', [])
+    snapshot['site_diagnostics'] = diagnostics
     if include_accessibility:
         accessibility = await page_get_accessibility_tree(client_id, tab_id, max_nodes=max_nodes)
         snapshot['accessibility'] = get_array(accessibility, 'nodes', [])

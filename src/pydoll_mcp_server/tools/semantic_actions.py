@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from typing import Annotated
 
 from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
+from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import (
     InvalidScriptResponseError,
     extract_script_array,
 )
 from pydoll_mcp_server.dom.element_cache import get_element_cache
+from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_float, get_string, require_json_object
+from pydoll_mcp_server.security.site_signals import inspect_element_security, inspect_site_diagnostics
 from pydoll_mcp_server.tools.choice_semantic_verification import wait_for_choice_state
+from pydoll_mcp_server.tools.click_observation import missing_effects, observe_effects
 from pydoll_mcp_server.tools.mouse_actions import element_click_center, mouse_click
 
 __all__ = ['element_click_by_text', 'element_click_center', 'mouse_click']
@@ -54,6 +59,16 @@ async def element_click_by_text(
         int,
         Field(description='Minimum score gap required to accept a close candidate match.'),
     ] = 25,
+    actionable_only: Annotated[
+        bool,
+        Field(description='Reject non-actionable text containers unless an unambiguous activation control exists.'),
+    ] = True,
+    expect_url_change: Annotated[bool, Field(description='Require a URL change after the click.')] = False,
+    expect_text: Annotated[str, Field(description='Optional text expected after the click.')] = '',
+    expect_selector: Annotated[str, Field(description='Optional CSS selector expected after the click.')] = '',
+    effect_timeout: Annotated[
+        float | None, Field(description='Timeout used to observe the requested page effect.')
+    ] = None,
 ) -> JsonObject:
     if match_index is not None and match_index < 0:
         return StructuredError(ErrorCode.INVALID_INPUT, 'match_index must be zero or greater').to_dict()
@@ -84,6 +99,7 @@ async def element_click_by_text(
             'prefer_visible_center': prefer_visible_center,
             'prefer_largest': prefer_largest,
             'max_candidates': 10,
+            'actionable_only': actionable_only,
         }
     )
     try:
@@ -125,6 +141,9 @@ async def element_click_by_text(
             f'No visible clickable text matched: {text}',
             retryable=False,
         ).to_dict()
+    pre_click_url = ''
+    with suppress(StructuredError, PydollException):
+        pre_click_url = await get_tab_url(get_registry().get_tab(client_id, tab_id).pydoll_tab)
     click = await _click_candidate(client_id, tab_id, chosen, timeout)
     if not click.get('success'):
         return click
@@ -147,12 +166,62 @@ async def element_click_by_text(
                 recovery_hint='Re-resolve the choice group and retry after the page finishes rendering.',
             ).to_dict()
         click['verified'] = True
+    has_effect = bool(expect_url_change or expect_text or expect_selector)
+    matched_effects: JsonArray = []
+    effect_observed = False
+    if has_effect:
+        try:
+            tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
+            effect_observed, matched = await observe_effects(
+                tab_id,
+                tab,
+                pre_click_url,
+                False,
+                expect_url_change,
+                expect_text,
+                expect_selector,
+                False,
+                min(effect_timeout or 5.0, 30.0),
+            )
+            matched_effects = list(matched)
+        except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+            effect_observed = False
+    missing = missing_effects(False, expect_url_change, expect_text, expect_selector, False, matched_effects)
+    diagnostics = await inspect_site_diagnostics(get_registry().get_tab(client_id, tab_id).pydoll_tab)
+    mcp_action: JsonObject = {'event_sent': True, 'strategy': click.get('mode_used', 'mouse')}
+    page_effect: JsonObject = {
+        'expectation': {'url_change': expect_url_change, 'text': expect_text, 'selector': expect_selector},
+        'observed': effect_observed,
+        'matched': matched_effects,
+        'missing': missing,
+    }
+    if has_effect and missing:
+        response = StructuredError(
+            ErrorCode.NO_EFFECT,
+            'The click event was sent, but the requested page effect was not observed.',
+            details={'mcp_action': mcp_action, 'page_effect': page_effect, 'site_diagnostics': diagnostics},
+            retryable=True,
+        ).to_dict()
+        response.update(
+            {
+                'clicked': True,
+                'chosen': chosen,
+                'mcp_action': mcp_action,
+                'page_effect': page_effect,
+                'site_diagnostics': diagnostics,
+                'failure_origin': 'page',
+            }
+        )
+        return response
     return {
         'success': True,
         'clicked': True,
         'mode_used': click.get('mode_used', 'mouse'),
         'chosen': chosen,
         'rejected': _rejected(candidates, chosen),
+        'mcp_action': mcp_action,
+        'page_effect': page_effect,
+        'site_diagnostics': diagnostics,
     }
 
 
@@ -191,12 +260,22 @@ async def _click_candidate(
     selector = str(chosen.get('activation_selector_hint') or chosen.get('selector_hint', ''))
     if selector and selector not in {'button', 'a', 'input', 'textarea', 'select', 'label', 'div', 'span'}:
         try:
-            tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
-            element = await tab.query(selector, timeout=1, find_all=False, raise_exc=False)
-            if element is not None:
-                async with tab_operation_lock(tab_id):
+            async with tab_operation_lock(tab_id):
+                tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
+                element = await tab.query(selector, timeout=1, find_all=False, raise_exc=False)
+                if element is not None:
+                    security_control = await inspect_element_security(element)
+                    if security_control:
+                        response = StructuredError(
+                            ErrorCode.SECURITY_CONTROL_PRESENT,
+                            'The target is a security control that requires user action.',
+                            details={'security_control': security_control},
+                            recovery_hint='Ask the user to complete the security control, then re-observe the page.',
+                        ).to_dict()
+                        response['failure_origin'] = 'security'
+                        return response
                     await element.click()
-                return {'success': True, 'clicked': True, 'mode_used': 'element_click', 'timeout': timeout or 0}
+                    return {'success': True, 'clicked': True, 'mode_used': 'element_click', 'timeout': timeout or 0}
         except (PydollException, StructuredError):
             pass
     bounds = require_json_object(chosen.get('bounds'), 'candidate bounds')
@@ -220,8 +299,12 @@ const filters = {
     section: (opts.section_label || '').toLowerCase(),
     aria: (opts.aria_contains || '').toLowerCase(),
 };
+"""
+        + ELEMENT_REFERENCE_HELPERS
+        + """
 
 function norm(v) { return (v || '').trim().replace(/\\s+/g, ' '); }
+function fold(v) { return normalizeVisibleText(v).normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase(); }
 function visible(el) {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
@@ -284,8 +367,9 @@ for (const el of allEls) {
     if (!visible(el)) continue;
     const txt = textOf(el);
     if (!txt) continue;
-    const lower = txt.toLowerCase();
-    const textMatch = opts.exact ? lower === expected : lower.includes(expected);
+    const lower = fold(txt);
+    const expectedFolded = fold(opts.text);
+    const textMatch = opts.exact ? lower === expectedFolded : lower.includes(expectedFolded);
     if (!textMatch) continue;
     if (filters.role && (el.getAttribute('role')||'').toLowerCase() !== filters.role) continue;
     if (filters.tag && el.tagName.toLowerCase() !== filters.tag) continue;
@@ -297,6 +381,7 @@ for (const el of allEls) {
     const actionable = isActionable(el);
     const activation = activationTarget(el);
     const activationActionable = Boolean(activation && isActionable(activation));
+    if (opts.actionable_only && !actionable && !activationActionable) continue;
     const enabled = !el.disabled && el.getAttribute('aria-disabled') !== 'true';
     const inModal = !!el.closest('[role="dialog"], dialog, [aria-modal="true"], .modal-overlay');
     const inMain = !!el.closest('main, [role="main"]');
@@ -337,8 +422,8 @@ for (const el of allEls) {
         visible: visible(el),
         in_modal: inModal,
         in_main: inMain,
-        selector_hint: selectorHint(el),
-        activation_selector_hint: activationActionable ? selectorHint(activation) : selectorHint(el),
+        selector_hint: structuralSelector(el),
+        activation_selector_hint: activationActionable ? structuralSelector(activation) : structuralSelector(el),
         activation_tag: activationActionable ? activation.tagName.toLowerCase() : el.tagName.toLowerCase(),
         activation_role: activationActionable ? (activation.getAttribute('role') || '') : role,
         bounds: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},

@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import uuid
-
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_array
-from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
-from pydoll_mcp_server.dom.models import ElementBounds
+from pydoll_mcp_server.dom.element_cache import cache_observed_element, get_element_cache
+from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_float, get_object, get_string, require_json_object
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, require_json_object
 
 
 async def page_get_interactive_summary(
@@ -36,34 +34,21 @@ async def page_get_interactive_summary(
     items: JsonArray = []
     for value in raw_items:
         item = require_json_object(value, 'interactive item')
-        selector_hint = get_string(item, 'selector_hint', '')
-        xpath_hint = get_string(item, 'xpath_hint', '')
-        element_id = f'el_{uuid.uuid4().hex[:12]}'
-        cache.store(
-            ElementCacheEntry(
-                element_id=element_id,
-                tab_id=tab_id,
-                document_generation=tab_info.document_generation,
-                tag_name=get_string(item, 'tag', ''),
-                text_summary=get_string(item, 'text', '')[:100],
-                bounding_box=_bounds(item),
-                selector_hint=selector_hint,
-                xpath_hint=xpath_hint,
-            )
+        element_id = cache_observed_element(
+            cache,
+            tab_id,
+            tab_info.document_generation,
+            item,
         )
         item['element_id'] = element_id
         items.append(item)
     return {'success': True, 'items': items, 'count': len(items), 'partial': len(items) >= max_items}
 
 
-def _bounds(item: JsonObject) -> ElementBounds:
-    bounds = get_object(item, 'bounds', {})
-    return {key: get_float(bounds, key, 0.0) for key in ('x', 'y', 'width', 'height')}
-
-
 def _summary_script(max_items: int) -> str:
     limit = max(1, min(max_items, 500))
     return f"""
+    {ELEMENT_REFERENCE_HELPERS}
     const out = [];
     const selectors = [
         'button','a[href]','input','textarea','select','label',
@@ -140,6 +125,7 @@ def _summary_script(max_items: int) -> str:
         const enabled = !el.disabled && el.getAttribute('aria-disabled') !== 'true';
         const editable = el.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(el.tagName);
         const score = (enabled ? 100 : 0) + (role ? 40 : 0) + (name ? 20 : 0);
+        const reference = elementReference(el);
         out.push({{
             tag: el.tagName.toLowerCase(),
             role,
@@ -154,8 +140,10 @@ def _summary_script(max_items: int) -> str:
             checked: el.checked ?? null,
             selected: el.selected ?? null,
             form: el.form ? (el.form.id || el.form.getAttribute('aria-label') || '') : '',
-            selector_hint: selectorHint(el),
-            xpath_hint: xpathHint(el),
+            selector_hint: reference.selector_hint,
+            xpath_hint: reference.xpath_hint,
+            match_index: reference.match_index,
+            fingerprint: reference.fingerprint,
             score
         }});
     }}

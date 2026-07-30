@@ -48,19 +48,26 @@ can detect ambiguity before continuing.
 
 ## Fill a controlled input
 
-Use `element_fill` or `element_fill_and_verify` with `value`:
+Use `element_fill` or `element_fill_and_verify` with `value`. The default
+`mode="auto"` is appropriate for React, Angular-like, and ordinary controls:
 
 ```json
 {
   "client_id": "agent",
   "tab_id": "tab",
   "element_id": "el_abc",
-  "value": "Senior Python developer"
+  "value": "Senior Python developer",
+  "mode": "auto",
+  "validation_timeout": 3
 }
 ```
 
-The fill path uses native property setters and dispatches `input`, `change`, and
-`blur` so React-like controlled inputs see the update.
+The result reports `mode_used`, `field_valid`, `dependent_control_enabled`,
+and `fallback_used`. When a portal replaces the input during validation, the
+MCP re-resolves the cached reference before its single keyboard fallback. Use
+`mode="keyboard"` only for an ordinary field that rejects framework-safe
+events. Never use keyboard mode for CAPTCHA, OTP, payment, biometric, identity,
+or password controls.
 
 ## Select an autocomplete combobox option
 
@@ -240,7 +247,37 @@ structured evidence.
 }
 ```
 
-Returns the new `element_id` when a single safe candidate is found.
+Returns the new `element_id` when a single safe candidate is found. The same
+re-resolution happens atomically inside mutating `element_click`,
+`element_click_by_text`, `form_fill_fields`, and `page_click_primary_action`.
+
+## Handle security controls
+
+After opening an application page or step, inspect `page_snapshot` or
+`page_get_active_surface`. Check `security_controls` before acting. A detected
+CAPTCHA, reCAPTCHA, hCaptcha, Turnstile, OTP or 2FA prompt, payment form,
+biometric check, or identity verification includes `automation_allowed=false`
+and `requires_user_action=true`. Do not click or fill the control. Ask the user
+to complete it in the visible browser, then call the observation tool again and
+resume the ordinary form flow.
+
+Interaction responses have three independent sections:
+
+- `mcp_action` records resolution, the event strategy, and whether the event was sent.
+- `page_effect` records requested and observed URL, text, selector, progress, surface, attribute, or enabled-state effects.
+- `site_diagnostics` records declared framework, validation, and security heuristics.
+
+`NO_EFFECT` means the browser event was sent but the requested page transition
+was not observed. It is not evidence that the click did not occur.
+
+## Confirm the active profile
+
+The catalog profile is selected at process startup. Use `server_status` with
+`include_tool_names=true` and compare `tool_profile`, `exposed_tool_count`, and
+`tool_names` with the client's expected surface. `full` intentionally contains
+advanced compatibility tools, while `agent` and `linkedin` intentionally omit
+them. `keyboard_press` is the canonical keyboard tool; `page_press_key` is not
+part of the public catalog.
 
 ## Evaluate JavaScript only when needed
 

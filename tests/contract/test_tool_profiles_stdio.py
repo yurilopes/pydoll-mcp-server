@@ -12,7 +12,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
-from pydoll_mcp_server.json_types import require_json_object
+from pydoll_mcp_server.json_types import get_array, require_json_object
 
 pytestmark = pytest.mark.contract
 
@@ -53,7 +53,10 @@ async def test_stdio_handshake_exposes_selected_profiles(tmp_path: Path) -> None
             assert all(tool.title for tool in catalog.tools)
             assert all(tool.description for tool in catalog.tools)
 
-            status_result = await session.call_tool('server_status', {'client_id': f'profile-{profile}'})
+            status_result = await session.call_tool(
+                'server_status',
+                {'client_id': f'profile-{profile}', 'include_tool_names': True},
+            )
             assert status_result.isError is not True
             assert len(status_result.content) == 1
             content = status_result.content[0]
@@ -61,3 +64,5 @@ async def test_stdio_handshake_exposes_selected_profiles(tmp_path: Path) -> None
             status = require_json_object(json.loads(content.text), 'server status')
             assert status['tool_profile'] == profile
             assert status['exposed_tool_count'] == expected_count
+            status_names = {str(name) for name in get_array(status, 'tool_names', [])}
+            assert status_names == names

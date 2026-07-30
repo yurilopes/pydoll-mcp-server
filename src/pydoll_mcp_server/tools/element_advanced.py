@@ -18,6 +18,7 @@ from pydoll_mcp_server.browser.script_utils import (
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonObject, get_bool, get_object, get_string
 from pydoll_mcp_server.security.policy import is_sensitive_field
+from pydoll_mcp_server.security.site_signals import inspect_element_security
 from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.elements import element_find
@@ -162,11 +163,21 @@ async def keyboard_press(
 
 
 async def _set_checked(client_id: str, tab_id: str, element_id: str, checked: bool) -> JsonObject:
-    element = await _get(client_id, tab_id, element_id)
-    if isinstance(element, dict):
-        return element
     try:
         async with tab_operation_lock(tab_id):
+            element = await _get(client_id, tab_id, element_id)
+            if isinstance(element, dict):
+                return element
+            security_control = await inspect_element_security(element)
+            if security_control:
+                response = StructuredError(
+                    ErrorCode.SECURITY_CONTROL_PRESENT,
+                    'The target is a security control that requires user action.',
+                    details={'security_control': security_control},
+                    recovery_hint='Ask the user to complete the security control, then re-observe the page.',
+                ).to_dict()
+                response['failure_origin'] = 'security'
+                return response
             result = await set_choice_state(element, checked)
         error = get_string(result, 'error', '')
         if error:
@@ -203,11 +214,21 @@ async def _get(client_id: str, tab_id: str, element_id: str) -> WebElement | Jso
 
 
 async def _mutate(client_id: str, tab_id: str, element_id: str, script: str, action: str) -> JsonObject:
-    element = await _get(client_id, tab_id, element_id)
-    if isinstance(element, dict):
-        return element
     try:
         async with tab_operation_lock(tab_id):
+            element = await _get(client_id, tab_id, element_id)
+            if isinstance(element, dict):
+                return element
+            security_control = await inspect_element_security(element)
+            if security_control:
+                response = StructuredError(
+                    ErrorCode.SECURITY_CONTROL_PRESENT,
+                    'The target is a security control that requires user action.',
+                    details={'security_control': security_control},
+                    recovery_hint='Ask the user to complete the security control, then re-observe the page.',
+                ).to_dict()
+                response['failure_origin'] = 'security'
+                return response
             result = extract_script_value(await element.execute_script(script, return_by_value=True))
         if isinstance(result, dict) and result.get('error'):
             return StructuredError(ErrorCode.INVALID_INPUT, str(result['error'])).to_dict()

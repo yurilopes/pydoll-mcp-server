@@ -7,6 +7,7 @@ DEEP_TREE_JS = """
     const includeShadow = __INCLUDE_SHADOW__;
     const includeIframes = __INCLUDE_IFRAMES__;
     const prefix = 'el_deep_' + Math.random().toString(36).slice(2, 8) + '_';
+    __REFERENCE_HELPERS__
     let counter = 0;
     const result = {
         elements: [],
@@ -49,26 +50,11 @@ DEEP_TREE_JS = """
     }
 
     function selectorHint(el) {
-        const tag = (el.tagName || '').toLowerCase();
-        if (!tag) return '';
-        if (el.id) return '#' + cssEscape(el.id);
-        const testId = el.getAttribute('data-testid');
-        if (testId) return '[data-testid="' + attrEscape(testId) + '"]';
-        const name = el.getAttribute('name');
-        if (name) return tag + '[name="' + attrEscape(name) + '"]';
-        const aria = el.getAttribute('aria-label');
-        if (aria) return tag + '[aria-label="' + attrEscape(aria) + '"]';
-        const type = el.getAttribute('type');
-        if (type) return tag + '[type="' + attrEscape(type) + '"]';
-        return tag;
+        return structuralSelector(el);
     }
 
     function xpathHint(el) {
-        if (el.id) return '//*[@id="' + el.id.replace(/"/g, '&quot;') + '"]';
-        const tag = (el.tagName || '').toLowerCase();
-        const name = el.getAttribute('name');
-        if (tag && name) return '//' + tag + '[@name="' + name.replace(/"/g, '&quot;') + '"]';
-        return '';
+        return structuralXPath(el);
     }
 
     function boundsOf(el) {
@@ -117,6 +103,10 @@ DEEP_TREE_JS = """
             attrs: attrsOf(el),
             selector_hint: selectorHint(el),
             xpath_hint: xpathHint(el),
+            match_index: referenceMatchIndex(el),
+            role: roleForReference(el),
+            label: labelForReference(el),
+            fingerprint: referenceFingerprint(el),
             bounding_box: bounds,
             visible: visibleOf(el, bounds),
             enabled: !el.disabled,
@@ -215,6 +205,7 @@ DEEP_FIND_JS = """
     const includeShadow = __INCLUDE_SHADOW__;
     const includeIframes = __INCLUDE_IFRAMES__;
     const prefix = 'el_deep_' + Math.random().toString(36).slice(2, 8) + '_';
+    __REFERENCE_HELPERS__
     let counter = 0;
     const result = {elements: [], errors: [], partial: false};
 
@@ -228,18 +219,7 @@ DEEP_FIND_JS = """
     }
 
     function selectorHint(el) {
-        const tag = (el.tagName || '').toLowerCase();
-        if (!tag) return '';
-        if (el.id) return '#' + cssEscape(el.id);
-        const testId = el.getAttribute('data-testid');
-        if (testId) return '[data-testid="' + attrEscape(testId) + '"]';
-        const name = el.getAttribute('name');
-        if (name) return tag + '[name="' + attrEscape(name) + '"]';
-        const aria = el.getAttribute('aria-label');
-        if (aria) return tag + '[aria-label="' + attrEscape(aria) + '"]';
-        const type = el.getAttribute('type');
-        if (type) return tag + '[type="' + attrEscape(type) + '"]';
-        return tag;
+        return structuralSelector(el);
     }
 
     function attrsOf(el) {
@@ -269,7 +249,11 @@ DEEP_FIND_JS = """
             text: textOf(el).slice(0, 200),
             attrs: attrsOf(el),
             selector_hint: selectorHint(el),
-            xpath_hint: el.id ? '//*[@id="' + el.id.replace(/"/g, '&quot;') + '"]' : '',
+            xpath_hint: structuralXPath(el),
+            match_index: referenceMatchIndex(el),
+            role: roleForReference(el),
+            label: labelForReference(el),
+            fingerprint: referenceFingerprint(el),
             frame_path: framePath.slice(),
             shadow_path: shadowPath.slice()
         });

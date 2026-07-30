@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Annotated
 
 from pydantic import Field
+from pydoll.browser.tab import Tab
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
+from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_object, get_string, require_json_object
+from pydoll_mcp_server.security.site_signals import inspect_element_security
 from pydoll_mcp_server.tools.active_surface import page_get_active_surface
+from pydoll_mcp_server.tools.element_resolver import resolve_element_for_action
 
 
 async def page_click_primary_action(
@@ -68,30 +73,40 @@ async def page_click_primary_action(
 
     target_el_id = str(target['element_id'])
 
+    clicked = False
+    before_url = ''
     try:
         tab = tab_info.pydoll_tab
-        element = await tab.query(
-            str(target.get('selector_hint', '')),
-            timeout=3,
-            find_all=False,
-            raise_exc=False,
-        )
-
+        before_url = await _safe_tab_url(tab)
         async with tab_operation_lock(tab_id):
-            if element is not None:
-                await element.execute_script(
-                    "this.scrollIntoView({block:'center'}); return true;", return_by_value=True
+            resolution = await resolve_element_for_action(tab_info, target_el_id)
+            element = resolution.element
+            if resolution.error is not None:
+                element = await tab.query(
+                    str(target.get('selector_hint', '')),
+                    timeout=2,
+                    find_all=False,
+                    raise_exc=False,
                 )
-                await element.click()
-            else:
-                return StructuredError(
-                    ErrorCode.STALE_ELEMENT,
-                    f'Primary action {target_el_id} is stale.',
-                    retryable=False,
-                    recovery_hint='Call page_get_active_surface again to get a fresh element_id.',
+                if element is None:
+                    response = resolution.error.to_dict()
+                    response['failure_origin'] = 'resolution'
+                    return response
+            if element is None:
+                return StructuredError(ErrorCode.STALE_ELEMENT, f'Primary action {target_el_id} is stale.').to_dict()
+            security_control = await inspect_element_security(element)
+            if security_control:
+                response = StructuredError(
+                    ErrorCode.SECURITY_CONTROL_PRESENT,
+                    'The primary action is a security control that requires user action.',
+                    details={'security_control': security_control},
+                    recovery_hint='Ask the user to complete the security control, then re-observe the surface.',
                 ).to_dict()
-
-        clicked = True
+                response['failure_origin'] = 'security'
+                return response
+            await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
+            await element.click()
+            clicked = True
     except PydollException as exc:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -99,20 +114,24 @@ async def page_click_primary_action(
             retryable=True,
         ).to_dict()
 
-    await _wait_stabilize(0.5)
-
-    after_surface = await page_get_active_surface(client_id, tab_id, scope=scope)
+    after_surface = await _wait_for_surface_effect(
+        client_id,
+        tab_id,
+        scope,
+        before_surface,
+        before_url,
+        min(timeout or 5.0, 30.0),
+    )
     after_progress = get_object(after_surface, 'progress', {}) if after_surface.get('success') else {}
     after_errors = get_array(after_surface, 'errors', []) if after_surface.get('success') else []
     after_pending = get_array(after_surface, 'pending_required', []) if after_surface.get('success') else []
 
-    effect_observed = _check_effect(
-        expected_next_text, expected_progress_change, before_progress, after_progress, after_surface
-    )
-
     before_step = get_object(before_surface, 'surface', {})
     after_step = get_object(after_surface, 'surface', {}) if after_surface.get('success') else {}
 
+    effect_observed = _check_effect(
+        expected_next_text, expected_progress_change, before_progress, after_progress, after_surface
+    )
     evidence: JsonObject = {
         'timestamp': time.time(),
         'clicked': clicked,
@@ -120,8 +139,34 @@ async def page_click_primary_action(
     }
 
     warnings: JsonArray = []
-    if not effect_observed:
+    if not effect_observed and (expected_next_text or expected_progress_change):
         warnings.append('Requested effect was not observed.')
+
+    diagnostics = get_object(after_surface, 'site_diagnostics', {}) if after_surface.get('success') else {}
+    page_effect: JsonObject = {
+        'expectation': {'next_text': expected_next_text, 'progress_change': expected_progress_change},
+        'observed': effect_observed,
+        'before_url': before_url,
+        'after_url': await _safe_tab_url(tab),
+        'evidence': evidence,
+    }
+    if (expected_next_text or expected_progress_change) and not effect_observed:
+        response = StructuredError(
+            ErrorCode.NO_EFFECT,
+            'The primary action was sent, but the expected step effect was not observed.',
+            details={'page_effect': page_effect, 'site_diagnostics': diagnostics},
+            retryable=True,
+        ).to_dict()
+        response.update(
+            {
+                'clicked': clicked,
+                'button': {'element_id': target_el_id, 'name': target.get('name', ''), 'tag': target.get('tag', '')},
+                'page_effect': page_effect,
+                'site_diagnostics': diagnostics,
+                'failure_origin': 'page',
+            }
+        )
+        return response
 
     return {
         'success': True,
@@ -147,6 +192,10 @@ async def page_click_primary_action(
         'pending_required': after_pending,
         'warnings': warnings,
         'evidence': evidence,
+        'mcp_action': {'event_sent': clicked, 'element_id': target_el_id},
+        'page_effect': page_effect,
+        'site_diagnostics': diagnostics,
+        'failure_origin': '',
     }
 
 
@@ -191,7 +240,48 @@ def _check_effect(
     return True
 
 
-async def _wait_stabilize(seconds: float) -> None:
-    import asyncio
+async def _wait_for_surface_effect(
+    client_id: str,
+    tab_id: str,
+    scope: str,
+    before_surface: JsonObject,
+    before_url: str,
+    timeout: float,
+) -> JsonObject:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = await page_get_active_surface(client_id, tab_id, scope=scope)
+        if not current.get('success'):
+            await asyncio.sleep(0.15)
+            continue
+        current_url = await _safe_tab_url(get_registry().get_tab(client_id, tab_id).pydoll_tab)
+        if _surface_changed(before_surface, current, before_url, current_url):
+            return current
+        await asyncio.sleep(0.15)
+    return await page_get_active_surface(client_id, tab_id, scope=scope)
 
-    await asyncio.sleep(seconds)
+
+async def _safe_tab_url(tab: Tab) -> str:
+    try:
+        return await get_tab_url(tab)
+    except (PydollException, TypeError, ValueError):
+        return ''
+
+
+def _surface_changed(
+    before: JsonObject,
+    current: JsonObject,
+    before_url: str,
+    current_url: str,
+) -> bool:
+    if before_url != current_url:
+        return True
+    before_step = get_object(before, 'surface', {})
+    current_step = get_object(current, 'surface', {})
+    if before_step != current_step:
+        return True
+    if get_object(before, 'progress', {}) != get_object(current, 'progress', {}):
+        return True
+    before_primary = get_object(before, 'primary_action', {})
+    current_primary = get_object(current, 'primary_action', {})
+    return get_string(before_primary, 'name', '') != get_string(current_primary, 'name', '')

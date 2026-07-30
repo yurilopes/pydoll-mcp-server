@@ -154,6 +154,7 @@ async def test_multi_step_form_flow_without_js_evaluate() -> None:
                 fields=[
                     {'label_contains': 'Years of Experience', 'value': '5'},
                     {'label_contains': 'Preferred Role', 'value': 'individual'},
+                    {'label_contains': 'Remote', 'value': 'remote'},
                 ],
                 scope='modal',
                 validate=True,

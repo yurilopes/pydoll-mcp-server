@@ -15,6 +15,7 @@ from pydoll_mcp_server.json_types import (
     get_int,
     get_object,
     get_string,
+    normalize_json_value,
     require_json_object,
 )
 
@@ -29,6 +30,12 @@ class RawTreeNode(TypedDict):
     bounds: ElementBounds
     visible: bool
     children: list[str]
+    selector_hint: NotRequired[str]
+    xpath_hint: NotRequired[str]
+    match_index: NotRequired[int]
+    role: NotRequired[str]
+    label: NotRequired[str]
+    fingerprint: NotRequired[JsonObject]
 
 
 class RawTreeResult(TypedDict):
@@ -50,6 +57,10 @@ class DeepRawElement(TypedDict):
     clickable: bool
     frame_path: list[str]
     shadow_path: list[str]
+    match_index: NotRequired[int]
+    role: NotRequired[str]
+    label: NotRequired[str]
+    fingerprint: NotRequired[JsonObject]
     pydoll_element: NotRequired[WebElement]
 
 
@@ -64,7 +75,7 @@ def parse_tree_result(value: object) -> RawTreeResult:
 
 def parse_tree_node(value: object) -> RawTreeNode:
     node = require_json_object(value, 'tree node')
-    return {
+    parsed: RawTreeNode = {
         'element_id': get_string(node, 'elementId'),
         'tag': get_string(node, 'tag'),
         'text': get_string(node, 'text'),
@@ -73,10 +84,21 @@ def parse_tree_node(value: object) -> RawTreeNode:
         'visible': get_bool(node, 'visible'),
         'children': _string_list(get_array(node, 'children', []), 'tree node.children'),
     }
+    for key in ('selector_hint', 'xpath_hint', 'role', 'label'):
+        value = node.get(key)
+        if isinstance(value, str):
+            parsed[key] = value
+    match_index = node.get('match_index')
+    if isinstance(match_index, int) and not isinstance(match_index, bool):
+        parsed['match_index'] = match_index
+    fingerprint = node.get('fingerprint')
+    if isinstance(fingerprint, dict):
+        parsed['fingerprint'] = fingerprint
+    return parsed
 
 
 def json_from_tree_node(node: RawTreeNode) -> JsonObject:
-    return {
+    result: JsonObject = {
         'elementId': node['element_id'],
         'tag': node['tag'],
         'text': node['text'],
@@ -85,11 +107,16 @@ def json_from_tree_node(node: RawTreeNode) -> JsonObject:
         'visible': node['visible'],
         'children': list(node['children']),
     }
+    for key in ('selector_hint', 'xpath_hint', 'match_index', 'role', 'label', 'fingerprint'):
+        value = node.get(key)
+        if value is not None:
+            result[key] = normalize_json_value(value, f'tree node.{key}')
+    return result
 
 
 def parse_deep_element(value: object) -> DeepRawElement:
     node = require_json_object(value, 'deep element')
-    return {
+    parsed: DeepRawElement = {
         'element_id': get_string(node, 'elementId'),
         'tag': get_string(node, 'tag'),
         'text': get_string(node, 'text'),
@@ -103,6 +130,17 @@ def parse_deep_element(value: object) -> DeepRawElement:
         'frame_path': _string_list(get_array(node, 'frame_path', []), 'deep element.frame_path'),
         'shadow_path': _string_list(get_array(node, 'shadow_path', []), 'deep element.shadow_path'),
     }
+    match_index = node.get('match_index')
+    if isinstance(match_index, int) and not isinstance(match_index, bool):
+        parsed['match_index'] = match_index
+    for key in ('role', 'label'):
+        field = node.get(key)
+        if isinstance(field, str):
+            parsed[key] = field
+    fingerprint = node.get('fingerprint')
+    if isinstance(fingerprint, dict):
+        parsed['fingerprint'] = fingerprint
+    return parsed
 
 
 def _string_map(value: JsonObject, context: str) -> dict[str, str]:

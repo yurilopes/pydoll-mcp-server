@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from typing import Annotated
 
 from pydoll.exceptions import PydollException
 
@@ -17,7 +18,14 @@ from pydoll_mcp_server.browser.script_utils import (
 )
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_float, get_string, require_json_object
+from pydoll_mcp_server.security.site_signals import inspect_element_security
 from pydoll_mcp_server.tools.element_resolver import resolve_element
+from pydoll_mcp_server.tools.form_input_modes import (
+    keyboard_fallback_allowed,
+    keyboard_fill,
+    read_filled_state,
+    wait_expected_enabled,
+)
 from pydoll_mcp_server.tools.form_scripts import (
     combobox_options_script,
     fill_script,
@@ -26,6 +34,7 @@ from pydoll_mcp_server.tools.form_scripts import (
 )
 
 DEFAULT_EVENTS = ['input', 'change', 'blur']
+VALID_FILL_MODES = frozenset({'auto', 'framework_safe', 'keyboard', 'blur'})
 
 
 async def fill_element_framework_safe(
@@ -36,21 +45,84 @@ async def fill_element_framework_safe(
     expected_value: str | None = None,
     verify: bool = True,
     events: list[str] | None = None,
+    mode: Annotated[str, 'Fill mode: auto, framework_safe, keyboard, or blur.'] = 'auto',
+    validation_timeout: float = 3.0,
+    expected_enabled_element_id: str = '',
 ) -> JsonObject:
+    if mode not in VALID_FILL_MODES:
+        return StructuredError(
+            ErrorCode.INVALID_INPUT,
+            f'Unsupported fill mode: {mode}. Use: {", ".join(sorted(VALID_FILL_MODES))}',
+        ).to_dict()
     try:
         tab_info = get_registry().get_tab(client_id, tab_id)
     except StructuredError as exc:
         return exc.to_dict()
-    element = await resolve_element(tab_info, element_id)
-    if element is None:
-        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
-
-    payload = json.dumps({'value': value, 'events': _safe_events(events)})
-    script = fill_script(payload)
+    fallback_used = False
+    mode_used = 'framework_safe'
+    verified = False
+    result: JsonObject = {}
     try:
         async with tab_operation_lock(tab_id):
+            element = await resolve_element(tab_info, element_id)
+            if element is None:
+                return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
+            security_control = await inspect_element_security(element)
+            if security_control:
+                response = StructuredError(
+                    ErrorCode.SECURITY_CONTROL_PRESENT,
+                    'The target is a security control that requires user action.',
+                    details={'security_control': security_control},
+                    recovery_hint='Ask the user to complete the security control, then re-observe the page.',
+                ).to_dict()
+                response['failure_origin'] = 'security'
+                return response
             await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
-            result = extract_script_object(await element.execute_script(script, return_by_value=True))
+            if mode == 'keyboard':
+                if not await keyboard_fallback_allowed(element):
+                    return StructuredError(
+                        ErrorCode.SECURITY_CONTROL_PRESENT,
+                        'Keyboard fallback is disabled for security-sensitive controls.',
+                        retryable=False,
+                        recovery_hint='Complete the security control manually and resume the workflow.',
+                    ).to_dict()
+                await keyboard_fill(tab_info.pydoll_tab, element, value)
+                result = await read_filled_state(element)
+                mode_used = 'keyboard'
+            else:
+                payload = json.dumps({'value': value, 'events': _safe_events(events, mode), 'mode': mode})
+                result = extract_script_object(await element.execute_script(fill_script(payload), return_by_value=True))
+                mode_used = 'blur' if mode == 'blur' else 'framework_safe'
+                actual = get_string(result, 'value', '')
+                selected_text = get_string(result, 'selected_text', '')
+                verified = actual == (value if expected_value is None else expected_value) or selected_text == (
+                    value if expected_value is None else expected_value
+                )
+                if mode == 'auto' and not verified and await keyboard_fallback_allowed(element):
+                    await keyboard_fill(tab_info.pydoll_tab, element, value)
+                    result = await read_filled_state(element)
+                    mode_used = 'keyboard'
+                    fallback_used = True
+            if expected_enabled_element_id:
+                enabled = await wait_expected_enabled(
+                    tab_info,
+                    expected_enabled_element_id,
+                    min(max(validation_timeout, 0.1), 30.0),
+                )
+                if mode == 'auto' and enabled is False and not fallback_used:
+                    refreshed = await resolve_element(tab_info, element_id)
+                    if refreshed is not None and await keyboard_fallback_allowed(refreshed):
+                        await keyboard_fill(tab_info.pydoll_tab, refreshed, value)
+                        result = await read_filled_state(refreshed)
+                        mode_used = 'keyboard'
+                        fallback_used = True
+                        enabled = await wait_expected_enabled(
+                            tab_info,
+                            expected_enabled_element_id,
+                            min(max(validation_timeout, 0.1), 30.0),
+                        )
+            else:
+                enabled = None
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
         return StructuredError(ErrorCode.EXECUTION_ERROR, f'Fill failed: {exc}', retryable=True).to_dict()
 
@@ -61,7 +133,7 @@ async def fill_element_framework_safe(
     expected = value if expected_value is None else expected_value
     actual = get_string(result, 'value', '')
     selected_text = get_string(result, 'selected_text', '')
-    verified = (actual == expected) or (selected_text == expected)
+    verified = verified or (actual == expected) or (selected_text == expected)
     if verify and not verified:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -74,8 +146,13 @@ async def fill_element_framework_safe(
         'element_id': element_id,
         'value_length': len(value),
         'verified': verified,
-        'mode_used': 'native_setter_events',
-        'events': list(_safe_events(events)),
+        'field_valid': verified,
+        'dependent_control_enabled': enabled,
+        'mode_requested': mode,
+        'mode_used': mode_used,
+        'fallback_used': fallback_used,
+        'validation_timeout': min(max(validation_timeout, 0.1), 30.0),
+        'events': list(_safe_events(events, mode)),
         'state': result,
     }
 
@@ -87,9 +164,23 @@ async def element_fill_and_verify(
     value: str,
     expected_value: str = '',
     events: list[str] | None = None,
+    mode: str = 'auto',
+    validation_timeout: float = 3.0,
+    expected_enabled_element_id: str = '',
 ) -> JsonObject:
     expected = expected_value or value
-    return await fill_element_framework_safe(client_id, tab_id, element_id, value, expected, True, events)
+    return await fill_element_framework_safe(
+        client_id,
+        tab_id,
+        element_id,
+        value,
+        expected,
+        True,
+        events,
+        mode,
+        validation_timeout,
+        expected_enabled_element_id,
+    )
 
 
 async def element_wait_value(
@@ -331,9 +422,12 @@ async def _dispatch_option_click(
     return {'success': True, **result}
 
 
-def _safe_events(events: list[str] | None) -> list[str]:
+def _safe_events(events: list[str] | None, mode: str = 'auto') -> list[str]:
     allowed = {'input', 'change', 'blur'}
-    return [event for event in events or DEFAULT_EVENTS if event in allowed]
+    selected = events or DEFAULT_EVENTS
+    if mode == 'blur' and 'blur' not in selected:
+        selected = [*selected, 'blur']
+    return [event for event in selected if event in allowed]
 
 
 def _select_option(options: JsonArray, text: str, exact: bool) -> JsonObject | None:
