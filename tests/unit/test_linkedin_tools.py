@@ -202,7 +202,7 @@ class TestLinkedInActions:
                     return_value={
                         'success': True,
                         'uploads': {'selected_or_latest_resume': 'resume.pdf'},
-                        'toast_messages': ['O currículo foi carregado'],
+                        'toast_messages': [],
                     }
                 ),
             ),
@@ -219,6 +219,7 @@ class TestLinkedInActions:
 
         assert result['uploaded'] is True
         assert result['upload_verified'] is True
+        assert result['verification_basis'] == ['selected_resume']
         upload.assert_awaited_once()
         upload_args = upload.await_args
         assert upload_args is not None

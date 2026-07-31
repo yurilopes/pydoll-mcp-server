@@ -226,7 +226,14 @@ function findDetailRoot(source) {
     });
     if (selected.length) return selected.at(-1);
   }
-  return candidates.at(-1) || null;
+  if (candidates.length) return candidates.at(-1);
+  const applyButton = [...source.querySelectorAll('button, [role="button"]')].find((control) => {
+    const aria = fold(control.getAttribute('aria-label') || '');
+    return /usar a candidatura simplificada|use easy apply/.test(aria)
+      && !control.closest('nav, header, [aria-label*="filter" i], [aria-label*="filtro" i]');
+  });
+  const fallback = applyButton?.closest('main, article, section') || applyButton?.parentElement;
+  return fallback && hasLoadedDetailContent(fallback) ? fallback : null;
 }
 function hasLoadedDetailContent(root) {
   const text = norm(rootText(root));
@@ -303,13 +310,17 @@ function inferStepTitle(text) {
   if (/education|formacao/.test(lower)) return 'Education';
   if (/work experience|experiencia/.test(lower)) return 'Work Experience';
   if (/contact info|informacoes de contato/.test(lower)) return 'Contact info';
+  if (/e-?mail\*?.{0,80}(phone|telefone|codigo do pais)/.test(lower)
+    || /(phone|telefone).{0,80}(e-?mail|email)/.test(lower)) return 'Contact info';
   return '';
 }
 """
         + form_state_helpers_script()
         + r"""
 function riskTextFor(text) {
-  const match = String(text || '').match(/.{0,80}(W2|GC Holder|Green Card|US Citizen|C2C|1099|sponsorship|visa|work authorization|no sponsorship).{0,140}/i);
+  const match = String(text || '').match(
+    /.{0,80}(\bW2\b|\bGC Holder\b|\bGreen Card\b|\bUS Citizen\b|\bC2C\b|\b1099\b|\bsponsorship\b|\bvisa\b|\bwork authorization\b|\bno sponsorship\b).{0,140}/i
+  );
   return match ? norm(match[0]) : '';
 }
 function applicationStateFromControls(text, controls) {

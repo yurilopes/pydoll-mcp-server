@@ -65,7 +65,7 @@ LINKEDIN_TOOL_NAMES = frozenset(
     linkedin_easy_apply_wait_ready linkedin_easy_apply_upload_resume linkedin_easy_apply_click_next
     linkedin_easy_apply_fill_questions linkedin_easy_apply_handle_save_prompt linkedin_easy_apply_submit
     linkedin_jobs_page_snapshot linkedin_jobs_open_result linkedin_application_evidence linkedin_jobs_search
-    linkedin_jobs_search_results
+    linkedin_jobs_search_results linkedin_message_recruiter
         """
     )
 )
@@ -98,7 +98,7 @@ PUBLIC_TOOL_NAMES = _split_names(
     linkedin_easy_apply_upload_resume linkedin_easy_apply_click_next linkedin_easy_apply_fill_questions
     linkedin_easy_apply_handle_save_prompt linkedin_easy_apply_submit linkedin_jobs_page_snapshot
     linkedin_jobs_open_result
-    linkedin_application_evidence linkedin_jobs_search linkedin_jobs_search_results
+    linkedin_application_evidence linkedin_jobs_search linkedin_jobs_search_results linkedin_message_recruiter
     """
 )
 
@@ -118,7 +118,7 @@ _MUTATING_TOOL_NAMES = frozenset(
     form_fill_fields form_select_choice page_click_primary_action artifact_prepare_upload profile_promote
     linkedin_easy_apply_open linkedin_easy_apply_close linkedin_easy_apply_upload_resume linkedin_easy_apply_click_next
     linkedin_easy_apply_fill_questions linkedin_easy_apply_handle_save_prompt linkedin_easy_apply_submit
-    linkedin_jobs_search linkedin_jobs_open_result
+    linkedin_jobs_search linkedin_jobs_open_result linkedin_message_recruiter
         """
     )
 )
@@ -250,6 +250,10 @@ _DESCRIPTION_OVERRIDES = {
     'linkedin_jobs_search': (
         'Build and open a LinkedIn Jobs search with location, remote, Easy Apply, '
         'date, experience, type, and pagination filters.'
+    ),
+    'linkedin_message_recruiter': (
+        'Send one caller-provided message to the uniquely associated recruiter on the current LinkedIn job '
+        'after a submitted application is confirmed. Does not navigate to profiles, send InMail, or retry delivery.'
     ),
 }
 

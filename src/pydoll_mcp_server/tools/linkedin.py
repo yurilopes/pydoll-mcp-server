@@ -9,6 +9,7 @@ from typing import TypedDict
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import (
     JsonObject,
+    JsonScalar,
     get_array,
     get_bool,
     get_object,
@@ -47,6 +48,9 @@ class LinkedInQuestionAnswer(TypedDict, total=False):
     option_text: str
 
 
+LinkedInAnswers = list[LinkedInQuestionAnswer] | dict[str, JsonScalar]
+
+
 async def linkedin_job_snapshot(client_id: str, tab_id: str) -> JsonObject:
     """Capture the active LinkedIn job detail and application state."""
     return await _execute_script(client_id, tab_id, job_snapshot_script(), 'LinkedIn job snapshot failed')
@@ -69,14 +73,51 @@ async def linkedin_easy_apply_open(
 ) -> JsonObject:
     """Open Easy Apply from the active job detail and return its first snapshot."""
     current = await linkedin_easy_apply_snapshot(client_id, tab_id)
-    if get_bool(current, 'form_present') or get_bool(current, 'submitted'):
+    if _is_easy_apply_surface(current):
         return current
     click_result = await _click_resolved_action(client_id, tab_id, 'apply', timeout_ms)
+    if get_string(click_result, 'error_code') == ErrorCode.NO_EFFECT.value:
+        delayed = await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=max(1000, timeout_ms // 2))
+        if _is_easy_apply_surface(delayed):
+            delayed['open'] = click_result
+            delayed['click_sent'] = True
+            delayed['effect_observed'] = True
+            delayed['effect_type'] = 'easy_apply_surface'
+            delayed['recovery_attempted'] = True
+            return delayed
+        click_result['click_sent'] = True
+        click_result['effect_observed'] = False
+        click_result['effect_type'] = ''
+        click_result['recovery_attempted'] = True
+        return click_result
     if not get_bool(click_result, 'success'):
         return click_result
     ready = await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=timeout_ms)
     ready['open'] = click_result
+    ready['click_sent'] = True
+    ready['effect_observed'] = _is_easy_apply_surface(ready)
+    ready['effect_type'] = 'easy_apply_surface' if _is_easy_apply_surface(ready) else ''
+    ready['recovery_attempted'] = False
+    if not ready['effect_observed']:
+        return StructuredError(
+            ErrorCode.NO_EFFECT,
+            'LinkedIn Easy Apply did not expose a dialog or confirmed application surface',
+            retryable=True,
+            details={'snapshot': ready, 'click': click_result},
+            recovery_hint='Select a job detail card and retry after the Easy Apply dialog is visible.',
+        ).to_dict()
     return ready
+
+
+def _is_easy_apply_surface(snapshot: JsonObject) -> bool:
+    surface = get_string(snapshot, 'surface')
+    if surface == 'inline':
+        return bool(get_string(snapshot, 'step_title')) and get_bool(snapshot, 'form_present')
+    return surface in {'dialog', 'save_prompt', 'confirmation'} and (
+        get_bool(snapshot, 'form_present')
+        or get_bool(snapshot, 'submitted')
+        or bool(get_object(snapshot, 'blocking_prompt', {}))
+    )
 
 
 async def linkedin_easy_apply_snapshot(
@@ -169,16 +210,18 @@ async def linkedin_easy_apply_click_next(
 async def linkedin_easy_apply_fill_questions(
     client_id: str,
     tab_id: str,
-    answers: list[LinkedInQuestionAnswer],
+    answers: LinkedInAnswers,
 ) -> JsonObject:
     """Fill explicitly provided Easy Apply answers and report unresolved questions."""
-    normalized_answers = [_answer_to_json(answer) for answer in answers]
+    normalized_answers, input_format = _normalize_answers(answers)
     result = await _execute_mutating_script(
         client_id,
         tab_id,
         fill_questions_script(normalized_answers),
         'LinkedIn Easy Apply question fill failed',
     )
+    if 'error_code' in result:
+        return _question_fill_error(result, input_format, len(normalized_answers))
     filled = get_array(result, 'filled', [])
     unfilled = get_array(result, 'unfilled', [])
     for action_value in get_array(result, 'radio_actions', []):
@@ -198,6 +241,7 @@ async def linkedin_easy_apply_fill_questions(
                     'question_contains': question_contains,
                     'matched_label': get_string(action, 'matched_label', get_string(click, 'matched_label')),
                     'option_text': option_text,
+                    'status': get_string(click, 'status', 'filled'),
                     'verified': True,
                     'attempts': len(get_array(click, 'attempts', [])),
                 }
@@ -208,6 +252,7 @@ async def linkedin_easy_apply_fill_questions(
                     'question_contains': question_contains,
                     'matched_label': get_string(action, 'matched_label'),
                     'option_text': option_text,
+                    'status': 'interaction_failed',
                     'reason': get_string(click, 'reason', 'click_failed'),
                     'click_error': click,
                 }
@@ -216,6 +261,11 @@ async def linkedin_easy_apply_fill_questions(
     result['unfilled'] = unfilled
     result['radio_actions'] = []
     result['success'] = len(unfilled) == 0 and len(get_array(result, 'ambiguous', [])) == 0
+    result['input_format'] = input_format
+    result['requested_count'] = len(normalized_answers)
+    result['filled_count'] = len(filled)
+    result['unfilled_count'] = len(unfilled)
+    result['ambiguous_count'] = len(get_array(result, 'ambiguous', []))
     snapshot = await linkedin_easy_apply_snapshot(client_id, tab_id)
     result['snapshot'] = snapshot
     result['authorization_risk'] = get_bool(snapshot, 'authorization_risk') or bool(get_array(result, 'blockers', []))
@@ -284,8 +334,22 @@ async def linkedin_easy_apply_submit(
             retryable=False,
             details=snapshot,
         ).to_dict()
+    if get_array(snapshot, 'pending_required', []) or get_array(snapshot, 'inline_errors', []):
+        return StructuredError(
+            ErrorCode.INVALID_INPUT,
+            'LinkedIn Easy Apply has required fields or visible validation errors before submit',
+            retryable=False,
+            details={
+                'pending_required': get_array(snapshot, 'pending_required', []),
+                'inline_errors': get_array(snapshot, 'inline_errors', []),
+                'snapshot': snapshot,
+            },
+        ).to_dict()
     click_result = await _click_resolved_action(client_id, tab_id, 'submit', timeout_ms)
-    if not get_bool(click_result, 'success'):
+    click_sent = (
+        get_bool(click_result, 'success') or get_string(click_result, 'error_code') == ErrorCode.NO_EFFECT.value
+    )
+    if not click_sent:
         return click_result
 
     deadline = time.monotonic() + max(1, timeout_ms) / 1000
@@ -293,7 +357,12 @@ async def linkedin_easy_apply_submit(
     while time.monotonic() < deadline:
         post = await linkedin_easy_apply_snapshot(client_id, tab_id)
         last_snapshot = post
-        if get_bool(post, 'submitted') or get_string(post, 'application_status') == 'submitted':
+        post_url = get_string(post, 'url')
+        if (
+            get_bool(post, 'submitted')
+            or get_string(post, 'application_status') == 'submitted'
+            or '/jobs/search/post-apply/' in post_url
+        ):
             return {
                 'success': True,
                 'submitted': True,
@@ -306,11 +375,36 @@ async def linkedin_easy_apply_submit(
             }
         await asyncio.sleep(0.5)
     return StructuredError(
-        ErrorCode.TIMEOUT,
-        f'LinkedIn submit confirmation did not appear within {timeout_ms}ms',
+        ErrorCode.NO_EFFECT,
+        f'LinkedIn submit click was sent but confirmation did not appear within {timeout_ms}ms',
         retryable=True,
-        details={'last_snapshot': last_snapshot, 'click': click_result},
+        details={'last_snapshot': last_snapshot, 'click': click_result, 'click_sent': click_sent},
+        recovery_hint=(
+            'Inspect the LinkedIn page and do not click submit again until the application state is confirmed.'
+        ),
     ).to_dict()
+
+
+def _normalize_answers(answers: LinkedInAnswers) -> tuple[list[JsonObject], str]:
+    if isinstance(answers, dict):
+        return [
+            {'question_contains': question, 'value': normalize_json_value(value, f'answers.{question}')}
+            for question, value in answers.items()
+        ], 'map'
+    return [_answer_to_json(answer) for answer in answers], 'list'
+
+
+def _question_fill_error(result: JsonObject, input_format: str, requested_count: int) -> JsonObject:
+    result['success'] = False
+    result['input_format'] = input_format
+    result['requested_count'] = requested_count
+    result['filled_count'] = 0
+    result['unfilled_count'] = requested_count
+    result['ambiguous_count'] = 0
+    result['filled'] = []
+    result['unfilled'] = []
+    result['ambiguous'] = []
+    return result
 
 
 def _answer_to_json(answer: LinkedInQuestionAnswer) -> JsonObject:

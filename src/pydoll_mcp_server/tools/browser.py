@@ -143,7 +143,20 @@ async def browser_launch(
                 recovery_hint=('Wait for the other client to release the profile or use a different profile_id.'),
             ).to_dict()
     elif profile_id:
-        profile = profile_mgr.create_named(client_id, profile_id)
+        indexed_profile = profile_index.get(profile_id)
+        if indexed_profile is not None and indexed_profile.owner_client_id != client_id:
+            return StructuredError(
+                ErrorCode.PERMISSION_DENIED,
+                f'Profile {profile_id} belongs to another client',
+                retryable=False,
+            ).to_dict()
+        # profile_list returns managed IDs. Reuse those IDs directly instead of
+        # treating them as a new logical name and creating a nested profile.
+        profile = (
+            profile_mgr.reuse_existing(profile_id, client_id)
+            if indexed_profile is not None
+            else profile_mgr.create_named(client_id, profile_id)
+        )
         if not profile_mgr.lock(profile.profile_id, client_id):
             return StructuredError(
                 error_code=ErrorCode.RESOURCE_LOCKED,

@@ -259,6 +259,7 @@ LinkedIn Easy Apply helpers:
 - `linkedin_easy_apply_fill_questions`
 - `linkedin_easy_apply_handle_save_prompt`
 - `linkedin_easy_apply_submit`
+- `linkedin_message_recruiter`
 
 The LinkedIn helpers are browser automation helpers only. They do not generate
 resumes, choose answers, or integrate with external application trackers.
@@ -273,9 +274,17 @@ provided and the current modal is a verified final submit step.
 The Easy Apply helpers support both visible dialogs and inline LinkedIn forms.
 `linkedin_easy_apply_upload_resume` accepts an explicit local file through its
 `path` parameter, uploads it with `paths` internally, and reports filename and
-toast verification separately from upload acceptance. It delegates native
+toast verification separately from upload acceptance. A selected filename is
+also a valid upload confirmation when LinkedIn does not show a toast. It delegates native
 picker handling to the generic upload layer when no `input[type="file"]` is
 available, while preserving LinkedIn-specific snapshot and toast verification.
+`linkedin_easy_apply_fill_questions` accepts the recommended list of
+`question_contains` answer objects and also accepts a simple question-to-value
+map for compatibility with clients that cannot construct the list shape.
+`linkedin_message_recruiter` requires a confirmed submitted application and a
+caller-provided message. It only messages one unambiguous recruiter listed in
+the current job detail surface, never navigates to a profile, sends InMail, or
+retries an inconclusive send automatically.
 
 Uploads use the `local` source policy by default. The agent supplies a concrete
 local file path and does not need to call `artifact_import`, copy the file into

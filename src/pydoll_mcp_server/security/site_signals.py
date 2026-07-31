@@ -59,7 +59,8 @@ def site_diagnostics_script() -> str:
         return element.tagName.toLowerCase();
     }
     const patterns = [
-        {kind: 'captcha', confidence: 0.98, pattern: /captcha|recaptcha|hcaptcha|turnstile|human verification|robot/i},
+        {kind: 'captcha', confidence: 0.98,
+            pattern: /captcha|recaptcha|hcaptcha|turnstile|human verification|i am not a robot|are you human/i},
         {kind: 'two_factor', confidence: 0.95, pattern: /two[- ]factor|2fa|otp|verification code|authentication code/i},
         {kind: 'payment', confidence: 0.94, pattern: /payment|credit card|card number|billing|cvv|cvc|paypal/i},
         {kind: 'biometric', confidence: 0.96, pattern: /biometric|face id|facial recognition|fingerprint|selfie/i},
@@ -88,9 +89,14 @@ def site_diagnostics_script() -> str:
         const safeAttrs = [
             element.getAttribute('aria-label'), element.getAttribute('title'),
             element.getAttribute('name'), element.getAttribute('placeholder'),
-            element.getAttribute('alt'), element.getAttribute('role')
+            element.getAttribute('alt'), element.getAttribute('role'),
+            element.getAttribute('id'), element.getAttribute('class')
         ].filter(Boolean).join(' ');
-        const source = normalize((element.innerText || element.textContent || '') + ' ' + safeAttrs);
+        const directText = [...element.childNodes]
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent || '')
+            .join(' ');
+        const source = normalize(directText + ' ' + safeAttrs);
         if (!source) continue;
         for (const item of patterns) {
             if (item.pattern.test(source)) addSignal(item.kind, item.confidence, source, element, '');

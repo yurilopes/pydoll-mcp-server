@@ -85,6 +85,55 @@ async def test_upload_files_from_trigger_uses_unique_direct_input(
 
 
 @pytest.mark.asyncio
+async def test_auto_continues_to_intercept_after_direct_input_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from pydoll_mcp_server.tools import upload_trigger
+
+    resume = _configure_runtime(monkeypatch, tmp_path)
+    trigger = _FakeElement({'file_input_count': 1, 'trigger_is_file_input': False})
+    tab_info = SimpleNamespace(pydoll_tab=object())
+    browser_info = SimpleNamespace(headless=True, browser_process_id=None)
+
+    def resolve_tab_with_browser(_client: str, _tab: str) -> tuple[SimpleNamespace, SimpleNamespace]:
+        return tab_info, browser_info
+
+    registry = SimpleNamespace(resolve_tab_with_browser=resolve_tab_with_browser)
+    intercepted = {
+        'success': True,
+        'uploaded': True,
+        'strategy_used': 'chooser_intercept',
+        'file_chooser_event_seen': True,
+    }
+
+    monkeypatch.setattr(upload_trigger, 'get_registry', lambda: registry)
+    monkeypatch.setattr(upload_trigger, 'resolve_element', AsyncMock(return_value=trigger))
+    monkeypatch.setattr(
+        upload_trigger,
+        'upload_direct_input',
+        AsyncMock(return_value={'success': False, 'error_code': 'EXECUTION_ERROR'}),
+    )
+    intercept_mock = AsyncMock(return_value=intercepted)
+    monkeypatch.setattr(upload_trigger, 'upload_with_intercept', intercept_mock)
+    monkeypatch.setattr(
+        upload_trigger,
+        'finish_upload_result',
+        AsyncMock(return_value=intercepted),
+    )
+
+    result = await upload_trigger.upload_files_from_trigger(
+        'client',
+        'tab',
+        'trigger-id',
+        [str(resume)],
+    )
+
+    assert result['strategy_used'] == 'chooser_intercept'
+    intercept_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_upload_files_from_trigger_rejects_path_outside_allowlist(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

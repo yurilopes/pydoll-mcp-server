@@ -47,7 +47,7 @@ EXPECTED_LINKEDIN_NAMES = _names(
     linkedin_easy_apply_wait_ready linkedin_easy_apply_upload_resume linkedin_easy_apply_click_next
     linkedin_easy_apply_fill_questions linkedin_easy_apply_handle_save_prompt linkedin_easy_apply_submit
     linkedin_jobs_page_snapshot linkedin_jobs_open_result linkedin_application_evidence linkedin_jobs_search
-    linkedin_jobs_search_results
+    linkedin_jobs_search_results linkedin_message_recruiter
     """
 )
 
@@ -55,8 +55,8 @@ EXPECTED_LINKEDIN_NAMES = _names(
 def test_full_profile_preserves_all_public_names_without_duplicates() -> None:
     names = get_exposed_tool_names(ToolProfile.FULL)
 
-    assert names == PUBLIC_TOOL_NAMES
-    assert len(names) == 144
+    assert names == tuple(PUBLIC_TOOL_NAMES)
+    assert len(names) == 145
     assert len(names) == len(set(names))
     assert set(TOOL_METADATA) == set(names)
 
@@ -75,7 +75,7 @@ def test_linkedin_profile_is_agent_plus_linkedin_tools() -> None:
     linkedin_names = set(get_exposed_tool_names(ToolProfile.LINKEDIN))
 
     assert linkedin_names == EXPECTED_AGENT_NAMES | EXPECTED_LINKEDIN_NAMES
-    assert len(linkedin_names) == 78
+    assert len(linkedin_names) == 79
     assert 'linkedin_easy_apply_submit' in linkedin_names
     assert 'network_replay_request' not in linkedin_names
 

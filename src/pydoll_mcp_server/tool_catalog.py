@@ -101,6 +101,7 @@ from pydoll_mcp_server.tools.linkedin import (
     linkedin_easy_apply_wait_ready,
     linkedin_job_snapshot,
 )
+from pydoll_mcp_server.tools.linkedin_recruiter import linkedin_message_recruiter
 from pydoll_mcp_server.tools.linkedin_search import (
     linkedin_application_evidence,
     linkedin_jobs_open_result,
@@ -318,6 +319,7 @@ TOOLS: tuple[Tool, ...] = (
     linkedin_application_evidence,
     linkedin_jobs_search,
     linkedin_jobs_search_results,
+    linkedin_message_recruiter,
 )
 
 

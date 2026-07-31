@@ -207,7 +207,9 @@ function collectLinkedInJobs(maxResults) {
       location: locationLine,
       url: `https://www.linkedin.com/jobs/view/${id}/`,
       visible_text: text.slice(0, 800),
-      easy_apply_hint: /candidatura simplificada|easy apply/i.test(fold(text)) || params.get('f_AL') === 'true',
+      // The f_AL query filter is only a request to LinkedIn, not evidence that
+      // this particular card actually exposes Easy Apply.
+      easy_apply_hint: /candidatura simplificada|easy apply/i.test(fold(text)),
       remote_hint: /remote|remoto/i.test(fold(text)) || params.get('f_WT') === '2',
       sponsored: /promoted|promovida|sponsored/i.test(fold(text)),
     });

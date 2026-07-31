@@ -31,6 +31,7 @@ def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> st
   if (!surface.root || surface.kind === 'confirmation') {{
     return {{
       success: true,
+      url: location.href,
       surface: confirmation ? 'confirmation' : 'none',
       form_present: false,
       dialog_present: false,
@@ -44,7 +45,7 @@ def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> st
       risk_text: '',
       fields: [],
       questions: [],
-      uploads: {{ selected_or_latest_resume: '', resume_entries: [], upload_button_available: false, new_upload_visible: false }},
+      uploads: {{ selected_resume: '', uploaded_resume: '', selected_or_latest_resume: '', input_file_names: [], resume_entries: [], upload_button_available: false, new_upload_visible: false }},
       primary_action: {{}},
       secondary_actions: [],
       blocking_prompt: {{}},
@@ -104,11 +105,16 @@ def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> st
   const inputResumeNames = [...root.querySelectorAll('input[type="file"]')]
     .flatMap((input) => [...(input.files || [])].map((file) => norm(file.name)));
   const resumeNames = [...new Set([...inputResumeNames, ...resumeLines.map((line) => line.replace(/^pdf\\s+/i, ''))])];
+  const selectedResume = inputResumeNames[0] || resumeNames[0] || '';
   const toastNodes = [...document.querySelectorAll('.artdeco-toast-item, [role="status"], [data-test-toast]')]
     .filter((item) => visible(item));
-  const toasts = toastNodes.map((item) => norm(item.innerText || '')).filter(Boolean);
+  const successAlertNodes = [...document.querySelectorAll('[role="alert"]')]
+    .filter((item) => visible(item) && /o currículo foi carregado|resume (uploaded|successfully uploaded)|upload successful/i.test(norm(item.innerText || '')));
+  const toastNodesWithSuccessAlerts = [...new Set([...toastNodes, ...successAlertNodes])];
+  const toasts = toastNodesWithSuccessAlerts.map((item) => norm(item.innerText || '')).filter(Boolean);
   const inlineErrors = [...root.querySelectorAll('[role="alert"], .artdeco-inline-feedback, .fb-dash-form-element__error-text')]
     .filter((item) => !item.closest('.artdeco-toast-item, [role="status"], [data-test-toast]'))
+    .filter((item) => !/o currículo foi carregado|resume (uploaded|successfully uploaded)|upload successful/i.test(norm(item.innerText || '')))
     .map((item) => norm(item.innerText || '')).filter(Boolean);
   for (const field of fields) {{
     if (field.validation_message) inlineErrors.push(field.validation_message);
@@ -128,9 +134,13 @@ def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> st
   const risk = riskTextFor(text);
   const reviewAnswers = reviewAnswersFor(text);
   const isReview = stepTitle === 'Review' || Boolean(submit && /revise sua candidatura|review/.test(fold(text)));
+  const singlePageSubmit = Boolean(
+    submit && !forward && /e-?mail|phone|telefone|resume|curriculo/.test(fold(text))
+  );
+  const finalSubmitStep = Boolean(isReview || singlePageSubmit);
   const reviewSummary = isReview ? {{
     text: norm(text).slice(0, 2500),
-    resume_filename: resumeNames[0] || '',
+    resume_filename: selectedResume,
     final_submit_available: Boolean(submit && !submit.disabled),
     answers: questions.length ? questions : reviewAnswers,
   }} : {{}};
@@ -140,6 +150,7 @@ def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> st
   }} : {{}};
   return {{
     success: true,
+    url: location.href,
     surface: surface.kind,
     form_present: surface.kind === 'dialog' || surface.kind === 'inline',
     dialog_present: surface.kind === 'dialog' || surface.kind === 'save_prompt',
@@ -147,18 +158,23 @@ def snapshot_script(include_resume_entries: bool, max_resume_entries: int) -> st
     step_count: stepCount,
     step_title: stepTitle,
     is_review_step: isReview,
-    is_final_submit_step: Boolean(submit && !submit.disabled),
+    // LinkedIn can render a submit-like control in the modal shell before Review.
+    // The final action is valid only when the visible content identifies Review.
+    is_final_submit_step: finalSubmitStep && Boolean(submit && !submit.disabled),
     application_state: isReview ? 'draft' : 'unknown',
     application_state_text: isReview ? 'review_ready' : '',
     fields,
     questions,
     uploads: {{
-      selected_or_latest_resume: resumeNames[0] || '',
+      selected_resume: selectedResume,
+      uploaded_resume: inputResumeNames[0] || '',
+      selected_or_latest_resume: selectedResume,
+      input_file_names: inputResumeNames,
       resume_entries: opts.include_resume_entries ? resumeNames.slice(0, opts.max_resume_entries) : [],
       upload_button_available: buttons.some((button) => isUploadLabel(`${{button.text}} ${{button.aria}}`)),
       new_upload_visible: Boolean(resumeNames[0]),
     }},
-    primary_action: submit || forward || {{}},
+    primary_action: (isReview ? submit : forward) || submit || forward || {{}},
     secondary_actions: buttons.filter((button) => /voltar|back|editar|edit/.test(fold(button.text))),
     blocking_prompt: prompt,
     toast_messages: [...new Set(toasts)],
@@ -180,7 +196,15 @@ def resolve_action_script(action: str) -> str:
   let surface = findApplicationSurface();
   let root = surface.root;
   if (opts.action === 'apply') {{
-    root = findDetailRoot(document) || document;
+    root = ['dialog', 'inline', 'save_prompt'].includes(surface.kind) ? surface.root : findDetailRoot(document);
+    if (!root && isDirectJobView()) root = document;
+    if (!root) return {{
+      success: false,
+      action: opts.action,
+      surface: 'search',
+      reason: 'job_detail_surface_not_found',
+      candidates: [],
+    }};
     surface = {{ kind: isDirectJobView() ? 'job_view' : 'search_detail', root }};
   }}
   if (!root) return {{ success: false, action: opts.action, reason: 'surface_not_found' }};
@@ -208,7 +232,16 @@ def resolve_action_script(action: str) -> str:
     .filter((control) => ['button', 'a', 'input', 'label'].includes(control.tagName.toLowerCase())
       || ['button', 'link', 'radio', 'checkbox', 'option'].includes(fold(control.getAttribute('role') || '')));
   let matcher = () => false;
-  if (opts.action === 'apply') matcher = (control) => isEasyApplyLabel(`${{controlText(control)}} ${{controlAria(control)}}`) || isContinueLabel(`${{controlText(control)}} ${{controlAria(control)}}`);
+  if (opts.action === 'apply') matcher = (control) => {{
+    const role = fold(control.getAttribute('role') || '');
+    const id = fold(control.id || '');
+    const aria = fold(controlAria(control));
+    const text = `${{controlText(control)}} ${{controlAria(control)}}`;
+    const excluded = role === 'radio' || role === 'checkbox' || id.includes('searchfilter')
+      || aria.includes('filter') || aria.includes('filtro')
+      || Boolean(control.closest('[aria-label*="filter" i], [aria-label*="filtro" i], nav, header'));
+    return !excluded && (isEasyApplyLabel(text) || isContinueLabel(text));
+  }};
   if (opts.action === 'forward') matcher = (control) => isForwardLabel(controlLabel(control));
   if (opts.action === 'submit') matcher = (control) => isSubmitLabel(controlLabel(control));
   if (opts.action === 'upload') matcher = (control) => isUploadLabel(controlLabel(control));
@@ -229,7 +262,11 @@ def resolve_action_script(action: str) -> str:
     const rightTag = right.tagName.toLowerCase();
     const leftButton = leftTag === 'button' || fold(left.getAttribute('role') || '') === 'button';
     const rightButton = rightTag === 'button' || fold(right.getAttribute('role') || '') === 'button';
-    return Number(rightButton) - Number(leftButton);
+    const leftAria = fold(controlAria(left));
+    const rightAria = fold(controlAria(right));
+    const leftExact = /usar a candidatura simplificada|use easy apply/.test(leftAria);
+    const rightExact = /usar a candidatura simplificada|use easy apply/.test(rightAria);
+    return Number(rightExact) - Number(leftExact) || Number(rightButton) - Number(leftButton);
   }});
   const target = matches[0];
   if (!target) return {{
@@ -306,6 +343,7 @@ def fill_questions_script(answers: list[JsonObject]) -> str:
     el.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertReplacementText', data: stringValue }}));
     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
     el.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+    return String(el.value ?? '') === stringValue;
   }};
   for (const answer of opts.answers) {{
     const needle = questionText(answer.question_contains || '');
@@ -336,8 +374,12 @@ def fill_questions_script(answers: list[JsonObject]) -> str:
     const optionText = fold(answer.option_text || answer.value || '');
     const textControl = group.find((item) => ['text', 'email', 'number', 'tel', 'url', ''].includes(fold(item.field.type)) || item.field.tag === 'textarea');
     if (answer.value !== undefined && answer.value !== null && textControl) {{
-      setValue(textControl.el, answer.value);
-      filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, value: String(answer.value), input_type: textControl.field.type || textControl.field.tag }});
+      const verified = setValue(textControl.el, answer.value);
+      if (verified) {{
+        filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, value: String(answer.value), input_type: textControl.field.type || textControl.field.tag, status: 'filled', verification: true }});
+      }} else {{
+        unfilled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, reason: 'validation_failed', status: 'validation_failed', verification: false }});
+      }}
       continue;
     }}
     const selectControl = group.find((item) => item.field.tag === 'select');
@@ -351,7 +393,12 @@ def fill_questions_script(answers: list[JsonObject]) -> str:
       if (setter) setter.call(selectControl.el, option.value); else selectControl.el.value = option.value;
       selectControl.el.dispatchEvent(new Event('input', {{ bubbles: true }}));
       selectControl.el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-      filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: norm(option.textContent || ''), selected_value: String(option.value || '') }});
+      const selected = [...selectControl.el.selectedOptions].some((item) => item === option);
+      if (selected) {{
+        filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: norm(option.textContent || ''), selected_value: String(option.value || ''), status: 'filled', verification: true }});
+      }} else {{
+        unfilled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, reason: 'validation_failed', status: 'validation_failed', verification: false }});
+      }}
       continue;
     }}
     const radios = group.filter((item) => ['radio', 'checkbox'].includes(fold(item.field.type)));
@@ -363,7 +410,7 @@ def fill_questions_script(answers: list[JsonObject]) -> str:
       }}
       const choice = choices[0];
       if (choice.field.checked) {{
-        filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: optionLabelFor(choice.el), verified: true }});
+        filled.push({{ question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: optionLabelFor(choice.el), status: 'already_filled', verified: true, verification: true }});
       }} else {{
         radioActions.push({{ selector: cssPath(choice.el), question_contains: answer.question_contains || '', matched_label: match.field.label, option_text: optionLabelFor(choice.el) }});
       }}

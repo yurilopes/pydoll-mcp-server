@@ -171,7 +171,7 @@ async def upload_files_from_trigger(
                     retryable=False,
                 ).to_dict()
             surface = await inspect_upload_surface(trigger)
-            if picker_strategy != 'desktop' and direct_input_available(surface):
+            if picker_strategy == 'auto' and direct_input_available(surface):
                 result = await upload_direct_input(
                     client_id,
                     tab_id,
@@ -182,7 +182,10 @@ async def upload_files_from_trigger(
                     picker_strategy,
                 )
                 set_surface_diagnostics(result, surface)
-                return await finish_upload_result(trigger, result, expected, timeout_ms)
+                if get_bool(result, 'success'):
+                    return await finish_upload_result(trigger, result, expected, timeout_ms)
+                # Auto mode treats a direct-input failure as a strategy failure,
+                # then continues to chooser interception before native fallback.
 
             attempts: JsonArray = []
             if picker_strategy in {'auto', 'intercept'}:
@@ -235,7 +238,7 @@ async def upload_files_from_trigger(
                     await native_stage.cleanup()
     except UploadPathError as exc:
         return exc.to_dict()
-    except (PydollException, InvalidScriptResponseError, OSError, TypeError, ValueError) as exc:
+    except (PydollException, InvalidScriptResponseError, KeyError, OSError, TypeError, ValueError) as exc:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
             f'Upload through trigger failed: {exc}',
