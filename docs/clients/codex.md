@@ -40,3 +40,21 @@ mcp_servers:
 ```
 
 Restart Codex after config changes.
+
+Keep the configured MCP server running for the whole browser task. Use one stable
+client identity and reuse the browser returned by `browser_launch`. Starting a
+second server against the same persistent profile returns `RESOURCE_LOCKED`.
+The server closes managed browsers during graceful shutdown while the persistent
+profile keeps its login state for the next session.
+
+Use `tab_list` as the authoritative tab count. The server reconciles the live Chrome targets
+and permits at most five tabs per browser. Keep the search tab open when working in an
+application tab. Do not assume a close succeeded until `tab_close` returns
+`confirmed_closed=true`; handle `DIALOG_PRESENT` with `dialog_list` and `dialog_handle`.
+
+For application forms, use `form_preflight`, `form_prepare`, `form_review`, and
+`form_submit_after_review` in that order. The final tool requires an explicit
+authorization mode and a single-use review token bound to the client, tab,
+document generation, and form fingerprint. It does not retry an unknown final
+click. Use `artifact_export` only with a server-owned artifact ID and a
+destination under the configured allowlist.

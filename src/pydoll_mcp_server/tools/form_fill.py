@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Annotated, TypedDict
 
 from pydantic import Field
@@ -11,7 +12,7 @@ from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
+from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
 from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_string, normalize_json_value
@@ -30,10 +31,12 @@ class FormFillField(TypedDict, total=False):
     selector: str
     role: str
     name: str
+    type: str
     value: str | int | float | bool | None
     checked: bool
     option_text: str
     mode: str
+    state_verification: str
 
 
 async def form_fill_fields(
@@ -61,6 +64,13 @@ async def form_fill_fields(
             json_schema_extra={'enum': ['auto', 'framework_safe', 'keyboard', 'blur']},
         ),
     ] = 'auto',
+    state_verification: Annotated[
+        str,
+        Field(
+            description='Required verification: dom, framework_event, blurred, or submission_ready.',
+            json_schema_extra={'enum': ['dom', 'framework_event', 'blurred', 'submission_ready']},
+        ),
+    ] = 'submission_ready',
     validation_timeout: Annotated[
         float,
         Field(description='Timeout for dependent validation and enabled controls.'),
@@ -72,6 +82,10 @@ async def form_fill_fields(
 ) -> JsonObject:
     if mode not in {'auto', 'framework_safe', 'keyboard', 'blur'}:
         return StructuredError(ErrorCode.INVALID_INPUT, f'Unsupported fill mode: {mode}').to_dict()
+    if state_verification not in {'dom', 'framework_event', 'blurred', 'submission_ready'}:
+        return StructuredError(
+            ErrorCode.INVALID_INPUT, f'Unsupported state_verification: {state_verification}'
+        ).to_dict()
     try:
         tab_info = get_registry().get_tab(client_id, tab_id)
     except StructuredError as exc:
@@ -92,6 +106,7 @@ async def form_fill_fields(
             'validate': validate,
             'include_values': include_values,
             'mode': mode,
+            'state_verification': state_verification,
         }
     )
 
@@ -100,7 +115,7 @@ async def form_fill_fields(
     try:
         async with tab_operation_lock(tab_id):
             result = await tab_info.pydoll_tab.execute_script(_fill_script(payload), return_by_value=True)
-            data = extract_script_object(result)
+            data = extract_normalized_object(result, 'form_fill')
             if expected_enabled_element_id:
                 dependent_control_enabled = await wait_expected_enabled(
                     tab_info,
@@ -183,9 +198,33 @@ async def form_fill_fields(
 
     used_modes = {str(item.get('mode_used', mode)) for item in filled if isinstance(item, dict)}
     mode_used = next(iter(used_modes)) if len(used_modes) == 1 else ('mixed' if used_modes else mode)
+    for item in filled:
+        if not isinstance(item, dict):
+            continue
+        dom_verified = bool(item.get('verified', False))
+        framework_verified = bool(item.get('framework_event', False)) and dom_verified
+        blurred_verified = bool(item.get('blurred', False)) and dom_verified
+        compatible = {
+            'dom': dom_verified,
+            'framework_event': framework_verified,
+            'blurred': blurred_verified,
+            'submission_ready': framework_verified and blurred_verified,
+        }[state_verification]
+        item['verification'] = 'verified' if compatible else 'inconclusive'
+        item['ready_for_submission'] = compatible and not item.get('validation_errors', [])
+        if not include_values:
+            item.pop('requested_value', None)
+    ready_for_submission = (
+        bool(filled)
+        and len(filled) == len(normalized_fields)
+        and all(bool(item.get('ready_for_submission', False)) for item in filled if isinstance(item, dict))
+    )
 
     return {
+        'contract_version': 2,
+        'operation_id': f'form_fill_{uuid.uuid4().hex[:16]}',
         'success': len(unfilled) == 0 and len(ambiguous) == 0,
+        'status': 'verified' if ready_for_submission else 'inconclusive',
         'filled': filled,
         'unfilled': unfilled,
         'ambiguous': ambiguous,
@@ -194,6 +233,9 @@ async def form_fill_fields(
         'pending_required': data.get('pending_required', []),
         'mode_requested': mode,
         'mode_used': mode_used,
+        'state_verification': state_verification,
+        'verification': 'verified' if ready_for_submission else 'inconclusive',
+        'ready_for_submission': ready_for_submission,
         'fallback_used': fallback_used,
         'field_valid': len(validation_errors) == 0 and not data.get('pending_required', []),
         'dependent_control_enabled': dependent_control_enabled,
@@ -319,9 +361,8 @@ function setValue(el, request) {
     if (tag === 'TEXTAREA' || (tag === 'INPUT' && (
         type === 'text' || type === 'email' || type === 'number'
         || type === 'tel' || type === 'url'))) {
-        const nativeSetter = Object.getOwnPropertyDescriptor(
-            HTMLInputElement.prototype, 'value'
-        ) || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+        const valuePrototype = tag === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(valuePrototype, 'value');
         if (nativeSetter && nativeSetter.set) {
             nativeSetter.set.call(el, value);
         } else {

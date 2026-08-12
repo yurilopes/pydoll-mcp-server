@@ -3,6 +3,13 @@
 ## 0.4.0b1 (Unreleased)
 
 ### Added
+- Added contract v2 application workflow tools: `form_preflight`, `form_prepare`,
+  `form_review`, `form_submit_after_review`, `application_domain_status`, and
+  controlled `artifact_export`
+- Added single-use review tokens bound to client, tab, document generation, and
+  form fingerprint for authorized submission
+- Added semantic upload states, typed submission outcomes, restart-safe profile
+  lease metadata, stale tab inventory protection, and one-tab close safety
 - Added `page_get_active_surface` for modal/dialog/form/viewport observation with fields, controls, progress, errors, and evidence
 - Added `element_find_by_text_candidates` for ranked text matching with ambiguity detection and filterable candidates
 - Added `element_resolve_again` for safe re-resolution of stale cached element handles
@@ -13,6 +20,10 @@
 - Added `AMBIGUOUS_ELEMENT` error code for cases where multiple candidates are too close to act safely
 
 ### Changed
+- Changed high-risk script consumers to use a common normalized result boundary
+  with explicit runtime types and structured retry information
+- Changed final submission classification so URL changes and modal disappearance
+  alone cannot be reported as confirmation
 - Changed `page_screenshot` and `element_screenshot` to save artifact files by default (`return_base64=false`)
 - Changed `element_click_by_text` to accept filter parameters and ambiguity threshold
 - Changed `element_click` to accept effect observation parameters

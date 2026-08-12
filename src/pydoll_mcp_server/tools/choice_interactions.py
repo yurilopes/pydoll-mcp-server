@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydoll.elements.web_element import WebElement
 
-from pydoll_mcp_server.browser.script_utils import extract_script_object
+from pydoll_mcp_server.browser.script_utils import extract_normalized_object
 from pydoll_mcp_server.json_types import JsonObject
 
 
@@ -16,9 +16,14 @@ async def set_choice_state(element: WebElement, checked: bool) -> JsonObject:
         const type = (target.type || '').toLowerCase();
         const role = (target.getAttribute('role') || '').toLowerCase();
         const nativeChoice = target.tagName === 'INPUT' && ['radio','checkbox'].includes(type);
-        const ariaChoice = ['radio','checkbox'].includes(role);
+        const ariaChoice = ['radio','checkbox','switch'].includes(role)
+            || target.getAttribute('aria-pressed') !== null
+            || target.getAttribute('aria-checked') !== null;
         const state = () => nativeChoice ? target.checked === true :
-            target.getAttribute('aria-checked') === 'true';
+            target.getAttribute('aria-checked') === 'true'
+            || target.getAttribute('aria-pressed') === 'true'
+            || ['checked','selected','active','on'].includes((target.getAttribute('data-state') || '').toLowerCase())
+            || target.classList.contains('selected') || target.classList.contains('is-selected');
         const visible = el => {{
             if (!el) return false;
             const rect = el.getBoundingClientRect();
@@ -31,14 +36,28 @@ async def set_choice_state(element: WebElement, checked: bool) -> JsonObject:
             has_associated_label: false, strategies_attempted: [], observed_checked: state()
         }};
         if (!nativeChoice && !ariaChoice) return {{error:'not_checkable', diagnostic}};
+        if (target.disabled || target.getAttribute('aria-disabled') === 'true')
+            return {{error:'disabled_control', diagnostic}};
         if (!{desired} && (type === 'radio' || role === 'radio'))
             return {{error:'radio_cannot_be_unchecked', diagnostic}};
-        if (state() === {desired}) return {{checked:state(), verified:true, strategy_used:'already_selected'}};
+        if (state() === {desired}) return {{
+            checked: state(),
+            indeterminate: target.indeterminate === true || target.getAttribute('aria-checked') === 'mixed',
+            verified: true,
+            strategy_used: 'already_selected'
+        }};
         if (ariaChoice && visible(target)) {{
             diagnostic.strategies_attempted.push('aria');
             target.click();
             diagnostic.observed_checked = state();
-            return {{checked:state(), verified:state(), clicked:true, strategy_used:'aria', diagnostic}};
+            return {{
+                checked: state(),
+                indeterminate: target.indeterminate === true || target.getAttribute('aria-checked') === 'mixed',
+                verified: state(),
+                clicked: true,
+                strategy_used: 'aria',
+                diagnostic
+            }};
         }}
         let label = target.closest('label');
         if (!label && target.id) label = document.querySelector('label[for="' + CSS.escape(target.id) + '"]');
@@ -49,9 +68,19 @@ async def set_choice_state(element: WebElement, checked: bool) -> JsonObject:
             node.click();
             return state() === {desired};
         }};
-        if (attempt('input', target)) return {{checked:state(), verified:true, strategy_used:'input'}};
+        if (attempt('input', target)) return {{
+            checked: state(),
+            indeterminate: target.indeterminate === true || target.getAttribute('aria-checked') === 'mixed',
+            verified: true,
+            strategy_used: 'input'
+        }};
         if (attempt('associated_label', label))
-            return {{checked:state(), verified:true, strategy_used:'associated_label'}};
+            return {{
+                checked: state(),
+                indeterminate: target.indeterminate === true || target.getAttribute('aria-checked') === 'mixed',
+                verified: true,
+                strategy_used: 'associated_label'
+            }};
         const group = target.closest(
             'fieldset, [role="radiogroup"], [role="group"], ' +
             '.form-group, .radio-group, .checkbox-group'
@@ -63,11 +92,16 @@ async def set_choice_state(element: WebElement, checked: bool) -> JsonObject:
                     (node.innerText || node.getAttribute('aria-label') || '').trim() === wanted);
             if (candidates.length > 1) return {{error:'ambiguous_group_option', diagnostic}};
             if (attempt('group_text', candidates[0]))
-                return {{checked:state(), verified:true, strategy_used:'group_text'}};
+                return {{
+                    checked: state(),
+                    indeterminate: target.indeterminate === true || target.getAttribute('aria-checked') === 'mixed',
+                    verified: true,
+                    strategy_used: 'group_text'
+                }};
         }}
         diagnostic.observed_checked = state();
         return {{error:'choice_state_not_verified', diagnostic}};
         """,
         return_by_value=True,
     )
-    return extract_script_object(result)
+    return extract_normalized_object(result, 'set_choice_state')

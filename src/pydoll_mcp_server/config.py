@@ -155,6 +155,7 @@ class LimitsConfig(BaseSettings):
     max_text_chars: int = Field(default=20000, description='Default max chars for page_get_text')
     max_js_code: int = Field(default=20000, description='Max JS code characters')
     max_js_result: int = Field(default=262144, description='Max JS result size in bytes (256 KiB)')
+    max_tabs_per_browser: int = Field(default=5, ge=1, le=100, description='Maximum live tabs per browser')
 
 
 @lru_cache

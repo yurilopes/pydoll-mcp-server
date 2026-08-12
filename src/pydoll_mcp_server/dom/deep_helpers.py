@@ -22,7 +22,7 @@ async def raw_from_pydoll_element(
     tag = str(element.tag_name or '').lower()
     attrs = element_attributes(element)
     selector = _selector_from_attrs(tag, attrs)
-    text = await get_element_text(element)
+    text = '' if tag in {'input', 'textarea'} else await get_element_text(element)
     return {
         'element_id': f'el_deep_{uuid.uuid4().hex[:12]}',
         'tag': tag,
@@ -52,10 +52,18 @@ def element_attributes(element: WebElement) -> dict[str, str]:
         'src',
         'alt',
         'title',
-        'value',
         'role',
         'aria-label',
         'data-testid',
+        'required',
+        'disabled',
+        'readonly',
+        'aria-required',
+        'aria-disabled',
+        'aria-readonly',
+        'aria-checked',
+        'aria-selected',
+        'aria-pressed',
     ):
         value = get_element_attribute(element, name)
         if value is not None:
@@ -127,6 +135,7 @@ def cache_deep_nodes(tab_info: TabInfo, raw_elements: list[DeepRawElement]) -> l
                 'element_id': element_id,
                 'tag': entry.tag_name,
                 'text': entry.text_summary,
+                'value_length': raw.get('value_length', 0),
                 'attrs': attrs,
                 'selector_hint': entry.selector_hint,
                 'xpath_hint': entry.xpath_hint,

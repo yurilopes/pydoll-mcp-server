@@ -10,8 +10,8 @@ from pydoll_mcp_server.browser.pydoll_compat import get_tab_title, get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import (
     InvalidScriptResponseError,
-    extract_script_array,
-    extract_script_object,
+    extract_normalized_array,
+    extract_normalized_object,
 )
 from pydoll_mcp_server.browser.snapshots import get_snapshot_manager
 from pydoll_mcp_server.config import get_limits_config
@@ -147,22 +147,78 @@ async def page_get_accessibility_tree(
     for(const c of e.children||[])walk(c,d+1);if(e.shadowRoot)for(const c of e.shadowRoot.children)walk(c,d+1);}}
     walk(document.documentElement,0);return out;}})()"""
     try:
-        nodes = extract_script_array(await tab.execute_script(script, return_by_value=True))
+        nodes = extract_normalized_array(
+            await tab.execute_script(script, return_by_value=True), 'page_get_accessibility_tree'
+        )
         return {'success': True, 'nodes': nodes, 'count': len(nodes), 'partial': len(nodes) >= max_nodes}
     except Exception as exc:
         return StructuredError(ErrorCode.UNSUPPORTED, f'Accessibility tree unavailable: {exc}').to_dict()
 
 
 async def frame_list(client_id: str, tab_id: str) -> JsonObject:
-    result = await page_get_tree_deep(client_id, tab_id, max_nodes=1, include_shadow=False, include_iframes=True)
-    if not result.get('success'):
-        return result
-    return {
-        'success': True,
-        'frames': get_array(result, 'frames', []),
-        'partial': bool(result.get('partial', False)),
-        'errors': get_array(result, 'errors', []),
-    }
+    try:
+        tab_info = get_registry().get_tab(client_id, tab_id)
+        result = await tab_info.pydoll_tab.execute_script(
+            """
+            const out = [];
+            for (const [index, frame] of [...document.querySelectorAll('iframe,frame')].entries()) {
+                const rect = frame.getBoundingClientRect();
+                const style = getComputedStyle(frame);
+                const src = frame.getAttribute('src') || '';
+                let sameOrigin = false;
+                let accessible = false;
+                let inaccessibleReason = '';
+                try {
+                    sameOrigin = Boolean(frame.contentDocument);
+                    accessible = sameOrigin;
+                    if (!sameOrigin) inaccessibleReason = 'cross_origin_or_not_loaded';
+                } catch (error) {
+                    inaccessibleReason = 'cross_origin';
+                }
+                const observedUrl = (() => {
+                    try { return frame.contentWindow?.location?.href || src; }
+                    catch (error) { return src; }
+                })();
+                out.push({
+                    frame_id: frame.id || `frame_${index}`,
+                    src,
+                    origin: (() => {
+                        try { return new URL(src, location.href).origin; }
+                        catch (error) { return ''; }
+                    })(),
+                    parent_url: location.href,
+                    bounds: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
+                    visible: rect.width > 0 && rect.height > 0
+                        && style.display !== 'none' && style.visibility !== 'hidden',
+                    same_origin: sameOrigin,
+                    accessible,
+                    inaccessible_reason: inaccessibleReason,
+                    navigable: Boolean(observedUrl),
+                    navigation_handoff: {
+                        url: observedUrl,
+                        provenance: observedUrl === src ? 'iframe_src' : 'observed_content_window'
+                    }
+                });
+            }
+            return out;
+            """,
+            return_by_value=True,
+        )
+        frames = extract_normalized_array(result, 'frame_list')
+        return {
+            'contract_version': 2,
+            'operation_id': f'frame_list_{int(time.time() * 1000)}',
+            'success': True,
+            'status': 'verified',
+            'frames': frames,
+            'partial': False,
+            'errors': [],
+            'parent_url': await get_tab_url(tab_info.pydoll_tab),
+        }
+    except StructuredError as exc:
+        return exc.to_dict()
+    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
+        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Frame listing failed: {exc}', retryable=True).to_dict()
 
 
 async def frame_snapshot(client_id: str, tab_id: str, frame_path: list[str], max_nodes: int = 300) -> JsonObject:
@@ -191,7 +247,7 @@ async def _scroll(client_id: str, tab_id: str, expression: str) -> JsonObject:
             f'{expression};return {{x:window.scrollX,y:window.scrollY}};',
             return_by_value=True,
         )
-        return {'success': True, 'position': extract_script_object(result)}
+        return {'success': True, 'position': extract_normalized_object(result, 'page_scroll')}
     except StructuredError as exc:
         return exc.to_dict()
     except (PydollException, InvalidScriptResponseError) as exc:

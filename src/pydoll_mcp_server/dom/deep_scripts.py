@@ -27,14 +27,22 @@ DEEP_TREE_JS = """
     }
 
     function textOf(el) {
-        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el.value || '';
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return '';
         return (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    }
+
+    function valueLengthOf(el) {
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return String(el.value || '').length;
+        if (el.isContentEditable) return String(el.textContent || '').length;
+        return 0;
     }
 
     function attrsOf(el) {
         const allowed = [
             'id', 'class', 'name', 'type', 'placeholder', 'href', 'src',
-            'alt', 'title', 'value', 'role', 'aria-label', 'data-testid'
+            'alt', 'title', 'role', 'aria-label', 'data-testid', 'required',
+            'disabled', 'readonly', 'aria-required', 'aria-disabled', 'aria-readonly',
+            'aria-checked', 'aria-selected', 'aria-pressed'
         ];
         const attrs = {};
         for (const attr of el.attributes || []) {
@@ -100,6 +108,7 @@ DEEP_TREE_JS = """
             elementId: prefix + counter++,
             tag,
             text: textOf(el).slice(0, 200),
+            value_length: valueLengthOf(el),
             attrs: attrsOf(el),
             selector_hint: selectorHint(el),
             xpath_hint: xpathHint(el),
@@ -226,7 +235,9 @@ DEEP_FIND_JS = """
         const attrs = {};
         for (const attr of el.attributes || []) {
             const name = attr.name.toLowerCase();
-            if (['id', 'class', 'name', 'type', 'placeholder', 'role', 'aria-label', 'data-testid'].includes(name)) {
+        if (['id', 'class', 'name', 'type', 'placeholder', 'role', 'aria-label', 'data-testid',
+            'required', 'disabled', 'readonly', 'aria-required', 'aria-disabled', 'aria-readonly',
+            'aria-checked', 'aria-selected', 'aria-pressed'].includes(name)) {
                 attrs[name] = (attr.value || '').slice(0, 500);
             }
         }
@@ -234,8 +245,14 @@ DEEP_FIND_JS = """
     }
 
     function textOf(el) {
-        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el.value || '';
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return '';
         return (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    }
+
+    function valueLengthOf(el) {
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return String(el.value || '').length;
+        if (el.isContentEditable) return String(el.textContent || '').length;
+        return 0;
     }
 
     function pushMatch(el, framePath, shadowPath) {
@@ -247,6 +264,7 @@ DEEP_FIND_JS = """
             elementId: prefix + counter++,
             tag: (el.tagName || '').toLowerCase(),
             text: textOf(el).slice(0, 200),
+            value_length: valueLengthOf(el),
             attrs: attrsOf(el),
             selector_hint: selectorHint(el),
             xpath_hint: structuralXPath(el),

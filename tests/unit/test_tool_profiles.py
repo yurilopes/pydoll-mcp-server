@@ -27,16 +27,21 @@ def _names(value: str) -> frozenset[str]:
 
 EXPECTED_AGENT_NAMES = _names(
     """
-    health_check server_status browser_launch browser_list browser_close tab_list tab_activate tab_close tab_recover
+    health_check server_status browser_launch browser_list browser_close browser_attach tab_list tab_activate
+    tab_close tab_recover
     tab_new tab_health_check profile_list page_goto page_reload page_back page_forward page_wait_for_url page_get_text
-    page_snapshot page_screenshot page_get_interactive_summary page_get_active_surface page_scroll page_scroll_to
-    element_find element_find_by_role element_find_by_text element_find_by_label element_find_by_placeholder
+    page_snapshot page_screenshot page_get_tree_deep page_get_interactive_summary page_get_active_surface frame_list
+    page_scroll page_scroll_to
+    element_find element_find_deep element_find_by_role element_find_by_text element_find_by_label
+    element_find_by_placeholder
     element_resolve_again element_click element_click_by_text element_type element_fill element_get_text
     element_get_attribute element_get_state element_select_option element_check element_uncheck keyboard_press
-    form_snapshot form_errors form_fill_fields form_select_choice combobox_get_options select_get_options
+    form_snapshot form_errors form_fill_fields form_select_choice form_preflight form_review form_prepare
+    form_submit_after_review application_domain_status combobox_get_options select_get_options
     combobox_type_and_select combobox_select_option page_wait_for_text page_wait_text_gone page_wait_for_selector
     page_wait_for_network_idle element_wait_for_state element_wait_value operation_cancel page_click_primary_action
-    submission_wait_for_confirmation artifact_get_paths artifact_prepare_upload upload_files upload_files_from_trigger
+    submission_wait_for_confirmation artifact_get_paths artifact_export artifact_prepare_upload upload_files
+    upload_files_from_trigger
     file_upload_state
     """
 )
@@ -56,7 +61,7 @@ def test_full_profile_preserves_all_public_names_without_duplicates() -> None:
     names = get_exposed_tool_names(ToolProfile.FULL)
 
     assert names == tuple(PUBLIC_TOOL_NAMES)
-    assert len(names) == 145
+    assert len(names) == 151
     assert len(names) == len(set(names))
     assert set(TOOL_METADATA) == set(names)
 
@@ -75,7 +80,7 @@ def test_linkedin_profile_is_agent_plus_linkedin_tools() -> None:
     linkedin_names = set(get_exposed_tool_names(ToolProfile.LINKEDIN))
 
     assert linkedin_names == EXPECTED_AGENT_NAMES | EXPECTED_LINKEDIN_NAMES
-    assert len(linkedin_names) == 79
+    assert len(linkedin_names) == 89
     assert 'linkedin_easy_apply_submit' in linkedin_names
     assert 'network_replay_request' not in linkedin_names
 
@@ -174,6 +179,7 @@ async def test_priority_tools_publish_parameter_descriptions_and_enums() -> None
     assert _schema_property(tools['browser_launch'], 'profile_mode').get('enum') == ['persistent', 'temporary']
     assert _schema_property(tools['element_find'], 'strategy').get('enum') == ['css', 'xpath', 'text']
     assert _schema_property(tools['element_click'], 'click_strategy').get('enum') == [
+        'auto',
         'native',
         'center_mouse',
         'dispatch_pointer_sequence',

@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import time
+from pathlib import Path
 
+from pydoll_mcp_server.browser.locks import browser_operation_lock
+from pydoll_mcp_server.browser.models import ProfileInfo, ProfileMode
+from pydoll_mcp_server.browser.profile_index import get_profile_index
+from pydoll_mcp_server.browser.profile_leases import get_profile_lease_manager
+from pydoll_mcp_server.browser.pydoll_compat import (
+    create_chromium_options,
+    get_browser_ws_address,
+    get_tab_target_id,
+    get_tab_title,
+    get_tab_url,
+)
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.config import get_config
+from pydoll_mcp_server.browser.tab_reconciliation import TabSyncResult, sync_browser_tabs
+from pydoll_mcp_server.config import get_config, get_limits_config
 from pydoll_mcp_server.diagnostics.trace import TraceEvent, get_trace_manager
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject
@@ -30,7 +45,7 @@ def health_check(include_runtime: bool = False) -> JsonObject:
     return result
 
 
-def server_status(
+async def server_status(
     client_id: str = 'anonymous',
     include_clients: bool = False,
     include_tool_names: bool = False,
@@ -57,10 +72,19 @@ def server_status(
         result['tool_names'] = tool_names
     try:
         browser_values: JsonArray = []
+        sync_results: list[TabSyncResult] = []
         for browser in registry.list_browsers(client_id):
-            browser_values.append(browser.summary())
+            async with browser_operation_lock(browser.browser_id):
+                sync = await sync_browser_tabs(client_id, browser.browser_id)
+            sync_results.append(sync)
+            browser_summary = browser.summary()
+            browser_summary.update(sync.summary(get_limits_config().max_tabs_per_browser))
+            browser_values.append(browser_summary)
         result['browsers'] = browser_values
         result['tabs'] = len(registry.list_tabs(client_id))
+        result['actual_tabs'] = sum(sync.actual_count for sync in sync_results)
+        result['managed_tabs'] = len(registry.list_tabs(client_id))
+        result['max_tabs_per_browser'] = get_limits_config().max_tabs_per_browser
     except Exception as exc:
         result['browsers_error'] = str(exc)
     if include_clients:
@@ -111,6 +135,11 @@ def _dynamic_capabilities() -> JsonObject:
                 'form_snapshot': 'form_snapshot',
                 'form_errors': 'form_errors',
                 'form_fill_fields': 'form_fill_fields',
+                'form_preflight': 'preflight',
+                'form_review': 'review',
+                'form_prepare': 'prepare',
+                'form_submit_after_review': 'authorized_submit',
+                'application_domain_status': 'domain_restrictions',
                 'page_click_primary_action': 'primary_action',
             }
         ),
@@ -130,6 +159,7 @@ def _dynamic_capabilities() -> JsonObject:
                 'upload_files': 'upload',
                 'file_upload_state': 'upload_state',
                 'artifact_get_paths': 'artifact_paths',
+                'artifact_export': 'artifact_export',
                 'artifact_import': 'artifact_import',
                 'artifact_prepare_upload': 'artifact_prepare_upload',
             }
@@ -146,6 +176,10 @@ async def diagnostics_snapshot(client_id: str = 'anonymous', include_clients: bo
     registry = get_registry()
     config = get_config()
     browsers = registry.list_browsers(client_id)
+    sync_results: list[TabSyncResult] = []
+    for browser in browsers:
+        async with browser_operation_lock(browser.browser_id):
+            sync_results.append(await sync_browser_tabs(client_id, browser.browser_id))
     tabs = registry.list_tabs(client_id)
     get_trace_manager().add_event_to_active(
         client_id,
@@ -162,10 +196,19 @@ async def diagnostics_snapshot(client_id: str = 'anonymous', include_clients: bo
         'uptime_seconds': round(get_server_state().uptime_seconds, 1),
         'auth_mode': 'token' if config.auth_enabled else 'none',
         'browsers': [
-            {'browser_id': b.browser_id, 'headless': b.headless, 'health': b.health.value, 'tabs': len(b.tabs)}
-            for b in browsers
+            {
+                'browser_id': b.browser_id,
+                'headless': b.headless,
+                'health': b.health.value,
+                'tabs': len(b.tabs),
+                **sync.summary(get_limits_config().max_tabs_per_browser),
+            }
+            for b, sync in zip(browsers, sync_results, strict=True)
         ],
         'tabs': [{'tab_id': t.tab_id, 'url': t.url, 'health': t.health.value} for t in tabs],
+        'actual_tabs': sum(item.actual_count for item in sync_results),
+        'managed_tabs': len(tabs),
+        'max_tabs_per_browser': get_limits_config().max_tabs_per_browser,
         'resources': get_server_state().summary(),
         'clients': list(registry.list_clients()) if include_clients else [],
     }
@@ -213,18 +256,162 @@ async def trace_cleanup(client_id: str, older_than_seconds: int = 86400) -> Json
     return {'success': True, 'cleaned': get_trace_manager().cleanup(client_id, older_than_seconds)}
 
 
-async def browser_attach(client_id: str, browser_id: str) -> JsonObject:
+async def browser_attach(client_id: str, browser_id: str = '', profile_id: str = '') -> JsonObject:
+    registry = get_registry()
+    if browser_id:
+        try:
+            info = registry.get_browser(client_id, browser_id)
+        except StructuredError:
+            info = None
+        if info is not None:
+            return {
+                'success': True,
+                'browser_id': info.browser_id,
+                'profile_id': info.profile.profile_id if info.profile else '',
+                'reconnected': False,
+                'new_instance': False,
+                'status': 'already_attached',
+            }
+        if not profile_id:
+            profile_id = browser_id
+    if not profile_id:
+        return StructuredError(ErrorCode.INVALID_INPUT, 'profile_id is required for restart-safe attach.').to_dict()
+
+    index_entry = get_profile_index().get(profile_id)
+    if index_entry is not None and index_entry.owner_client_id != client_id:
+        return StructuredError(ErrorCode.PERMISSION_DENIED, 'Profile belongs to another client.').to_dict()
+    metadata = get_profile_lease_manager().find_metadata(profile_id, client_id)
+    if metadata is None:
+        return StructuredError(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f'No live lease metadata was found for profile {profile_id}.',
+            retryable=False,
+            recovery_hint='Use browser_launch with the explicit profile_id when no browser process is running.',
+        ).to_dict()
+    raw_path = metadata.get('profile_path')
+    raw_port = metadata.get('cdp_port')
+    profile_path = Path(str(raw_path or '')).resolve(strict=False)
+    config = get_config()
+    allowed_roots = (config.profiles_dir.resolve(strict=False), config.tmp_dir.resolve(strict=False))
+    if not _inside_any(profile_path, allowed_roots):
+        return StructuredError(ErrorCode.PERMISSION_DENIED, 'Lease profile path is outside managed roots.').to_dict()
+    if not isinstance(raw_port, int) or raw_port <= 0:
+        return _handoff(profile_id, 'Lease metadata has no valid CDP port.')
+    browser_pid = _safe_int(metadata.get('browser_pid'))
+    if browser_pid is not None and not _process_is_alive(browser_pid):
+        get_profile_lease_manager().release_by_profile(str(profile_path))
+        return _stale_lease(profile_id, 'The leased browser process is no longer alive.')
     try:
-        info = get_registry().get_browser(client_id, browser_id)
-    except StructuredError as exc:
-        return exc.to_dict()
-    if info.client_id != client_id:
-        return StructuredError(ErrorCode.PERMISSION_DENIED, 'Browser belongs to another client').to_dict()
-    return StructuredError(
-        ErrorCode.UNSUPPORTED,
-        'Browser attach is not supported after server restart.',
-        recovery_hint='Use browser_launch to create a new browser instance.',
-    ).to_dict()
+        ws_address = await asyncio.wait_for(get_browser_ws_address(raw_port), timeout=5.0)
+    except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
+        return _handoff(profile_id, f'CDP endpoint could not be validated: {exc}')
+
+    lease = get_profile_lease_manager().acquire(str(profile_path), client_id, profile_id)
+    if lease is None:
+        return StructuredError(
+            ErrorCode.RESOURCE_LOCKED,
+            f'Profile {profile_id} is currently owned by another process.',
+            retryable=True,
+            details={'profile_id': profile_id, 'status': 'profile_locked'},
+        ).to_dict()
+
+    browser = None
+    try:
+        from pydoll.browser import Chrome
+
+        browser = Chrome(options=create_chromium_options(), connection_port=raw_port)
+        first_tab = await asyncio.wait_for(browser.connect(ws_address), timeout=15.0)
+        mode = ProfileMode.PERSISTENT
+        if index_entry is not None and index_entry.mode == ProfileMode.TEMPORARY.value:
+            mode = ProfileMode.TEMPORARY
+        profile = ProfileInfo(profile_id, client_id, mode, str(profile_path))
+        browser_info = registry.register_browser(
+            client_id,
+            browser,
+            profile,
+            headless=False,
+            browser_process_id=browser_pid,
+        )
+        registry.register_tab(
+            client_id,
+            browser_info.browser_id,
+            first_tab,
+            target_id=get_tab_target_id(first_tab),
+            url=await get_tab_url(first_tab),
+            title=await get_tab_title(first_tab),
+        )
+        sync = await sync_browser_tabs(client_id, browser_info.browser_id)
+        attached_tabs = registry.list_tabs(client_id, browser_info.browser_id)
+        lease.write_metadata(
+            browser_pid,
+            raw_port,
+            [tab.target_id for tab in attached_tabs],
+            [tab.url for tab in attached_tabs],
+        )
+        return {
+            'success': True,
+            'status': 'reconnected',
+            'reconnected': True,
+            'new_instance': False,
+            'browser_id': browser_info.browser_id,
+            'profile_id': profile_id,
+            'tabs': [tab.summary() for tab in attached_tabs],
+            'reconciliation': sync.summary(get_limits_config().max_tabs_per_browser),
+        }
+    except Exception as exc:
+        get_profile_lease_manager().release(lease)
+        return _handoff(profile_id, f'Browser attach failed: {exc}')
+
+
+def _handoff(profile_id: str, reason: str) -> JsonObject:
+    return {
+        'success': False,
+        'status': 'requires_handoff',
+        'reconnected': False,
+        'new_instance': False,
+        'profile_id': profile_id,
+        'handoff': True,
+        'message': reason,
+        'recovery_hint': 'Verify the browser process manually, then call browser_launch or attach again.',
+    }
+
+
+def _stale_lease(profile_id: str, reason: str) -> JsonObject:
+    return {
+        'success': False,
+        'status': 'stale_lease',
+        'reconnected': False,
+        'new_instance': False,
+        'profile_id': profile_id,
+        'message': reason,
+        'recovery_hint': 'The profile may be launched again after the stale lease is released.',
+    }
+
+
+def _inside_any(path: Path, roots: tuple[Path, ...]) -> bool:
+    return any(_is_relative_to(path, root) for root in roots)
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _process_is_alive(process_id: int) -> bool:
+    try:
+        os.kill(process_id, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _not_found(kind: str, resource_id: str, client_id: str) -> JsonObject:

@@ -25,6 +25,7 @@ from pydoll_mcp_server.server_state import (
 )
 from pydoll_mcp_server.tool_catalog import register_tools
 from pydoll_mcp_server.tool_metadata import ToolProfile, parse_tool_profile
+from pydoll_mcp_server.tools.browser import shutdown_browsers
 from pydoll_mcp_server.tools.diagnostics import (
     browser_attach,
     diagnostics_snapshot,
@@ -80,7 +81,10 @@ def create_app() -> Starlette:
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncGenerator[None, None]:
         async with session_manager.run():
-            yield
+            try:
+                yield
+            finally:
+                await shutdown_browsers()
 
     return Starlette(
         debug=False,

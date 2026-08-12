@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import json
+from urllib.parse import quote
+
 
 def fill_script(payload: str) -> str:
+    encoded_payload = json.dumps(quote(payload, safe=''))
     return f"""
-    const payload = {payload};
+    function(){{
+    const payload = JSON.parse(decodeURIComponent({encoded_payload}));
     const value = String(payload.value ?? '');
     const events = payload.events || [];
     const tag = this.tagName || '';
+    const observedEvents = [];
+    for (const eventName of events) this.addEventListener(
+        eventName, () => observedEvents.push(eventName), {{once: true}}
+    );
     if (payload.mode === 'blur' && typeof this.focus === 'function') this.focus();
     function nativeSet(el, proto, prop, next) {{
         const descriptor = Object.getOwnPropertyDescriptor(proto, prop);
@@ -40,9 +49,87 @@ def fill_script(payload: str) -> str:
         tag,
         value: this.value ?? this.textContent ?? '',
         selected_text: selectedText,
+        selected_value: tag === 'SELECT' && this.selectedIndex >= 0 ? this.options[this.selectedIndex].value : '',
+        framework_event: observedEvents.length > 0,
+        event_names: observedEvents,
+        blurred: events.includes('blur'),
+        validity: typeof this.checkValidity === 'function'
+            ? (this.checkValidity() ? 'valid' : 'invalid') : 'not_yet_validated',
+        errors: [],
         changed: this.dataset ? this.dataset.changed === 'true' : false,
-        blurred: this.dataset ? this.dataset.blurred === 'true' : false
+        controlled_value_survived: false
     }};
+    }}
+    """
+
+
+def fill_reference_script(reference: str, payload: str) -> str:
+    """Fill an exact page reference when a cached WebElement cannot be trusted."""
+
+    reference_literal = json.dumps(reference)
+    return f"""
+    (() => {{
+        const reference = {reference_literal};
+        let target = null;
+        if (reference.startsWith('/')) {{
+            target = document.evaluate(
+                reference, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+            ).singleNodeValue;
+        }} else {{
+            try {{ target = document.querySelector(reference); }} catch (error) {{ target = null; }}
+        }}
+        if (!target) return {{error: 'stale_element'}};
+        if (typeof target.scrollIntoView === 'function') target.scrollIntoView({{block: 'center'}});
+        return ({fill_script(payload)}).call(target);
+    }})()
+    """
+
+
+def read_filled_state_reference_script(reference: str) -> str:
+    """Read observable state from the same exact page reference used for filling."""
+
+    reference_literal = json.dumps(reference)
+    return f"""
+    (() => {{
+        const reference = {reference_literal};
+        let target = null;
+        if (reference.startsWith('/')) {{
+            target = document.evaluate(
+                reference, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+            ).singleNodeValue;
+        }} else {{
+            try {{ target = document.querySelector(reference); }} catch (error) {{ target = null; }}
+        }}
+        if (!target) return {{error: 'stale_element'}};
+        const value = target.type === 'password' ? '' : (target.value ?? target.textContent ?? '');
+        const errors = [];
+        const described = (target.getAttribute('aria-describedby') || '').split(/\\s+/).filter(Boolean);
+        for (const id of described) {{
+            const node = document.getElementById(id);
+            if (node && (node.innerText || node.textContent || '').trim())
+                errors.push((node.innerText || node.textContent || '').trim());
+        }}
+        const selected = target.tagName === 'SELECT' && target.selectedIndex >= 0
+            ? target.options[target.selectedIndex] : null;
+        return {{
+            tag: target.tagName || '', input_type: target.type || '', value,
+            selected_text: selected ? selected.text : '', selected_value: selected ? selected.value : '',
+            checked: target.checked === true, indeterminate: target.indeterminate === true,
+            aria_checked: target.getAttribute('aria-checked') || '',
+            aria_selected: target.getAttribute('aria-selected') || '',
+            aria_pressed: target.getAttribute('aria-pressed') || '',
+            validity: typeof target.checkValidity === 'function'
+                ? (target.checkValidity() ? 'valid' : 'invalid') : 'not_yet_validated',
+            errors, disabled: !!target.disabled,
+            enabled: !target.disabled && target.getAttribute('aria-disabled') !== 'true',
+            read_only: !!target.readOnly || target.getAttribute('aria-readonly') === 'true',
+            visible: Boolean(target.getClientRects().length),
+            value_present: String(value).trim().length > 0,
+            framework_value: String(value).trim().length > 0 ? 'present' : 'absent',
+            blurred: document.activeElement !== target,
+            ready_for_submission: false
+        }};
+    }})()
     """
 
 
@@ -71,7 +158,11 @@ def combobox_options_script(max_options: int) -> str:
             const rect = option.getBoundingClientRect();
             out.push({{
                 text: (option.innerText || option.textContent || '').trim(),
-                selected: option.getAttribute('aria-selected') === 'true',
+                value: option.getAttribute('data-value') || option.getAttribute('value') || option.id || '',
+                selected: option.getAttribute('aria-selected') === 'true'
+                    || option.getAttribute('data-state') === 'selected'
+                    || option.classList.contains('selected'),
+                disabled: option.getAttribute('aria-disabled') === 'true',
                 id: option.id || '',
                 bounds: {{x: rect.x, y: rect.y, width: rect.width, height: rect.height}}
             }});
@@ -157,22 +248,69 @@ def form_snapshot_script(max_fields: int) -> str:
         }}
         return [...new Set(errors.filter(Boolean))];
     }}
+    function valueFor(el) {{
+        if (el.type === 'password') return '';
+        return String(el.value ?? el.textContent ?? '');
+    }}
+    function optionLabels(el) {{
+        if (el.tagName !== 'SELECT') return [];
+        return [...el.options].slice(0, 100).map(option => ({{
+            label: (option.text || option.label || '').trim(),
+            value: option.value || '',
+            selected: option.selected,
+            disabled: option.disabled
+        }}));
+    }}
+    function validityFor(el, errors) {{
+        if (errors.length) return 'invalid';
+        if (typeof el.checkValidity === 'function') return el.checkValidity() ? 'valid' : 'invalid';
+        return 'not_yet_validated';
+    }}
     for (const el of document.querySelectorAll(selectors)) {{
         if (fields.length >= {max(1, min(max_fields, 500))}) break;
         if (!visible(el)) continue;
         const rect = el.getBoundingClientRect();
+        const value = valueFor(el);
+        const errors = errorsFor(el);
+        const selectedOption = el.tagName === 'SELECT' && el.selectedIndex >= 0
+            ? el.options[el.selectedIndex] : null;
+        const labels = labelFor(el);
         fields.push({{
+            field_key: selectorHint(el) + '|' + (labels[0] || el.name || el.type || ''),
             tag: el.tagName.toLowerCase(),
             type: el.type || '',
             role: el.getAttribute('role') || '',
             name: el.name || '',
-            labels: labelFor(el),
+            visible: true,
+            enabled: !el.disabled && el.getAttribute('aria-disabled') !== 'true',
+            labels,
             placeholder: el.getAttribute('placeholder') || '',
-            value_length: String(el.value ?? el.textContent ?? '').length,
+            value_length: value.length,
+            value_present: value.trim().length > 0,
+            empty: value.trim().length === 0,
+            value: '',
             required: !!el.required || el.getAttribute('aria-required') === 'true',
             disabled: !!el.disabled,
+            read_only: !!el.readOnly || el.getAttribute('aria-readonly') === 'true',
+            framework_value: 'unknown',
+            framework_event: false,
+            controlled_value_survived: false,
+            blurred: false,
             checked: el.checked ?? null,
-            errors: errorsFor(el),
+            indeterminate: el.indeterminate ?? false,
+            selected_label: selectedOption ? (selectedOption.text || selectedOption.label || '').trim() : '',
+            selected_value: selectedOption ? selectedOption.value || '' : '',
+            option_labels: optionLabels(el),
+            aria_checked: el.getAttribute('aria-checked') || '',
+            aria_selected: el.getAttribute('aria-selected') || '',
+            aria_pressed: el.getAttribute('aria-pressed') || '',
+            validity: validityFor(el, errors),
+            errors,
+            blocker: ((el.required || el.getAttribute('aria-required') === 'true') && !value.trim())
+                ? 'missing_required' : (errors.length ? 'invalid' : ''),
+            ready_for_submission: ((!el.required && el.getAttribute('aria-required') !== 'true')
+                || value.trim().length > 0)
+                && errors.length === 0 && !el.disabled,
             nearest_heading: nearestHeading(el),
             selector_hint: selectorHint(el),
             bounds: {{x: rect.x, y: rect.y, width: rect.width, height: rect.height}}

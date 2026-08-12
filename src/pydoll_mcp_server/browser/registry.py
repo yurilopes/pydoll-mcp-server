@@ -24,6 +24,7 @@ from pydoll_mcp_server.json_types import JsonObject
 class BrowserRegistry:
     def __init__(self) -> None:
         self._clients: dict[str, ClientSession] = {}
+        self._closed_tabs: set[tuple[str, str]] = set()
 
     def get_or_create_client(self, client_id: str) -> ClientSession:
         if client_id not in self._clients:
@@ -69,8 +70,10 @@ class BrowserRegistry:
         client_id: str,
         browser_id: str,
         pydoll_tab: Tab,
+        target_id: str = '',
         url: str = '',
         title: str = '',
+        discovered: bool = False,
     ) -> TabInfo:
         client = self._clients.get(client_id)
         if not client:
@@ -85,9 +88,22 @@ class BrowserRegistry:
             url=url,
             title=title,
             pydoll_tab=pydoll_tab,
+            target_id=target_id,
+            discovered=discovered,
         )
         client.browsers[browser_id].tabs[tab_id] = info
         return info
+
+    def find_tab_by_target(
+        self,
+        client_id: str,
+        browser_id: str,
+        target_id: str,
+    ) -> TabInfo | None:
+        for tab in self.list_tabs(client_id, browser_id):
+            if tab.target_id == target_id:
+                return tab
+        return None
 
     def get_browser(self, client_id: str, browser_id: str) -> BrowserInfo:
         client = self._clients.get(client_id)
@@ -120,6 +136,22 @@ class BrowserRegistry:
         if not client:
             return []
         return list(client.browsers.values())
+
+    def find_by_profile(self, client_id: str, profile_id: str) -> BrowserInfo | None:
+        return next(
+            (
+                browser
+                for browser in self.list_browsers(client_id)
+                if browser.profile and browser.profile.profile_id == profile_id
+            ),
+            None,
+        )
+
+    def list_all_browsers(self) -> list[BrowserInfo]:
+        browsers: list[BrowserInfo] = []
+        for client in self._clients.values():
+            browsers.extend(client.browsers.values())
+        return browsers
 
     def list_tabs(
         self,
@@ -158,6 +190,12 @@ class BrowserRegistry:
             if tab_id in browser.tabs:
                 del browser.tabs[tab_id]
                 return
+
+    def mark_tab_closed(self, client_id: str, tab_id: str) -> None:
+        self._closed_tabs.add((client_id, tab_id))
+
+    def was_tab_closed(self, client_id: str, tab_id: str) -> bool:
+        return (client_id, tab_id) in self._closed_tabs
 
     def update_tab_health(
         self,

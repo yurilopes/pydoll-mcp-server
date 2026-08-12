@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -68,18 +69,34 @@ class TabInfo:
     browser_id: str
     client_id: str
     pydoll_tab: Tab = field(repr=False)
+    target_id: str = ''
     url: str = ''
     title: str = ''
     health: ResourceHealth = ResourceHealth.HEALTHY
     document_generation: int = 0
+    discovered: bool = False
+    close_pending: bool = False
+    one_tab_safety_blocked: bool = False
+    created_at: float = field(default_factory=time.time)
+    last_sync_at: float = 0.0
+    last_sync_error: str = ''
+    active: bool = False
 
     def summary(self) -> JsonObject:
         return {
             'tab_id': self.tab_id,
             'browser_id': self.browser_id,
+            'target_id': self.target_id,
             'url': self.url,
             'title': self.title,
             'health': self.health.value,
+            'discovered': self.discovered,
+            'close_pending': self.close_pending,
+            'one_tab_safety_blocked': self.one_tab_safety_blocked,
+            'created_at': self.created_at,
+            'last_sync_at': self.last_sync_at,
+            'last_sync_error': self.last_sync_error,
+            'active': self.active,
         }
 
     def mark_navigated(self) -> None:
@@ -109,8 +126,10 @@ class BrowserInfo:
             'client_id': self.client_id,
             'headless': self.headless,
             'health': self.health.value,
+            'browser_process_id': self.browser_process_id,
             'tabs': len(self.tabs),
             'profile': self.profile.summary() if self.profile else None,
+            'profile_id': self.profile.profile_id if self.profile else '',
             'proxy_enabled': bool(self.proxy_server),
             'proxy_scheme': self.proxy_scheme,
             'proxy_server': self.proxy_server,

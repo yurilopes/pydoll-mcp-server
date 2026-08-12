@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 from pydoll_mcp_server.json_types import (
     InvalidJsonValueError,
     JsonArray,
@@ -13,6 +15,150 @@ from pydoll_mcp_server.json_types import (
 
 class InvalidScriptResponseError(ValueError):
     """Raised when Pydoll returns an invalid Runtime.evaluate response."""
+
+
+class ScriptResult(TypedDict):
+    """Normalized result from a Pydoll script boundary."""
+
+    success: bool
+    value: JsonValue
+    value_type: str
+    runtime_type: str
+    operation: str
+    retryable: bool
+
+
+def normalize_script_result(
+    response: object,
+    operation: str,
+    expected_type: str = '',
+) -> JsonObject:
+    """Normalize primitive and structured script results without leaking raw CDP data."""
+
+    response_format = 'cdp_runtime_evaluate'
+    try:
+        response_info = extract_script_response(response)
+        value = extract_script_value(response)
+    except InvalidScriptResponseError as exc:
+        return {
+            'success': False,
+            'error_code': 'EXECUTION_ERROR',
+            'message': f'Script result normalization failed for {operation}: {exc}',
+            'retryable': True,
+            'operation': operation,
+            'expected_type': expected_type,
+            'received_type': 'malformed',
+            'response_shape': type(response).__name__,
+            'response_format': 'malformed',
+            'resource_state': 'unknown',
+        }
+
+    value_type = script_value_type(value, response_info)
+    runtime_type = str(response_info.get('type', ''))
+    if _has_exception_details(response):
+        return {
+            'success': False,
+            'error_code': 'EXECUTION_ERROR',
+            'message': f'Script execution raised an exception for {operation}.',
+            'retryable': True,
+            'operation': operation,
+            'expected_type': expected_type,
+            'received_type': runtime_type or value_type,
+            'response_shape': type(response).__name__,
+            'response_format': 'cdp_runtime_exception',
+            'resource_state': 'unknown',
+        }
+    result: JsonObject = {
+        'success': True,
+        'value': value,
+        'value_type': value_type,
+        'runtime_type': runtime_type,
+        'operation': operation,
+        'retryable': False,
+        'response_format': response_format,
+        'resource_state': 'observed',
+    }
+    if expected_type and value_type != expected_type:
+        result.update(
+            {
+                'success': False,
+                'error_code': 'EXECUTION_ERROR',
+                'message': f'Expected {expected_type} from {operation}, received {value_type}.',
+                'retryable': True,
+                'expected_type': expected_type,
+                'received_type': value_type,
+            }
+        )
+    return result
+
+
+def _has_exception_details(response: object) -> bool:
+    try:
+        normalized = normalize_json_value(response, 'script response')
+    except InvalidJsonValueError:
+        return False
+    if not isinstance(normalized, dict):
+        return False
+    inner = normalized.get('result')
+    if not isinstance(inner, dict):
+        return False
+    return inner.get('exceptionDetails') is not None
+
+
+def script_value_type(value: JsonValue, response: JsonObject | None = None) -> str:
+    """Return a stable semantic type for a normalized JavaScript value."""
+
+    response_info = response or {}
+    runtime_type = str(response_info.get('type', ''))
+    if runtime_type == 'undefined':
+        return 'undefined'
+    if value is None:
+        return 'null'
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, int | float):
+        return 'number'
+    if isinstance(value, str):
+        return 'string'
+    if isinstance(value, list):
+        return 'array'
+    return 'object'
+
+
+def extract_normalized_value(response: object, operation: str, expected_type: str = '') -> JsonValue:
+    normalized = normalize_script_result(response, operation, expected_type)
+    if normalized.get('success') is not True:
+        message = normalized.get('message')
+        raise InvalidScriptResponseError(str(message) if isinstance(message, str) else 'Script operation failed')
+    return normalized.get('value')
+
+
+def extract_normalized_object(response: object, operation: str) -> JsonObject:
+    value = extract_normalized_value(response, operation, 'object')
+    if not isinstance(value, dict):
+        raise InvalidScriptResponseError(f'{operation} did not return an object')
+    return value
+
+
+def extract_normalized_array(response: object, operation: str) -> JsonArray:
+    value = extract_normalized_value(response, operation, 'array')
+    if not isinstance(value, list):
+        raise InvalidScriptResponseError(f'{operation} did not return an array')
+    return value
+
+
+def extract_normalized_string(response: object, operation: str) -> str:
+    value = extract_normalized_value(response, operation, 'string')
+    if not isinstance(value, str):
+        raise InvalidScriptResponseError(f'{operation} did not return a string')
+    return value
+
+
+def extract_normalized_bool(response: object, operation: str) -> bool:
+    value = extract_normalized_value(response, operation, 'boolean')
+    if not isinstance(value, bool):
+        raise InvalidScriptResponseError(f'{operation} did not return a boolean')
+    return value
 
 
 def extract_script_value(response: object) -> JsonValue:

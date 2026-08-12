@@ -4,28 +4,61 @@ from __future__ import annotations
 
 import asyncio
 
-from pydoll_mcp_server.browser.locks import tab_operation_lock
+from pydoll_mcp_server.browser.locks import browser_operation_lock, tab_operation_lock
 from pydoll_mcp_server.browser.models import ResourceHealth
 from pydoll_mcp_server.browser.pydoll_compat import (
     enable_page_events,
+    get_tab_target_id,
     get_tab_title,
     get_tab_url,
     try_close_tab,
 )
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.snapshots import get_snapshot_manager
+from pydoll_mcp_server.browser.tab_reconciliation import sync_browser_tabs
 from pydoll_mcp_server.browser.watches import get_watch_manager
+from pydoll_mcp_server.config import get_limits_config
 from pydoll_mcp_server.dom.element_cache import get_element_cache
-from pydoll_mcp_server.errors import ErrorCode, StructuredError
+from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject
 
 
 async def tab_new(client_id: str, browser_id: str, url: str = '') -> JsonObject:
     try:
-        browser = get_registry().get_browser(client_id, browser_id)
-        tab = await browser.pydoll_browser.new_tab(url=url)
-        info = get_registry().register_tab(client_id, browser_id, tab, url=url)
-        return {'success': True, 'tab': info.summary()}
+        registry = get_registry()
+        browser = registry.get_browser(client_id, browser_id)
+        async with browser_operation_lock(browser_id):
+            sync = await sync_browser_tabs(client_id, browser_id)
+            max_tabs = get_limits_config().max_tabs_per_browser
+            if not sync.reconciled:
+                return StructuredError(
+                    ErrorCode.EXECUTION_ERROR,
+                    'Could not reconcile the live tab count before opening a new tab.',
+                    retryable=True,
+                    resource_state=ResourceState.DEGRADED,
+                    details=sync.summary(max_tabs),
+                ).to_dict()
+            if sync.actual_count >= max_tabs:
+                return StructuredError(
+                    ErrorCode.TAB_LIMIT_REACHED,
+                    f'Browser already has {sync.actual_count} open tabs; the limit is {max_tabs}.',
+                    details={**sync.summary(max_tabs), 'browser_id': browser_id},
+                    retryable=True,
+                    recovery_hint='Close an existing tab explicitly before opening another.',
+                ).to_dict()
+            tab = await browser.pydoll_browser.new_tab(url=url)
+            target_id = get_tab_target_id(tab)
+            after = await sync_browser_tabs(client_id, browser_id)
+            info = registry.find_tab_by_target(client_id, browser_id, target_id)
+            if info is None or not after.reconciled:
+                return StructuredError(
+                    ErrorCode.EXECUTION_ERROR,
+                    'New tab was created but could not be reconciled with the browser.',
+                    retryable=True,
+                    resource_state=ResourceState.DEGRADED,
+                    details={'target_id': target_id, **after.summary(max_tabs)},
+                ).to_dict()
+            return {'success': True, 'tab': info.summary(), **after.summary(max_tabs)}
     except StructuredError as exc:
         return exc.to_dict()
     except Exception as exc:
@@ -79,17 +112,31 @@ async def tab_recreate(client_id: str, tab_id: str, force: bool = False, preserv
         return StructuredError(ErrorCode.INVALID_INPUT, 'tab_recreate requires force=true').to_dict()
     try:
         info, browser = get_registry().resolve_tab_with_browser(client_id, tab_id)
-        url = await get_tab_url(info.pydoll_tab) if preserve_url else ''
-        async with tab_operation_lock(tab_id):
-            new_tab = await browser.pydoll_browser.new_tab(url=url)
-            old_tab = info.pydoll_tab
-            info.pydoll_tab = new_tab
-            info.url = url
-            info.document_generation += 1
-            info.health = ResourceHealth.HEALTHY
-            get_element_cache().invalidate_tab(tab_id)
-            get_snapshot_manager().clear_tab(client_id, tab_id)
-            await try_close_tab(old_tab)
+        async with browser_operation_lock(browser.browser_id):
+            await sync_browser_tabs(client_id, browser.browser_id)
+            info = get_registry().get_tab(client_id, tab_id)
+            url = await get_tab_url(info.pydoll_tab) if preserve_url else ''
+            async with tab_operation_lock(tab_id):
+                old_tab = info.pydoll_tab
+                new_tab = await browser.pydoll_browser.new_tab(url=url)
+                info.pydoll_tab = new_tab
+                info.target_id = get_tab_target_id(new_tab)
+                info.url = url
+                info.document_generation += 1
+                info.health = ResourceHealth.HEALTHY
+                info.close_pending = False
+                get_element_cache().invalidate_tab(tab_id)
+                get_snapshot_manager().clear_tab(client_id, tab_id)
+                old_closed = await try_close_tab(old_tab)
+            sync = await sync_browser_tabs(client_id, browser.browser_id)
+        if not old_closed:
+            return StructuredError(
+                ErrorCode.EXECUTION_ERROR,
+                'Replacement tab opened, but the previous tab could not be closed.',
+                retryable=True,
+                resource_state=ResourceState.DEGRADED,
+                details=sync.summary(get_limits_config().max_tabs_per_browser),
+            ).to_dict()
         state_lost: JsonArray = ['dom', 'element_ids', 'snapshots', 'form_state']
         return {
             'success': True,
@@ -97,6 +144,7 @@ async def tab_recreate(client_id: str, tab_id: str, force: bool = False, preserv
             'recreated': True,
             'preserved_url': bool(url),
             'state_lost': state_lost,
+            **sync.summary(get_limits_config().max_tabs_per_browser),
         }
     except StructuredError as exc:
         return exc.to_dict()
@@ -141,7 +189,9 @@ async def dialog_handle(
 async def popup_prepare(client_id: str, tab_id: str, timeout: float = 30.0) -> JsonObject:
     try:
         info = get_registry().get_tab(client_id, tab_id)
-        baseline = {item.tab_id for item in get_registry().list_tabs(client_id, info.browser_id)}
+        async with browser_operation_lock(info.browser_id):
+            await sync_browser_tabs(client_id, info.browser_id)
+            baseline = {item.tab_id for item in get_registry().list_tabs(client_id, info.browser_id)}
         watch = get_watch_manager().create(client_id, tab_id, 'popup', baseline=baseline)
         return {'success': True, 'watch_id': watch.watch_id, 'timeout': timeout}
     except StructuredError as exc:
@@ -155,12 +205,9 @@ async def popup_wait(client_id: str, watch_id: str, timeout: float = 30.0) -> Js
 
         async def wait() -> JsonObject:
             while True:
-                browser = get_registry().get_browser(client_id, source.browser_id)
-                known_objects = {item.pydoll_tab for item in get_registry().list_tabs(client_id, source.browser_id)}
-                for pydoll_tab in await browser.pydoll_browser.get_opened_tabs():
-                    if pydoll_tab not in known_objects:
-                        get_registry().register_tab(client_id, source.browser_id, pydoll_tab)
-                tabs = get_registry().list_tabs(client_id, source.browser_id)
+                async with browser_operation_lock(source.browser_id):
+                    await sync_browser_tabs(client_id, source.browser_id)
+                    tabs = get_registry().list_tabs(client_id, source.browser_id)
                 created = [item for item in tabs if item.tab_id not in (watch.baseline or set())]
                 if created:
                     return {'success': True, 'watch_id': watch_id, 'tab': created[0].summary()}

@@ -13,9 +13,9 @@ from pydoll_mcp_server.browser.models import TabInfo
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.script_utils import (
     InvalidScriptResponseError,
-    extract_script_bool,
-    extract_script_object,
-    extract_script_string,
+    extract_normalized_bool,
+    extract_normalized_object,
+    extract_normalized_string,
 )
 from pydoll_mcp_server.errors import StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_string
@@ -35,27 +35,30 @@ async def capture_effect_state(
     state: JsonObject = {}
     if attribute_selector and attribute_name:
         state.update(
-            extract_script_object(
+            extract_normalized_object(
                 await tab_info.pydoll_tab.execute_script(
                     _effect_state_script(attribute_selector, attribute_name),
                     return_by_value=True,
-                )
+                ),
+                'click_effect_state',
             )
         )
     if progress_change or active_surface_change:
         state.update(
-            extract_script_object(
-                await tab_info.pydoll_tab.execute_script(_surface_effect_script(), return_by_value=True)
+            extract_normalized_object(
+                await tab_info.pydoll_tab.execute_script(_surface_effect_script(), return_by_value=True),
+                'click_surface_effect_state',
             )
         )
     if enabled_element_id:
         element = await resolve_element(tab_info, enabled_element_id)
         if element is not None:
-            state['enabled'] = extract_script_bool(
+            state['enabled'] = extract_normalized_bool(
                 await element.execute_script(
                     "return !this.disabled && this.getAttribute('aria-disabled') !== 'true';",
                     return_by_value=True,
-                )
+                ),
+                'click_enabled_state',
             )
     return state
 
@@ -81,7 +84,13 @@ def _surface_effect_script() -> str:
     const progress=[...document.querySelectorAll('[role="progressbar"], progress, [aria-valuenow]')]
         .filter(visible).map(node => node.getAttribute('aria-valuenow') || node.textContent || '').join('|');
     const surface=[...document.querySelectorAll('[role="dialog"], dialog[open], form, [aria-modal="true"]')]
-        .filter(visible).map(node => node.getAttribute('aria-label') || node.id || node.tagName).join('|');
+        .filter(visible).map(node => {
+            const controls=[...node.querySelectorAll('input, textarea, select, [contenteditable="true"]')]
+                .filter(visible).length;
+            const buttons=[...node.querySelectorAll('button, [role="button"]')].filter(visible).length;
+            const text=(node.innerText || '').replace(/\\s+/g, ' ').slice(0, 160);
+            return [node.getAttribute('aria-label') || node.id || node.tagName, controls, buttons, text].join(':');
+        }).join('|');
     return {progress, surface};
     """
 
@@ -119,7 +128,7 @@ async def observe_effects(
                     "return d ? d.getAttribute('aria-label') || d.tagName : '';"
                 )
                 result = await pydoll_tab.execute_script(script, return_by_value=True)
-                dialog_text = extract_script_string(result)
+                dialog_text = extract_normalized_string(result, 'click_dialog_effect')
                 if dialog_text:
                     matched.append('expect_dialog')
             except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
@@ -137,17 +146,19 @@ async def observe_effects(
             try:
                 script = f'return document.body.innerText.indexOf({expect_text!r}) >= 0;'
                 result = await pydoll_tab.execute_script(script, return_by_value=True)
-                if extract_script_bool(result):
+                if extract_normalized_bool(result, 'click_text_effect'):
                     matched.append('expect_text')
             except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
                 pass
 
         if expect_selector and 'expect_selector' not in matched:
             try:
-                elements = await pydoll_tab.query(expect_selector, timeout=1, find_all=False, raise_exc=False)
-                if elements is not None:
+                selector_state = await _selector_effect_state(pydoll_tab, expect_selector)
+                if selector_state == 'visible':
                     matched.append('expect_selector')
-            except PydollException:
+                elif selector_state == 'hidden':
+                    matched.append('expect_selector_hidden')
+            except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
                 pass
 
         if expect_network_idle and 'expect_network_idle' not in matched:
@@ -213,6 +224,31 @@ async def observe_effects(
         await asyncio.sleep(0.15)
 
     return len(matched) > 0, matched
+
+
+async def _selector_effect_state(tab: Tab, selector: str) -> str:
+    script = f"""
+    const selector = {json.dumps(selector)};
+    const nodes = [...document.querySelectorAll(selector)];
+    function visible(node) {{
+        for (let current = node; current; current = current.parentElement) {{
+            const style = getComputedStyle(current);
+            const rect = current.getBoundingClientRect();
+            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0)
+                return false;
+            if (rect.width <= 0 || rect.height <= 0) return false;
+        }}
+        return true;
+    }}
+    return {{visible:nodes.some(visible), present:nodes.length > 0}};
+    """
+    result = await tab.execute_script(script, return_by_value=True)
+    state = extract_normalized_object(result, 'click_selector_effect')
+    if bool(state.get('visible', False)):
+        return 'visible'
+    if bool(state.get('present', False)):
+        return 'hidden'
+    return 'absent'
 
 
 def all_effects_satisfied(

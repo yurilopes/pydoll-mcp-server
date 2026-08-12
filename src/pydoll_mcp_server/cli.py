@@ -44,6 +44,7 @@ def main() -> None:
     args = parser.parse_args()
 
     os.environ['PYDOLL_MCP_TOOL_PROFILE'] = args.tool_profile
+    previous_transport = os.environ.get('PYDOLL_MCP_TRANSPORT')
     os.environ['PYDOLL_MCP_TRANSPORT'] = args.transport
     os.environ['PYDOLL_MCP_HOST'] = args.host
 
@@ -54,7 +55,13 @@ def main() -> None:
 
     if args.transport == 'stdio':
         logger.info(f'Starting Pydoll MCP Server via stdio with tool profile {args.tool_profile}')
-        run_stdio()
+        try:
+            run_stdio()
+        finally:
+            if previous_transport is None:
+                os.environ.pop('PYDOLL_MCP_TRANSPORT', None)
+            else:
+                os.environ['PYDOLL_MCP_TRANSPORT'] = previous_transport
         return
 
     from pydoll_mcp_server.config import get_config
@@ -81,9 +88,15 @@ def main() -> None:
 
 
 def run_stdio() -> None:
-    from pydoll_mcp_server.server import mcp
+    import asyncio
 
-    mcp.run(transport='stdio')
+    from pydoll_mcp_server.server import mcp
+    from pydoll_mcp_server.tools.browser import shutdown_browsers
+
+    try:
+        mcp.run(transport='stdio')
+    finally:
+        asyncio.run(shutdown_browsers())
 
 
 _run_stdio = run_stdio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -79,15 +80,24 @@ def test_browser_launch_passes_proxy_to_pydoll_but_returns_sanitized_metadata() 
             def create_temporary(self, client_id: str) -> SimpleNamespace:
                 return profile
 
+            def lock(self, profile_id: str, owner: str) -> bool:
+                return True
+
             def unlock(self, profile_id: str) -> None:
                 return None
 
         class FakeRegistry:
+            def find_by_profile(self, client_id: str, profile_id: str) -> None:
+                return None
+
             def register_browser(self, **kwargs: object) -> SimpleNamespace:
                 return SimpleNamespace(browser_id='browser', **kwargs)
 
             def register_tab(self, **kwargs: object) -> SimpleNamespace:
                 return SimpleNamespace(tab_id='tab')
+
+            def list_tabs(self, client_id: str, browser_id: str) -> list[SimpleNamespace]:
+                return []
 
         with (
             patch.object(browser_tools, 'get_profile_manager', return_value=FakeProfileManager()),
@@ -105,8 +115,10 @@ def test_browser_launch_passes_proxy_to_pydoll_but_returns_sanitized_metadata() 
         assert 'secret' not in str(result)
         assert options_seen is not None
         assert '--proxy-server=socks5://user:secret@proxy.example:1080' in options_seen.arguments
+        browser_tools.get_profile_lease_manager().release_by_profile(profile.path)
 
-    asyncio.run(run())
+    with patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}):
+        asyncio.run(run())
 
 
 def test_browser_launch_redacts_proxy_credentials_from_errors() -> None:
@@ -126,6 +138,9 @@ def test_browser_launch_redacts_proxy_credentials_from_errors() -> None:
             def create_temporary(self, client_id: str) -> SimpleNamespace:
                 return profile
 
+            def lock(self, profile_id: str, owner: str) -> bool:
+                return True
+
             def unlock(self, profile_id: str) -> None:
                 return None
 
@@ -143,7 +158,8 @@ def test_browser_launch_redacts_proxy_credentials_from_errors() -> None:
         assert 'user:' not in str(result)
         assert 'http://proxy.example:8080' in str(result)
 
-    asyncio.run(run())
+    with patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}):
+        asyncio.run(run())
 
 
 def _awaitable(value: str) -> Awaitable[str]:

@@ -156,7 +156,10 @@ class TestAppTransport:
         import uvicorn
 
         token = 'loopback-token'
-        with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': token}):
+        with patch.dict(
+            os.environ,
+            {'PYDOLL_MCP_AUTH_TOKEN': token, 'PYDOLL_MCP_ALLOW_NO_AUTH': 'false'},
+        ):
             _reset_config_cache()
             from pydoll_mcp_server.server import create_app
 
@@ -236,7 +239,7 @@ class TestMCPTools:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test'}):
             from pydoll_mcp_server.server import server_status
 
-            result = server_status(client_id='test-client')
+            result = asyncio.run(server_status(client_id='test-client'))
             assert result['status'] == 'ok'
             assert result['upload_policy'] == 'local'
             assert result['native_picker_staging'] == 'automatic'

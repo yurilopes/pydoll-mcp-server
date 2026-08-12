@@ -11,7 +11,7 @@ from pydoll_mcp_server.browser.inspection import get_inspection_manager
 from pydoll_mcp_server.browser.operations import get_operation_manager, operation_cancel
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_value
+from pydoll_mcp_server.browser.script_utils import extract_normalized_bool
 from pydoll_mcp_server.config import get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import (
@@ -24,6 +24,7 @@ from pydoll_mcp_server.json_types import (
     require_json_object,
 )
 from pydoll_mcp_server.tools.element_advanced import element_get_state
+from pydoll_mcp_server.tools.form_contracts import v2_envelope
 from pydoll_mcp_server.tools.javascript import scan_script
 from pydoll_mcp_server.tools.network import network_list
 
@@ -66,7 +67,10 @@ async def page_wait_for_function(
         tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
 
         async def evaluate() -> bool:
-            return bool(extract_script_value(await tab.execute_script(script, return_by_value=True)))
+            return extract_normalized_bool(
+                await tab.execute_script(script, return_by_value=True),
+                'page_wait_for_function',
+            )
 
         return await _poll(evaluate, timeout, poll_interval, 'function')
 
@@ -112,7 +116,10 @@ async def page_wait_for_selector(
 
         async def evaluate() -> bool:
             script = _selector_script(selector, strategy, visible)
-            return bool(extract_script_value(await tab.execute_script(script, return_by_value=True)))
+            return extract_normalized_bool(
+                await tab.execute_script(script, return_by_value=True),
+                'page_wait_for_selector',
+            )
 
         return await _poll(evaluate, timeout, poll_interval, f'selector {selector}')
 
@@ -265,7 +272,10 @@ async def _text_wait(
                 f'const found={str(exact).lower()} ? body.trim()===text : body.includes(text);'
                 f'return {str(gone).lower()} ? !found : found;'
             )
-            return bool(extract_script_value(await tab.execute_script(script, return_by_value=True)))
+            return extract_normalized_bool(
+                await tab.execute_script(script, return_by_value=True),
+                'page_wait_for_text',
+            )
 
         label = f'text {text}' if not gone else f'text gone {text}'
         return await _poll(evaluate, timeout, poll_interval, label)
@@ -284,17 +294,19 @@ async def _poll(
     async def wait() -> JsonObject:
         while True:
             if await check():
-                return {'success': True, 'matched': True}
+                return {**v2_envelope('wait', 'verified'), 'matched': True}
             await asyncio.sleep(max(0.02, min(interval, 5.0)))
 
     try:
         return await asyncio.wait_for(wait(), limit)
     except TimeoutError:
-        return StructuredError(
+        result = StructuredError(
             ErrorCode.TIMEOUT,
             f'Wait for {label} timed out after {limit}s',
             retryable=True,
         ).to_dict()
+        result.update(v2_envelope('wait', 'inconclusive', False))
+        return result
 
 
 async def _run(client_id: str, operation_id: str, awaitable: Awaitable[JsonObject]) -> JsonObject:

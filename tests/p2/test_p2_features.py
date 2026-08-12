@@ -56,7 +56,7 @@ class TestCapabilities:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import server_status
 
-            result = server_status(client_id='test-p2')
+            result = asyncio.run(server_status(client_id='test-p2'))
             assert 'schema_version' in result
             assert string_at(result, 'schema_version') == '2026-06-17.v0.5'
 
@@ -64,7 +64,7 @@ class TestCapabilities:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import server_status
 
-            result = server_status(client_id='test-p2')
+            result = asyncio.run(server_status(client_id='test-p2'))
             caps = object_at(result, 'capabilities')
             transports = array_at(caps, 'transports')
             assert 'transports' in caps
@@ -75,7 +75,7 @@ class TestCapabilities:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import server_status
 
-            result = server_status(client_id='test-p2')
+            result = asyncio.run(server_status(client_id='test-p2'))
             caps = object_at(result, 'capabilities')
             inspection = array_at(caps, 'inspection')
             assert 'inspection' in caps
@@ -85,7 +85,7 @@ class TestCapabilities:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import server_status
 
-            result = server_status(client_id='test-p2')
+            result = asyncio.run(server_status(client_id='test-p2'))
             caps = object_at(result, 'capabilities')
             assert 'diagnostics' in caps
 
@@ -93,7 +93,7 @@ class TestCapabilities:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import server_status
 
-            result = server_status(client_id='test-p2')
+            result = asyncio.run(server_status(client_id='test-p2'))
             assert 'version' in result
             assert string_at(result, 'version') == '0.4.0b1'
 

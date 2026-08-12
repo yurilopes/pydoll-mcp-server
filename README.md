@@ -78,11 +78,11 @@ python -m pydoll_mcp_server.cli --transport stdio
 
 The server keeps the complete catalog available by default for compatibility:
 
-- `full` exposes all 144 public tools, including advanced network, JavaScript,
+- `full` exposes all 151 public tools, including advanced network, JavaScript,
   deep traversal, diagnostics, and low-level fallback operations.
-- `agent` exposes 63 canonical tools for general browser automation.
-- `linkedin` exposes the 63 `agent` tools plus 15 LinkedIn search and Easy Apply
-  helpers, for 78 tools total.
+- `agent` exposes 73 canonical tools for general browser automation.
+- `linkedin` exposes the 73 `agent` tools plus 16 LinkedIn search and Easy Apply
+  helpers, for 89 tools total.
 
 Select a profile explicitly with the CLI:
 
@@ -171,6 +171,27 @@ Lifecycle:
 - `dialog_list`, `dialog_handle`, `popup_prepare`, `popup_wait`
 - `proxy_validate`, `proxy_get`
 
+Browser lifecycle contract:
+
+- Keep one MCP server process and one stable `client_id` for a browser session.
+- Call `browser_list` before `browser_launch`; launching an already-open profile reuses the existing browser.
+- A profile can be owned by only one MCP process at a time. A second process receives `RESOURCE_LOCKED`.
+- Use `tab_new` for additional pages. Do not call `browser_launch` to create another tab.
+- The server reconciles tab state with Chrome before listing or mutating tabs. `tab_list`
+  reports live counts and enforces a maximum of five tabs per browser.
+- `tab_close` reports success only after Chrome confirms that the target disappeared. If a
+  before-unload dialog is present, it returns `DIALOG_PRESENT`; inspect and handle the dialog
+  before retrying.
+- The server closes its managed browsers during HTTP, stdio, and graceful process shutdown.
+- Persistent profiles keep login state after shutdown, but the Chrome process itself is not kept alive.
+- After a server restart, use `browser_attach(profile_id=...)` to reconcile a live
+  browser owned by the same client. If the lease or CDP endpoint cannot be
+  validated, the tool returns a handoff instead of attaching by profile directory
+  name alone.
+- `tab_close` refuses to act on a stale tab inventory and blocks closing the only
+  managed tab. A transport timeout leaves the registry entry marked
+  `close_pending=true` until the target disappears.
+
 `browser_launch` accepts an optional `proxy_server` using `http`, `https`,
 `socks4`, or `socks5`, plus an optional `proxy_bypass_list`. Proxy credentials
 may be embedded for Pydoll authentication, but MCP responses and browser
@@ -219,6 +240,8 @@ Elements:
 - `element_hover`, `element_scroll_into_view`, `keyboard_press`
 - semantic finders by role, text, label, placeholder, and test ID
 - `form_snapshot`, `form_errors`
+- `form_preflight`, `form_prepare`, `form_review`, `form_submit_after_review`
+- `application_domain_status`
 - `combobox_get_options`, `select_get_options`, `combobox_type_and_select`, `combobox_select_option`
 
 JavaScript and advanced helpers:
@@ -237,7 +260,7 @@ JavaScript and advanced helpers:
 - `download_prepare`, `download_wait`, `download_list`, `download_get_info`
 - `upload_files`
 - `upload_files_from_trigger`
-- `file_upload_state`, `artifact_get_paths`, `artifact_import`, `artifact_prepare_upload`
+- `file_upload_state`, `artifact_get_paths`, `artifact_import`, `artifact_export`, `artifact_prepare_upload`
 - `profile_list`, `profile_promote`
 - `operation_cancel`
 - `http_request`
@@ -431,7 +454,26 @@ Radio and checkbox questions are represented as `radio_group` or `checkbox_group
 
 Use `form_select_choice(field_label, option_label)` for radio and checkbox questions. It restricts matching to the identified question, uses associated labels when needed, and returns success only after verifying the selected state.
 
-For multi-step form flows, use `form_fill_fields` to fill fields by intent (label, placeholder, selector matching) and `page_click_primary_action` to advance steps. `element_find_by_text_candidates` resolves duplicate visible text before clicking. `element_resolve_again` recovers stale element handles after page re-renders. `submission_wait_for_confirmation` polls for post-submit outcomes.
+For job applications, prefer the v2 workflow: call `form_preflight` for a
+read-only inventory, `form_prepare` for planned fields, choices, comboboxes,
+uploads, and intermediate steps, then `form_review` before any final action.
+`form_submit_after_review` requires an unexpired, single-use review token,
+explicit `authorization_mode`, a matching client and tab, and a fresh review.
+It performs exactly one final click and classifies the observed result. A
+security challenge, attestation, legal declaration, sensitive consent, or
+missing candidate fact produces a handoff instead of an automated action.
+
+The workflow tools use contract version 2 envelopes with `operation_id`,
+`success`, and semantic `status`. Use `verified`, `ready_for_submission`,
+`blockers`, `handoff`, `outcome`, and `verification` as the source of truth.
+Legacy fields such as `confirmed`, `checked`, `selected`, and `mode_used` remain
+compatibility aliases. `form_fill_fields` and `page_click_primary_action`
+remain available for lower-level multi-step flows. `element_find_by_text_candidates`
+resolves duplicate visible text before clicking, and `element_resolve_again`
+recovers stale element handles after page re-renders.
+
+`submission_wait_for_confirmation` returns a typed `outcome`. A URL change,
+modal disappearance, or portal limit by itself is never confirmation.
 
 For React-like forms and custom controls, prefer `element_fill`, `element_fill_and_verify`, `combobox_type_and_select`, `element_click_by_text`, and condition waits before using custom JavaScript. `js_evaluate` and `js_evaluate_readonly` return structured JSON values directly in `value`; clients should not parse `value` as a JSON string.
 

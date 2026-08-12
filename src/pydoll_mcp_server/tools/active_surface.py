@@ -10,11 +10,12 @@ from pydantic import Field
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
+from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
 from pydoll_mcp_server.dom.element_cache import cache_observed_element, get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_object, get_string, require_json_object
 from pydoll_mcp_server.security.site_signals import inspect_site_diagnostics
+from pydoll_mcp_server.tools.form_contracts import v2_envelope
 from pydoll_mcp_server.tools.surface_scripts import surface_script
 
 VALID_SCOPES = frozenset({'auto', 'modal', 'dialog', 'form', 'main', 'viewport', 'active_element_context'})
@@ -65,7 +66,7 @@ async def page_get_active_surface(
 
     try:
         result = await tab_info.pydoll_tab.execute_script(surface_script(payload), return_by_value=True)
-        data = extract_script_object(result)
+        data = extract_normalized_object(result, 'page_get_active_surface')
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -127,45 +128,47 @@ def _build_response(
         'surface_label': get_string(data, 'surface_label', ''),
     }
 
-    result: JsonObject = {
-        'success': True,
-        'surface': {
-            'scope': get_string(data, 'surface_scope', scope),
-            'reason': get_string(data, 'surface_reason', ''),
-            'element_id': _cache_control_entry(
-                client_id,
-                tab_id,
-                generation,
-                {
-                    'tag': get_string(data, 'surface_tag', ''),
-                    'role': get_string(data, 'surface_role', ''),
-                    'name': get_string(data, 'surface_label', ''),
-                    'text': get_string(data, 'surface_label', ''),
-                    'selector_hint': get_string(data, 'surface_selector', ''),
-                },
-            ),
-            'role': get_string(data, 'surface_role', ''),
-            'label': get_string(data, 'surface_label', ''),
-        },
-        'fields': surface_fields,
-        'controls': surface_controls,
-        'containers': surface_containers,
-        'primary_action': primary,
-        'secondary_actions': secondary,
-        'progress': get_object(data, 'progress', {}),
-        'errors': errors_data,
-        'pending_required': get_array(data, 'pending_required', []),
-        'review_text': get_array(data, 'review_text', []),
-        'active_element': get_object(data, 'active_element', {}),
-        'count': {
-            'fields': len(surface_fields),
-            'controls': len(surface_controls),
-            'containers': len(surface_containers),
-        },
-        'partial': len(surface_fields) >= max_fields or len(surface_controls) >= max_controls,
-        'warnings': get_array(data, 'warnings', []),
-        'evidence': evidence,
-    }
+    result: JsonObject = v2_envelope('page_get_active_surface', 'verified')
+    result.update(
+        {
+            'surface': {
+                'scope': get_string(data, 'surface_scope', scope),
+                'reason': get_string(data, 'surface_reason', ''),
+                'element_id': _cache_control_entry(
+                    client_id,
+                    tab_id,
+                    generation,
+                    {
+                        'tag': get_string(data, 'surface_tag', ''),
+                        'role': get_string(data, 'surface_role', ''),
+                        'name': get_string(data, 'surface_label', ''),
+                        'text': get_string(data, 'surface_label', ''),
+                        'selector_hint': get_string(data, 'surface_selector', ''),
+                    },
+                ),
+                'role': get_string(data, 'surface_role', ''),
+                'label': get_string(data, 'surface_label', ''),
+            },
+            'fields': surface_fields,
+            'controls': surface_controls,
+            'containers': surface_containers,
+            'primary_action': primary,
+            'secondary_actions': secondary,
+            'progress': get_object(data, 'progress', {}),
+            'errors': errors_data,
+            'pending_required': get_array(data, 'pending_required', []),
+            'review_text': get_array(data, 'review_text', []),
+            'active_element': get_object(data, 'active_element', {}),
+            'count': {
+                'fields': len(surface_fields),
+                'controls': len(surface_controls),
+                'containers': len(surface_containers),
+            },
+            'partial': len(surface_fields) >= max_fields or len(surface_controls) >= max_controls,
+            'warnings': get_array(data, 'warnings', []),
+            'evidence': evidence,
+        }
+    )
     return result
 
 

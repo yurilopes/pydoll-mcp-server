@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+
+from pydoll_mcp_server.browser.artifact_registry import artifact_context, register_artifact, valid_evidence_kind
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_string, extract_script_value
+from pydoll_mcp_server.browser.script_utils import extract_normalized_object, extract_normalized_string
 from pydoll_mcp_server.config import get_config, get_limits_config
 from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
 from pydoll_mcp_server.dom.models import RawTreeNode, json_from_tree_node, parse_tree_result
@@ -44,11 +47,8 @@ TREE_BUILDER_JS = """
             for (const attr of node.attributes || []) {
                 const name = attr.name.toLowerCase();
                 if (['id', 'class', 'name', 'type', 'placeholder', 'href', 'src', 'alt', 'title',
-                     'value', 'role', 'aria-label', 'data-testid'].includes(name)) {
-                    let val = attr.value || '';
-                    if (name === 'value' && (node.tagName === 'INPUT' && node.type === 'password')) {
-                        val = '***';
-                    }
+                     'role', 'aria-label', 'data-testid'].includes(name)) {
+                    const val = attr.value || '';
                     info.attrs[name] = val.substring(0, 500);
                 }
             }
@@ -138,11 +138,7 @@ async def build_page_tree(
             .replace('%REFERENCE_HELPERS%', ELEMENT_REFERENCE_HELPERS)
         )
         result = await pydoll_tab.execute_script(js, return_by_value=True)
-        raw_value = extract_script_value(result)
-        if isinstance(raw_value, str):
-            import json
-
-            raw_value = json.loads(raw_value)
+        raw_value = extract_normalized_object(result, 'page_get_tree')
         raw = parse_tree_result(raw_value)
     except Exception as e:
         return StructuredError(
@@ -297,7 +293,7 @@ async def page_get_text(
             'return (document.body ? document.body.innerText : document.documentElement.innerText) || "";',
             return_by_value=True,
         )
-        text = extract_script_string(result)
+        text = extract_normalized_string(result, 'page_get_text')
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,
@@ -324,6 +320,9 @@ async def page_screenshot(
     full_page: bool = False,
     as_base64: bool = False,
     path: str = '',
+    evidence_kind: str = 'diagnostic',
+    return_base64: bool | None = None,
+    name: str = '',
 ) -> JsonObject:
     registry = get_registry()
     config = get_config()
@@ -335,6 +334,12 @@ async def page_screenshot(
 
     pydoll_tab = tab_info.pydoll_tab
 
+    if return_base64 is not None:
+        as_base64 = return_base64
+    if not valid_evidence_kind(evidence_kind):
+        return StructuredError(ErrorCode.INVALID_INPUT, f'Unknown evidence_kind: {evidence_kind}').to_dict()
+    if name and not path:
+        path = name
     safe_path: str | None = None
     if path:
         safe_path = validate_artifact_path(path, config)
@@ -347,8 +352,6 @@ async def page_screenshot(
             ).to_dict()
 
     if not safe_path and not as_base64:
-        import uuid
-
         ext = fmt if fmt in ('png', 'jpeg', 'jpg') else 'png'
         screenshots_dir = config.artifacts_dir / client_id
         screenshots_dir.mkdir(parents=True, exist_ok=True)
@@ -368,25 +371,40 @@ async def page_screenshot(
                 file_size = Path(safe_path).stat().st_size
             except OSError:
                 pass
+            url, viewport = await artifact_context(pydoll_tab)
+            mime_type = 'image/jpeg' if fmt in ('jpeg', 'jpg') else 'image/png'
+            artifact = register_artifact(client_id, safe_path, mime_type, evidence_kind, url, viewport)
+            if not artifact.get('success'):
+                return artifact
             return {
                 'success': True,
                 'path': safe_path,
-                'mime_type': f'image/{fmt}',
+                'contract_version': 2,
+                'operation_id': f'screenshot_{uuid.uuid4().hex[:16]}',
+                'status': 'captured',
+                'mime_type': mime_type,
                 'format': fmt,
                 'size': file_size,
                 'return_base64': False,
                 'data': '',
-                'evidence': {},
+                'artifact_id': artifact.get('artifact_id', ''),
+                'relative_path': artifact.get('relative_path', ''),
+                'evidence_kind': evidence_kind,
+                'evidence': artifact,
             }
         result = await pydoll_tab.take_screenshot(
             beyond_viewport=full_page,
             as_base64=True,
         )
         return {
+            'contract_version': 2,
+            'operation_id': f'screenshot_{uuid.uuid4().hex[:16]}',
             'success': True,
+            'status': 'captured',
             'data': result if isinstance(result, str) else '',
             'format': fmt,
             'return_base64': True,
+            'evidence_kind': evidence_kind,
             'evidence': {},
         }
     except Exception as e:

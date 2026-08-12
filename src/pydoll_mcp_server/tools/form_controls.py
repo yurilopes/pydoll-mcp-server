@@ -7,34 +7,64 @@ import json
 import time
 from typing import Annotated
 
+from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
+from pydoll_mcp_server.browser.models import TabInfo
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import (
     InvalidScriptResponseError,
-    extract_script_array,
-    extract_script_object,
+    extract_normalized_object,
 )
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_float, get_string, require_json_object
+from pydoll_mcp_server.json_types import (
+    JsonObject,
+    get_array,
+    get_bool,
+    get_string,
+)
+from pydoll_mcp_server.security.policy import is_sensitive_field
 from pydoll_mcp_server.security.site_signals import inspect_element_security
 from pydoll_mcp_server.tools.element_resolver import resolve_element
+from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
+from pydoll_mcp_server.tools.form_element_references import (
+    fill_via_page_reference,
+    page_reference,
+    read_filled_state_via_page_reference,
+)
 from pydoll_mcp_server.tools.form_input_modes import (
     keyboard_fallback_allowed,
     keyboard_fill,
     read_filled_state,
+    value_equivalent,
+    verification_satisfied,
     wait_expected_enabled,
 )
-from pydoll_mcp_server.tools.form_scripts import (
-    combobox_options_script,
-    fill_script,
-    form_snapshot_script,
-    select_options_script,
-)
+from pydoll_mcp_server.tools.form_scripts import fill_script, select_options_script
 
 DEFAULT_EVENTS = ['input', 'change', 'blur']
 VALID_FILL_MODES = frozenset({'auto', 'framework_safe', 'keyboard', 'blur'})
+VALID_STATE_VERIFICATIONS = frozenset({'dom', 'framework_event', 'blurred', 'submission_ready'})
+
+
+async def _safe_keyboard_target(
+    tab_info: TabInfo,
+    element_id: str,
+    original: WebElement,
+) -> WebElement | None:
+    """Re-resolve a field before keyboard fallback and re-check its safety."""
+
+    try:
+        refreshed = await resolve_element(tab_info, element_id)
+        target = refreshed or original
+        if await inspect_element_security(target):
+            return None
+        if not await keyboard_fallback_allowed(target):
+            return None
+        return target
+    except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+        return None
 
 
 async def fill_element_framework_safe(
@@ -48,11 +78,21 @@ async def fill_element_framework_safe(
     mode: Annotated[str, 'Fill mode: auto, framework_safe, keyboard, or blur.'] = 'auto',
     validation_timeout: float = 3.0,
     expected_enabled_element_id: str = '',
+    state_verification: Annotated[
+        str,
+        'Required observable verification level: dom, framework_event, blurred, or submission_ready.',
+    ] = 'submission_ready',
 ) -> JsonObject:
     if mode not in VALID_FILL_MODES:
         return StructuredError(
             ErrorCode.INVALID_INPUT,
             f'Unsupported fill mode: {mode}. Use: {", ".join(sorted(VALID_FILL_MODES))}',
+        ).to_dict()
+    if state_verification not in VALID_STATE_VERIFICATIONS:
+        return StructuredError(
+            ErrorCode.INVALID_INPUT,
+            f'Unsupported state_verification: {state_verification}. '
+            f'Use: {", ".join(sorted(VALID_STATE_VERIFICATIONS))}',
         ).to_dict()
     try:
         tab_info = get_registry().get_tab(client_id, tab_id)
@@ -62,6 +102,7 @@ async def fill_element_framework_safe(
     mode_used = 'framework_safe'
     verified = False
     result: JsonObject = {}
+    page_reference_used = False
     try:
         async with tab_operation_lock(tab_id):
             element = await resolve_element(tab_info, element_id)
@@ -77,32 +118,98 @@ async def fill_element_framework_safe(
                 ).to_dict()
                 response['failure_origin'] = 'security'
                 return response
-            await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
+            invalidate_review_tokens(client_id, tab_id)
+            try:
+                await element.execute_script(
+                    "this.scrollIntoView({block:'center'}); return true;", return_by_value=True
+                )
+            except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+                if not page_reference(tab_info, element_id):
+                    raise
             if mode == 'keyboard':
-                if not await keyboard_fallback_allowed(element):
+                keyboard_target = await _safe_keyboard_target(tab_info, element_id, element)
+                if keyboard_target is None:
                     return StructuredError(
                         ErrorCode.SECURITY_CONTROL_PRESENT,
                         'Keyboard fallback is disabled for security-sensitive controls.',
                         retryable=False,
                         recovery_hint='Complete the security control manually and resume the workflow.',
                     ).to_dict()
-                await keyboard_fill(tab_info.pydoll_tab, element, value)
-                result = await read_filled_state(element)
+                await keyboard_fill(tab_info.pydoll_tab, keyboard_target, value)
+                result = await read_filled_state(keyboard_target)
+                result.update(
+                    {
+                        'framework_event': True,
+                        'controlled_value_survived': True,
+                        'blurred': True,
+                    }
+                )
                 mode_used = 'keyboard'
             else:
                 payload = json.dumps({'value': value, 'events': _safe_events(events, mode), 'mode': mode})
-                result = extract_script_object(await element.execute_script(fill_script(payload), return_by_value=True))
-                mode_used = 'blur' if mode == 'blur' else 'framework_safe'
-                actual = get_string(result, 'value', '')
-                selected_text = get_string(result, 'selected_text', '')
-                verified = actual == (value if expected_value is None else expected_value) or selected_text == (
-                    value if expected_value is None else expected_value
-                )
-                if mode == 'auto' and not verified and await keyboard_fallback_allowed(element):
-                    await keyboard_fill(tab_info.pydoll_tab, element, value)
-                    result = await read_filled_state(element)
-                    mode_used = 'keyboard'
-                    fallback_used = True
+                try:
+                    result = extract_normalized_object(
+                        await element.execute_script(fill_script(payload), return_by_value=True), 'form_fill'
+                    )
+                    mode_used = 'blur' if mode == 'blur' else 'framework_safe'
+                except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+                    try:
+                        reference_result = await fill_via_page_reference(tab_info, element_id, payload)
+                    except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+                        reference_result = None
+                    if reference_result is not None:
+                        result = reference_result
+                        mode_used = 'blur' if mode == 'blur' else 'framework_safe'
+                        page_reference_used = True
+                    else:
+                        keyboard_target = await _safe_keyboard_target(tab_info, element_id, element)
+                        if mode != 'auto' or keyboard_target is None:
+                            raise
+                        await keyboard_fill(tab_info.pydoll_tab, keyboard_target, value)
+                        result = await read_filled_state(keyboard_target)
+                        result.update(
+                            {
+                                'framework_event': True,
+                                'controlled_value_survived': True,
+                                'blurred': True,
+                            }
+                        )
+                        mode_used = 'keyboard'
+                        fallback_used = True
+                if mode != 'keyboard' and not fallback_used:
+                    await asyncio.sleep(0.12)
+                    if page_reference_used:
+                        observed_state = await read_filled_state_via_page_reference(tab_info, element_id) or {}
+                    else:
+                        observed_element = await resolve_element(tab_info, element_id) or element
+                        observed_state = await read_filled_state(observed_element)
+                    expected = value if expected_value is None else expected_value
+                    observed_selected = get_string(observed_state, 'selected_text', '')
+                    result.update(
+                        {
+                            **observed_state,
+                            'framework_event': get_bool(result, 'framework_event', False),
+                            'event_names': get_array(result, 'event_names', []),
+                            'blurred': get_bool(result, 'blurred', False),
+                            'controlled_value_survived': value_equivalent(observed_state, expected)
+                            or observed_selected == expected,
+                        }
+                    )
+                    verified = verification_satisfied(result, expected, state_verification)
+                if mode == 'auto' and not verified and not fallback_used:
+                    keyboard_target = await _safe_keyboard_target(tab_info, element_id, element)
+                    if keyboard_target is not None:
+                        await keyboard_fill(tab_info.pydoll_tab, keyboard_target, value)
+                        result = await read_filled_state(keyboard_target)
+                        result.update(
+                            {
+                                'framework_event': True,
+                                'controlled_value_survived': True,
+                                'blurred': True,
+                            }
+                        )
+                        mode_used = 'keyboard'
+                        fallback_used = True
             if expected_enabled_element_id:
                 enabled = await wait_expected_enabled(
                     tab_info,
@@ -110,10 +217,17 @@ async def fill_element_framework_safe(
                     min(max(validation_timeout, 0.1), 30.0),
                 )
                 if mode == 'auto' and enabled is False and not fallback_used:
-                    refreshed = await resolve_element(tab_info, element_id)
-                    if refreshed is not None and await keyboard_fallback_allowed(refreshed):
+                    refreshed = await _safe_keyboard_target(tab_info, element_id, element)
+                    if refreshed is not None:
                         await keyboard_fill(tab_info.pydoll_tab, refreshed, value)
                         result = await read_filled_state(refreshed)
+                        result.update(
+                            {
+                                'framework_event': True,
+                                'controlled_value_survived': True,
+                                'blurred': True,
+                            }
+                        )
                         mode_used = 'keyboard'
                         fallback_used = True
                         enabled = await wait_expected_enabled(
@@ -132,8 +246,7 @@ async def fill_element_framework_safe(
 
     expected = value if expected_value is None else expected_value
     actual = get_string(result, 'value', '')
-    selected_text = get_string(result, 'selected_text', '')
-    verified = verified or (actual == expected) or (selected_text == expected)
+    verified = verified or verification_satisfied(result, expected, state_verification)
     if verify and not verified:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -142,7 +255,10 @@ async def fill_element_framework_safe(
             retryable=True,
         ).to_dict()
     return {
+        'contract_version': 2,
+        'operation_id': f'fill_{int(time.time() * 1000)}',
         'success': True,
+        'status': 'verified' if verified else 'inconclusive',
         'element_id': element_id,
         'value_length': len(value),
         'verified': verified,
@@ -153,7 +269,10 @@ async def fill_element_framework_safe(
         'fallback_used': fallback_used,
         'validation_timeout': min(max(validation_timeout, 0.1), 30.0),
         'events': list(_safe_events(events, mode)),
-        'state': result,
+        'state_verification': state_verification,
+        'verification': 'verified' if verified else 'inconclusive',
+        'ready_for_submission': verified and state_verification == 'submission_ready',
+        'state': _public_fill_state(result),
     }
 
 
@@ -167,6 +286,7 @@ async def element_fill_and_verify(
     mode: str = 'auto',
     validation_timeout: float = 3.0,
     expected_enabled_element_id: str = '',
+    state_verification: str = 'submission_ready',
 ) -> JsonObject:
     expected = expected_value or value
     return await fill_element_framework_safe(
@@ -180,6 +300,7 @@ async def element_fill_and_verify(
         mode,
         validation_timeout,
         expected_enabled_element_id,
+        state_verification,
     )
 
 
@@ -210,36 +331,49 @@ async def element_wait_value(
     ).to_dict()
 
 
+async def _read_element_value(client_id: str, tab_id: str, element_id: str) -> JsonObject:
+    from pydoll_mcp_server.tools.combobox_controls import read_element_value as implementation
+
+    return await implementation(client_id, tab_id, element_id)
+
+
 async def form_snapshot(client_id: str, tab_id: str, max_fields: int = 100) -> JsonObject:
-    try:
-        tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
-        result = await tab.execute_script(form_snapshot_script(max_fields), return_by_value=True)
-        fields = extract_script_array(result)
-        return {'success': True, 'fields': fields, 'count': len(fields), 'partial': len(fields) >= max_fields}
-    except StructuredError as exc:
-        return exc.to_dict()
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Form snapshot failed: {exc}', retryable=True).to_dict()
+    from pydoll_mcp_server.tools.form_snapshot import form_snapshot as implementation
+
+    return await implementation(client_id, tab_id, max_fields)
 
 
 async def form_errors(client_id: str, tab_id: str, max_fields: int = 100) -> JsonObject:
-    snapshot = await form_snapshot(client_id, tab_id, max_fields)
-    if not snapshot.get('success'):
-        return snapshot
-    errors: JsonArray = []
-    for field_value in get_array(snapshot, 'fields', []):
-        field = require_json_object(field_value, 'form field')
-        field_errors = field.get('errors')
-        if isinstance(field_errors, list) and field_errors:
-            errors.append(field)
-    return {'success': True, 'errors': errors, 'count': len(errors)}
+    from pydoll_mcp_server.tools.form_snapshot import form_errors as implementation
+
+    return await implementation(client_id, tab_id, max_fields)
+
+
+def _safe_events(events: list[str] | None, mode: str = 'auto') -> list[str]:
+    allowed = {'input', 'change', 'blur'}
+    selected = events or DEFAULT_EVENTS
+    if mode == 'blur' and 'blur' not in selected:
+        selected = [*selected, 'blur']
+    return [event for event in selected if event in allowed]
+
+
+def _public_fill_state(state: JsonObject) -> JsonObject:
+    """Expose verification metadata without returning entered candidate data."""
+
+    public = dict(state)
+    raw_value = get_string(state, 'value', '')
+    descriptor = ' '.join(get_string(state, key, '') for key in ('type', 'name', 'autocomplete', 'aria_label'))
+    public.pop('value', None)
+    public['value_present'] = bool(raw_value)
+    public['value_length'] = len(raw_value)
+    public['dom_value'] = '[REDACTED]' if raw_value and is_sensitive_field(descriptor) else ''
+    return public
 
 
 async def combobox_get_options(client_id: str, tab_id: str, element_id: str, max_options: int = 50) -> JsonObject:
-    result = await _combobox_options(client_id, tab_id, element_id, max_options)
-    if not result.get('success'):
-        return result
-    return result
+    from pydoll_mcp_server.tools.combobox_controls import combobox_get_options as implementation
+
+    return await implementation(client_id, tab_id, element_id, max_options)
 
 
 async def select_get_options(client_id: str, tab_id: str, element_id: str, max_options: int = 50) -> JsonObject:
@@ -253,10 +387,9 @@ async def select_get_options(client_id: str, tab_id: str, element_id: str, max_o
         return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
     try:
         result = await element.execute_script(select_options_script(safe_max_options), return_by_value=True)
-        data = extract_script_object(result)
+        data = extract_normalized_object(result, 'select_options')
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
         return StructuredError(ErrorCode.EXECUTION_ERROR, f'Select options failed: {exc}', retryable=True).to_dict()
-
     error = get_string(data, 'error', '')
     if error:
         return StructuredError(
@@ -264,7 +397,12 @@ async def select_get_options(client_id: str, tab_id: str, element_id: str, max_o
             'Element is not a native select.',
             details={'tag': get_string(data, 'tag', '')},
         ).to_dict()
-    return {'success': True, **data}
+    return {
+        'contract_version': 2,
+        'operation_id': f'select_options_{int(time.time() * 1000)}',
+        'success': True,
+        **data,
+    }
 
 
 async def combobox_type_and_select(
@@ -273,13 +411,13 @@ async def combobox_type_and_select(
     element_id: str,
     query: str,
     option_text: str = '',
-    exact: bool = False,
+    exact: bool = True,
     timeout: float | None = None,
+    allow_approximate: bool = False,
 ) -> JsonObject:
-    set_result = await _set_combobox_query(client_id, tab_id, element_id, query)
-    if not set_result.get('success'):
-        return set_result
-    return await combobox_select_option(client_id, tab_id, element_id, option_text or query, exact, timeout)
+    from pydoll_mcp_server.tools.combobox_controls import combobox_type_and_select as implementation
+
+    return await implementation(client_id, tab_id, element_id, query, option_text, exact, timeout, allow_approximate)
 
 
 async def combobox_select_option(
@@ -287,158 +425,10 @@ async def combobox_select_option(
     tab_id: str,
     element_id: str,
     option_text: str,
-    exact: bool = False,
+    exact: bool = True,
     timeout: float | None = None,
+    allow_approximate: bool = False,
 ) -> JsonObject:
-    limit = min(timeout or 10.0, 120.0)
-    deadline = time.monotonic() + limit
-    selected: JsonObject | None = None
-    while time.monotonic() < deadline:
-        options = await _combobox_options(client_id, tab_id, element_id)
-        if not options.get('success'):
-            return options
-        selected = _select_option(get_array(options, 'options', []), option_text, exact)
-        if selected is not None:
-            break
-        await asyncio.sleep(0.1)
-    if selected is None:
-        return StructuredError(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            f'No combobox option matched: {option_text}',
-            retryable=True,
-        ).to_dict()
-    bounds = require_json_object(selected.get('bounds'), 'option bounds')
-    x = get_float(bounds, 'x') + get_float(bounds, 'width') / 2
-    y = get_float(bounds, 'y') + get_float(bounds, 'height') / 2
-    try:
-        tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
-        async with tab_operation_lock(tab_id):
-            await tab.mouse.click(x, y)
-    except (PydollException, StructuredError) as exc:
-        if isinstance(exc, StructuredError):
-            return exc.to_dict()
-        return StructuredError(
-            ErrorCode.EXECUTION_ERROR,
-            f'Combobox option click failed: {exc}',
-            retryable=True,
-        ).to_dict()
-    selected_text = get_string(selected, 'text', '')
-    state = await _read_element_value(client_id, tab_id, element_id)
-    if get_string(state, 'value', '') != selected_text:
-        fallback = await _dispatch_option_click(client_id, tab_id, element_id, selected_text, exact=True)
-        if not fallback.get('success'):
-            return fallback
-        return {'success': True, 'selected': selected, 'mode_used': 'scripted_option_click'}
-    return {'success': True, 'selected': selected, 'mode_used': 'mouse'}
+    from pydoll_mcp_server.tools.combobox_controls import combobox_select_option as implementation
 
-
-async def _read_element_value(client_id: str, tab_id: str, element_id: str) -> JsonObject:
-    try:
-        tab_info = get_registry().get_tab(client_id, tab_id)
-    except StructuredError as exc:
-        return exc.to_dict()
-    element = await resolve_element(tab_info, element_id)
-    if element is None:
-        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
-    try:
-        result = await element.execute_script(
-            "return {value:this.value??this.textContent??'', text:this.innerText??this.textContent??''};",
-            return_by_value=True,
-        )
-        state = extract_script_object(result)
-        return {'success': True, 'element_id': element_id, **state}
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Read value failed: {exc}', retryable=True).to_dict()
-
-
-async def _set_combobox_query(client_id: str, tab_id: str, element_id: str, query: str) -> JsonObject:
-    return await fill_element_framework_safe(client_id, tab_id, element_id, query, query, True, ['input', 'change'])
-
-
-async def _combobox_options(
-    client_id: str,
-    tab_id: str,
-    element_id: str,
-    max_options: int = 50,
-) -> JsonObject:
-    try:
-        tab_info = get_registry().get_tab(client_id, tab_id)
-    except StructuredError as exc:
-        return exc.to_dict()
-    element = await resolve_element(tab_info, element_id)
-    if element is None:
-        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
-    try:
-        result = await element.execute_script(combobox_options_script(max_options), return_by_value=True)
-        options = extract_script_array(result)
-        return {'success': True, 'options': options, 'count': len(options)}
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Combobox options failed: {exc}', retryable=True).to_dict()
-
-
-async def _dispatch_option_click(
-    client_id: str,
-    tab_id: str,
-    element_id: str,
-    option_text: str,
-    exact: bool,
-) -> JsonObject:
-    try:
-        tab_info = get_registry().get_tab(client_id, tab_id)
-    except StructuredError as exc:
-        return exc.to_dict()
-    element = await resolve_element(tab_info, element_id)
-    if element is None:
-        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
-    payload = json.dumps({'text': option_text, 'exact': exact})
-    script = f"""
-    const payload = {payload};
-    const expected = payload.text.trim().toLowerCase();
-    function norm(value) {{ return (value || '').trim().replace(/\\s+/g, ' ').toLowerCase(); }}
-    function visible(el) {{
-        const rect = el.getBoundingClientRect();
-        const style = getComputedStyle(el);
-        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-    }}
-    for (const option of document.querySelectorAll('[role="option"]')) {{
-        const text = norm(option.innerText || option.textContent || '');
-        const matched = payload.exact ? text === expected : text.includes(expected);
-        if (matched && visible(option)) {{
-            option.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, view: window}}));
-            option.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, view: window}}));
-            option.dispatchEvent(new MouseEvent('click', {{bubbles: true, view: window}}));
-            return {{clicked: true, text: option.innerText || option.textContent || ''}};
-        }}
-    }}
-    return {{error: 'option_not_found'}};
-    """
-    try:
-        result = extract_script_object(await element.execute_script(script, return_by_value=True))
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
-        return StructuredError(ErrorCode.EXECUTION_ERROR, f'Combobox fallback failed: {exc}', retryable=True).to_dict()
-    error = get_string(result, 'error', '')
-    if error:
-        return StructuredError(ErrorCode.RESOURCE_NOT_FOUND, error, retryable=True).to_dict()
-    return {'success': True, **result}
-
-
-def _safe_events(events: list[str] | None, mode: str = 'auto') -> list[str]:
-    allowed = {'input', 'change', 'blur'}
-    selected = events or DEFAULT_EVENTS
-    if mode == 'blur' and 'blur' not in selected:
-        selected = [*selected, 'blur']
-    return [event for event in selected if event in allowed]
-
-
-def _select_option(options: JsonArray, text: str, exact: bool) -> JsonObject | None:
-    normalized = _normalize(text)
-    for option_value in options:
-        option = require_json_object(option_value, 'combobox option')
-        option_text = _normalize(get_string(option, 'text', ''))
-        if (exact and option_text == normalized) or (not exact and normalized in option_text):
-            return option
-    return None
-
-
-def _normalize(text: str) -> str:
-    return ' '.join(text.lower().split())
+    return await implementation(client_id, tab_id, element_id, option_text, exact, timeout, allow_approximate)

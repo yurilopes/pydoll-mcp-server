@@ -1,5 +1,7 @@
 """Version consistency across source and public health responses."""
 
+import asyncio
+
 from pytest import MonkeyPatch
 
 from pydoll_mcp_server import __version__ as public_version
@@ -19,7 +21,7 @@ def test_source_and_health_responses_share_one_version(monkeypatch: MonkeyPatch)
     assert get_version() == expected
     assert get_health_response()['version'] == expected
     assert health_check()['version'] == expected
-    assert server_status()['version'] == expected
+    assert asyncio.run(server_status())['version'] == expected
     get_config.cache_clear()
 
 

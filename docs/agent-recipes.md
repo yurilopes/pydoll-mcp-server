@@ -26,6 +26,17 @@ For disposable browsing where state should not persist:
 3. `page_get_text(client_id, tab_id)`
 4. `page_get_interactive_summary(client_id, tab_id)`
 
+For a persistent browser session, call `browser_list` before `browser_launch`.
+If a browser already exists for the client and profile, `browser_launch` returns
+that browser with `reused=true`. Open additional pages with `tab_new`. Do not
+start another browser for each search or page. A managed browser is closed when
+the MCP server shuts down, while its persistent profile retains authentication.
+
+Before opening another page, call `tab_list` and keep the live count at five or fewer. The
+server reconciles tabs opened by pages or manually in Chrome, so the count is not limited to
+tabs created through `tab_new`. A tab close is confirmed only when Chrome removes the target;
+`DIALOG_PRESENT` means that `dialog_handle` is required before retrying.
+
 Use `page_get_tree` when you need DOM shape. It hides head metadata and
 invisible nodes by default. Use `include_head=true` or `include_invisible=true`
 only for diagnostics.
@@ -145,6 +156,50 @@ staging internally only when required.
 Check `file_upload_state` or `visible_in_page` after upload if the page moves
 file state out of the native input. Use `artifact_prepare_upload` only when a
 stable artifact copy is explicitly useful for later operations.
+
+## Prepare and review a job application
+
+Use the v2 workflow for a job application. It separates inspection, planned
+mutations, review, and the authorized final click:
+
+1. Call `form_preflight` with the candidate facts and planned uploads. It
+   reports required fields, missing candidate data, upload states, visible
+   errors, security controls, attestations, and partial discovery errors.
+2. Call `form_prepare` with only the approved fields, choices, comboboxes,
+   uploads, and explicitly named intermediate steps. It never clicks the final
+   submit action.
+3. Call `form_review` and inspect `blockers`, `handoff`, `ready_for_submission`,
+   selected labels, upload states, and the pre-submission evidence artifact.
+4. If the review is ready and the session has explicit authorization, call
+   `form_submit_after_review` with the returned `review_token` and either
+   `session_autonomous` or `user_approved`.
+
+The review token is bound to the client, tab, document generation, form
+fingerprint, and expiration. It is single-use and becomes invalid after a
+relevant change or server restart. Never retry a submit when the click
+transport is unknown. Re-run preflight and review instead.
+
+Example preflight:
+
+```json
+{
+  "client_id": "agent",
+  "tab_id": "tab",
+  "planned_fields": [
+    {"label": "Full Name", "value": "Jane Doe"},
+    {"label": "Email", "value": "jane@example.com"}
+  ],
+  "planned_uploads": [
+    {"label": "Resume", "path": "C:/approved/resume.pdf"}
+  ],
+  "employer_domain": "example.com",
+  "include_values": false
+}
+```
+
+Do not provide guessed address, salary, work authorization, demographic,
+attestation, or consent values. A handoff is the expected result when the
+candidate must answer or complete a security control.
 
 ## Complete a multi-step form flow
 

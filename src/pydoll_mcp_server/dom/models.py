@@ -48,6 +48,7 @@ class DeepRawElement(TypedDict):
     element_id: str
     tag: str
     text: str
+    value_length: NotRequired[int]
     attrs: dict[str, str]
     selector_hint: str
     xpath_hint: str
@@ -130,6 +131,9 @@ def parse_deep_element(value: object) -> DeepRawElement:
         'frame_path': _string_list(get_array(node, 'frame_path', []), 'deep element.frame_path'),
         'shadow_path': _string_list(get_array(node, 'shadow_path', []), 'deep element.shadow_path'),
     }
+    value_length = node.get('value_length')
+    if isinstance(value_length, int) and not isinstance(value_length, bool):
+        parsed['value_length'] = value_length
     match_index = node.get('match_index')
     if isinstance(match_index, int) and not isinstance(match_index, bool):
         parsed['match_index'] = match_index

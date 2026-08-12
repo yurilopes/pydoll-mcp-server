@@ -8,7 +8,7 @@ import json
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
+from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
 from pydoll_mcp_server.errors import StructuredError
 
 
@@ -36,7 +36,7 @@ async def wait_for_choice_state(
         try:
             tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
             result = await tab.execute_script(script, return_by_value=True)
-            state = extract_script_object(result)
+            state = extract_normalized_object(result, 'choice_state')
             if state.get('selected') is True:
                 return True
         except (StructuredError, PydollException, InvalidScriptResponseError, TypeError, ValueError):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +13,12 @@ from pydoll_mcp_server.json_types import JsonObject
 from tests.typing_helpers import string_at
 
 pytestmark = [pytest.mark.unit]
+
+
+async def _write_fake_screenshot(*args: object, **kwargs: object) -> None:
+    path = kwargs.get('path')
+    if isinstance(path, str):
+        Path(path).write_bytes(b'fake-screenshot')
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +75,7 @@ class TestElementScreenshotSecurity:
             from pydoll_mcp_server.tools.elements import element_screenshot
 
         mock_element = MagicMock()
-        mock_element.take_screenshot = AsyncMock(return_value='fake-data')
+        mock_element.take_screenshot = AsyncMock(side_effect=_write_fake_screenshot)
 
         with (
             patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),
@@ -137,7 +144,7 @@ class TestElementScreenshotSecurity:
             from pydoll_mcp_server.tools.elements import element_screenshot
 
         mock_element = MagicMock()
-        mock_element.take_screenshot = AsyncMock(return_value=None)
+        mock_element.take_screenshot = AsyncMock(side_effect=_write_fake_screenshot)
 
         with (
             patch.dict(os.environ, {'PYDOLL_MCP_ALLOW_NO_AUTH': 'true'}),

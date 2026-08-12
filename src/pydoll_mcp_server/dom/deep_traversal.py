@@ -13,7 +13,7 @@ from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.models import TabInfo
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_object
+from pydoll_mcp_server.browser.script_utils import extract_normalized_object
 from pydoll_mcp_server.config import get_limits_config, get_timeout_config
 from pydoll_mcp_server.dom.deep_helpers import (
     cache_deep_nodes,
@@ -68,7 +68,7 @@ async def page_get_tree_deep(
             pydoll_tab.execute_script(script, return_by_value=True),
             timeout=timeout,
         )
-        raw = extract_script_object(response)
+        raw = extract_normalized_object(response, 'page_get_tree_deep')
     except asyncio.TimeoutError:
         raw = {}
         partial = True
@@ -186,7 +186,7 @@ async def element_find_deep(
             pydoll_tab.execute_script(script, return_by_value=True),
             timeout=timeout,
         )
-        raw = extract_script_object(response)
+        raw = extract_normalized_object(response, 'element_find_deep')
     except asyncio.TimeoutError:
         return StructuredError(
             error_code=ErrorCode.TIMEOUT,

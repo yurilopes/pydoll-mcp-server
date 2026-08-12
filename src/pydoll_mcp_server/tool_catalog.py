@@ -21,7 +21,9 @@ from pydoll_mcp_server.tool_metadata import (
 )
 from pydoll_mcp_server.tool_runtime import set_active_tool_profile
 from pydoll_mcp_server.tools.active_surface import page_get_active_surface
-from pydoll_mcp_server.tools.browser import browser_close, browser_launch, browser_list, proxy_get
+from pydoll_mcp_server.tools.artifacts import artifact_export
+from pydoll_mcp_server.tools.browser import browser_close, browser_launch, browser_list
+from pydoll_mcp_server.tools.browser_proxy import proxy_get
 from pydoll_mcp_server.tools.diagnostics import (
     browser_attach,
     diagnostics_snapshot,
@@ -82,6 +84,13 @@ from pydoll_mcp_server.tools.form_controls import (
     select_get_options,
 )
 from pydoll_mcp_server.tools.form_fill import form_fill_fields
+from pydoll_mcp_server.tools.form_workflow import (
+    application_domain_status,
+    form_preflight,
+    form_prepare,
+    form_review,
+    form_submit_after_review,
+)
 from pydoll_mcp_server.tools.http import http_request, network_replay_request
 from pydoll_mcp_server.tools.inspection import (
     console_disable,
@@ -299,8 +308,14 @@ TOOLS: tuple[Tool, ...] = (
     element_resolve_again,
     form_fill_fields,
     form_select_choice,
+    form_preflight,
+    form_review,
+    form_prepare,
+    form_submit_after_review,
+    application_domain_status,
     page_click_primary_action,
     artifact_prepare_upload,
+    artifact_export,
     submission_wait_for_confirmation,
     profile_list,
     profile_promote,

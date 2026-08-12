@@ -219,7 +219,7 @@ class TestBehavioralLocks:
             resolve_element,
         )
 
-        result = await element_tools.element_click('client-1', 'tab-1', 'el-1')
+        result = await element_tools.element_click('client-1', 'tab-1', 'el-1', click_strategy='native')
 
         assert result['success'] is True
         assert lock_probe.events == [('enter', 'tab-1'), ('exit', 'tab-1')]

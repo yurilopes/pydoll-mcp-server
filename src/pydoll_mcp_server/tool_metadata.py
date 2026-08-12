@@ -43,16 +43,21 @@ OPEN_DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, ide
 AGENT_TOOL_NAMES = frozenset(
     _split_names(
         """
-    health_check server_status browser_launch browser_list browser_close tab_list tab_activate tab_close tab_recover
+    health_check server_status browser_launch browser_list browser_close browser_attach tab_list tab_activate
+    tab_close tab_recover
     tab_new tab_health_check profile_list page_goto page_reload page_back page_forward page_wait_for_url page_get_text
-    page_snapshot page_screenshot page_get_interactive_summary page_get_active_surface page_scroll page_scroll_to
-    element_find element_find_by_role element_find_by_text element_find_by_label element_find_by_placeholder
+    page_snapshot page_screenshot page_get_tree_deep page_get_interactive_summary page_get_active_surface
+    frame_list page_scroll page_scroll_to
+    element_find element_find_deep element_find_by_role element_find_by_text element_find_by_label
+    element_find_by_placeholder
     element_resolve_again element_click element_click_by_text element_type element_fill element_get_text
     element_get_attribute element_get_state element_select_option element_check element_uncheck keyboard_press
-    form_snapshot form_errors form_fill_fields form_select_choice combobox_get_options select_get_options
+    form_snapshot form_errors form_fill_fields form_select_choice form_preflight form_review form_prepare
+    form_submit_after_review application_domain_status combobox_get_options select_get_options
     combobox_type_and_select combobox_select_option page_wait_for_text page_wait_text_gone page_wait_for_selector
     page_wait_for_network_idle element_wait_for_state element_wait_value operation_cancel page_click_primary_action
-    submission_wait_for_confirmation artifact_get_paths artifact_prepare_upload upload_files upload_files_from_trigger
+    submission_wait_for_confirmation artifact_get_paths artifact_export artifact_prepare_upload upload_files
+    upload_files_from_trigger
     file_upload_state
         """
     )
@@ -92,8 +97,10 @@ PUBLIC_TOOL_NAMES = _split_names(
     network_summary network_clear dialog_list dialog_handle popup_prepare popup_wait download_prepare download_wait
     download_list download_get_info page_print_pdf mouse_click form_snapshot form_errors combobox_get_options
     select_get_options combobox_type_and_select combobox_select_option page_get_active_surface
-    element_find_by_text_candidates element_resolve_again form_fill_fields form_select_choice page_click_primary_action
-    artifact_prepare_upload submission_wait_for_confirmation profile_list profile_promote linkedin_job_snapshot
+    element_find_by_text_candidates element_resolve_again form_fill_fields form_select_choice form_preflight form_review
+    form_prepare form_submit_after_review application_domain_status page_click_primary_action
+    artifact_prepare_upload artifact_export submission_wait_for_confirmation profile_list profile_promote
+    linkedin_job_snapshot
     linkedin_easy_apply_open linkedin_easy_apply_close linkedin_easy_apply_snapshot linkedin_easy_apply_wait_ready
     linkedin_easy_apply_upload_resume linkedin_easy_apply_click_next linkedin_easy_apply_fill_questions
     linkedin_easy_apply_handle_save_prompt linkedin_easy_apply_submit linkedin_jobs_page_snapshot
@@ -115,7 +122,8 @@ _MUTATING_TOOL_NAMES = frozenset(
     element_hover
     element_scroll_into_view keyboard_press page_scroll page_scroll_to page_print_pdf operation_cancel network_clear
     dialog_handle popup_prepare download_prepare mouse_click combobox_type_and_select combobox_select_option
-    form_fill_fields form_select_choice page_click_primary_action artifact_prepare_upload profile_promote
+    form_fill_fields form_select_choice form_prepare artifact_export page_click_primary_action
+    artifact_prepare_upload profile_promote
     linkedin_easy_apply_open linkedin_easy_apply_close linkedin_easy_apply_upload_resume linkedin_easy_apply_click_next
     linkedin_easy_apply_fill_questions linkedin_easy_apply_handle_save_prompt linkedin_easy_apply_submit
     linkedin_jobs_search linkedin_jobs_open_result linkedin_message_recruiter
@@ -125,13 +133,13 @@ _MUTATING_TOOL_NAMES = frozenset(
 _DESTRUCTIVE_TOOL_NAMES = frozenset(
     _split_names(
         'browser_close tab_close tab_recreate js_evaluate http_request network_clear network_replay_request '
-        'linkedin_easy_apply_submit'
+        'linkedin_easy_apply_submit form_submit_after_review'
     )
 )
 _OPEN_WORLD_TOOL_NAMES = frozenset(
     _split_names(
         'browser_launch page_goto page_reload page_back page_forward http_request network_replay_request '
-        'tab_new tab_duplicate user_agent_set linkedin_jobs_search linkedin_easy_apply_submit'
+        'tab_new tab_duplicate user_agent_set linkedin_jobs_search linkedin_easy_apply_submit form_submit_after_review'
     )
 )
 
@@ -183,6 +191,11 @@ _TITLE_OVERRIDES = {
     'page_get_active_surface': 'Get Active Surface',
     'page_click_primary_action': 'Click Primary Action',
     'submission_wait_for_confirmation': 'Wait for Submission Confirmation',
+    'form_preflight': 'Preflight Form',
+    'form_review': 'Review Form',
+    'form_prepare': 'Prepare Form',
+    'form_submit_after_review': 'Submit After Review',
+    'application_domain_status': 'Check Application Domain Status',
 }
 
 _DESCRIPTION_OVERRIDES = {
@@ -241,6 +254,24 @@ _DESCRIPTION_OVERRIDES = {
     'submission_wait_for_confirmation': (
         'Wait for success text, status text, URL change, or modal closure after submission. '
         'Use immediately after a submit action.'
+    ),
+    'form_preflight': (
+        'Inspect required fields, blockers, security controls, and candidate data gaps without changing the page.'
+    ),
+    'form_review': (
+        'Capture a compact, redacted review of the current application form and issue a short-lived review token '
+        'only when the state is consistent.'
+    ),
+    'form_prepare': (
+        'Prepare an application form from explicit caller-provided facts, choices, comboboxes, uploads, and steps. '
+        'Never clicks the final submit action.'
+    ),
+    'form_submit_after_review': (
+        'Submit exactly once after validating a scoped review token and explicit authorization. '
+        'Returns a typed outcome and never retries an unknown click.'
+    ),
+    'application_domain_status': (
+        'Check a restriction recorded for one explicit employer domain. Restrictions are not inferred across domains.'
     ),
     'upload_files_from_trigger': (
         'Upload an explicit local file through a custom browser trigger without manual staging. '

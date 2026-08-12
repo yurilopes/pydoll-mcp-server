@@ -11,7 +11,7 @@ from pydoll.exceptions import PydollException
 from pydoll_mcp_server.browser.models import TabInfo
 from pydoll_mcp_server.browser.pydoll_compat import set_input_files
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_object
+from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
 from pydoll_mcp_server.config import ServerConfig, get_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_object, get_string
@@ -19,6 +19,7 @@ from pydoll_mcp_server.security.policy import PathAllowlist
 from pydoll_mcp_server.security.upload_policy import upload_allowlist, validate_upload_path
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.files import file_info
+from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
 
 
 async def artifact_prepare_upload(
@@ -90,7 +91,10 @@ async def upload_files_enhanced(
     paths: list[str],
     expect_filename_visible: bool = False,
     verify_timeout: float | None = None,
+    replace_existing: bool = False,
 ) -> JsonObject:
+    if not paths:
+        return StructuredError(ErrorCode.INVALID_INPUT, 'At least one upload path is required.').to_dict()
     registry = get_registry()
 
     for p in paths:
@@ -111,7 +115,23 @@ async def upload_files_enhanced(
             retryable=False,
         ).to_dict()
 
+    from pydoll_mcp_server.tools.files import file_upload_state
+
+    current_state = await file_upload_state(client_id, tab_id, element_id)
+    current_status = str(current_state.get('state', 'absent'))
+    if (
+        current_status in {'accepted', 'accepted_with_verification_warning', 'processing', 'rendered'}
+        and not replace_existing
+    ):
+        return StructuredError(
+            ErrorCode.UPLOAD_STATE_CONFLICT,
+            'The upload control already contains a file. Set replace_existing=true to replace it.',
+            details={'state': current_state},
+            retryable=False,
+        ).to_dict()
+
     try:
+        invalidate_review_tokens(client_id, tab_id)
         await set_input_files(element, paths)
     except (PydollException, ValueError, OSError) as exc:
         return StructuredError(
@@ -122,6 +142,7 @@ async def upload_files_enhanced(
 
     accepted: JsonArray = [file_info(Path(p)) for p in paths]
     native_state = await _get_upload_state_native(tab_info, element_id)
+    semantic_state = await file_upload_state(client_id, tab_id, element_id)
     filename_visible_map: JsonObject = {}
     visible_in_page = False
     nearby_text = ''
@@ -146,12 +167,20 @@ async def upload_files_enhanced(
             'The site likely moved upload state into custom UI.'
         )
 
+    state_name = get_string(semantic_state, 'state', 'unknown')
     return {
+        'contract_version': 2,
+        'operation_id': f'upload_{element_id}',
         'success': True,
+        'status': state_name,
         'count': len(paths),
         'accepted': accepted,
         'accepted_by_input': native_files_count > 0,
         'visible_in_page': visible_in_page,
+        'replace_existing': replace_existing,
+        'state': state_name,
+        'upload_state': semantic_state,
+        'upload_id': semantic_state.get('upload_id', ''),
         'filename_visible': filename_visible_map,
         'nearby_text': nearby_text,
         'diagnostics': list(diagnostics),
@@ -186,7 +215,7 @@ async def _get_upload_state_native(tab_info: TabInfo, element_id: str) -> JsonOb
             'const files = [...(this.files || [])]; return {count: files.length};',
             return_by_value=True,
         )
-        data = extract_script_object(result)
+        data = extract_normalized_object(result, 'upload_native_state')
         return {'success': True, 'count': data.get('count', 0)}
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
         return {'success': False, 'count': 0}
@@ -235,7 +264,7 @@ async def _wait_filename_visible(
                 f'const names={json.dumps(expected_names)};({script})(names)',
                 return_by_value=True,
             )
-            data = extract_script_object(result)
+            data = extract_normalized_object(result, 'upload_filename_visibility')
             if data.get('any'):
                 name_map = get_object(data, 'visible', {})
                 visible = True

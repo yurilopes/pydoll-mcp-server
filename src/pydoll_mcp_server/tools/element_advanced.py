@@ -12,8 +12,8 @@ from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import (
     InvalidScriptResponseError,
-    extract_script_object,
-    extract_script_value,
+    extract_normalized_object,
+    extract_normalized_value,
 )
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonObject, get_bool, get_object, get_string
@@ -22,6 +22,7 @@ from pydoll_mcp_server.security.site_signals import inspect_element_security
 from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.elements import element_find
+from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
 
 
 async def element_get_state(client_id: str, tab_id: str, element_id: str) -> JsonObject:
@@ -35,7 +36,7 @@ async def element_get_state(client_id: str, tab_id: str, element_id: str) -> Jso
         focused:document.activeElement===this,value:this.value??null,type:this.type||''};""",
         return_by_value=True,
     )
-    state = extract_script_object(result)
+    state = extract_normalized_object(result, 'element_get_state')
     if is_sensitive_field(get_string(state, 'type')) and state.get('value') is not None:
         state['value'] = '[REDACTED]'
         state['redacted'] = True
@@ -50,6 +51,7 @@ async def element_select_option(
     labels: list[str] | None = None,
     indexes: list[int] | None = None,
 ) -> JsonObject:
+    invalidate_review_tokens(client_id, tab_id)
     payload = json.dumps({'values': values or [], 'labels': labels or [], 'indexes': indexes or []})
     script = f"""const q={payload};if(this.tagName!=='SELECT')return {{error:'not_select'}};
     const opts=[...this.options];let n=0;for(const o of opts){{const yes=q.values.includes(o.value)||
@@ -178,6 +180,7 @@ async def _set_checked(client_id: str, tab_id: str, element_id: str, checked: bo
                 ).to_dict()
                 response['failure_origin'] = 'security'
                 return response
+            invalidate_review_tokens(client_id, tab_id)
             result = await set_choice_state(element, checked)
         error = get_string(result, 'error', '')
         if error:
@@ -192,10 +195,23 @@ async def _set_checked(client_id: str, tab_id: str, element_id: str, checked: bo
                 details=get_object(result, 'diagnostic', {}),
             ).to_dict()
         return {
+            'contract_version': 2,
+            'operation_id': f'choice_{element_id}',
             'success': True,
+            'status': 'verified' if get_bool(result, 'verified') else 'inconclusive',
             'element_id': element_id,
             'checked': get_bool(result, 'checked'),
+            'indeterminate': get_bool(result, 'indeterminate'),
+            'selected_label': get_string(result, 'label'),
+            'selected_state': (
+                'indeterminate'
+                if get_bool(result, 'indeterminate')
+                else 'selected'
+                if get_bool(result, 'checked')
+                else 'unselected'
+            ),
             'verified': get_bool(result, 'verified'),
+            'verification': 'verified' if get_bool(result, 'verified') else 'inconclusive',
             'strategy_used': get_string(result, 'strategy_used'),
         }
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
@@ -229,7 +245,7 @@ async def _mutate(client_id: str, tab_id: str, element_id: str, script: str, act
                 ).to_dict()
                 response['failure_origin'] = 'security'
                 return response
-            result = extract_script_value(await element.execute_script(script, return_by_value=True))
+            result = extract_normalized_value(await element.execute_script(script, return_by_value=True), action)
         if isinstance(result, dict) and result.get('error'):
             return StructuredError(ErrorCode.INVALID_INPUT, str(result['error'])).to_dict()
         return {'success': True, 'element_id': element_id, action: result}

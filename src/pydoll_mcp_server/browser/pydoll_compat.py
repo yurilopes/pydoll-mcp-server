@@ -38,6 +38,11 @@ def create_chromium_options() -> ChromiumOptions:
     return factory()
 
 
+def install_browser_process_manager(browser: Browser, process_manager: object) -> None:
+    """Install a managed process manager before Pydoll starts the browser."""
+    object.__setattr__(browser, '_browser_process_manager', process_manager)
+
+
 async def get_tab_url(tab: Tab) -> str:
     url = await tab.current_url
     return str(url) if url else ''
@@ -46,6 +51,22 @@ async def get_tab_url(tab: Tab) -> str:
 async def get_tab_title(tab: Tab) -> str:
     title = await tab.title
     return str(title) if title else ''
+
+
+def get_tab_target_id(tab: Tab) -> str:
+    """Read the stable Pydoll target identifier at the compatibility boundary."""
+
+    try:
+        target_id: object = object.__getattribute__(tab, '_target_id')
+    except AttributeError:
+        return ''
+    return target_id if isinstance(target_id, str) else ''
+
+
+async def get_opened_tabs(browser: Browser) -> list[Tab]:
+    """Return live page targets currently exposed by Pydoll."""
+
+    return await browser.get_opened_tabs()
 
 
 async def get_element_text(element: WebElement) -> str:
@@ -117,6 +138,13 @@ async def close_tab(tab: Tab) -> None:
     await operation()
 
 
+async def tab_has_dialog(tab: Tab) -> bool:
+    """Check for a browser dialog without exposing the Pydoll object to tools."""
+
+    await enable_page_events(tab)
+    return await tab.has_dialog()
+
+
 async def try_close_tab(tab: Tab) -> bool:
     # Closing the replaced tab is best-effort because the recovered tab must remain usable.
     try:
@@ -148,6 +176,24 @@ def get_browser_process_id(browser: Browser) -> int | None:
     except AttributeError:
         return None
     return process_id if isinstance(process_id, int) and not isinstance(process_id, bool) else None
+
+
+def get_browser_connection_port(browser: Browser) -> int | None:
+    """Read the Pydoll connection port at the isolated compatibility boundary."""
+
+    try:
+        port: object = object.__getattribute__(browser, '_connection_port')
+    except AttributeError:
+        return None
+    return port if isinstance(port, int) and not isinstance(port, bool) and port > 0 else None
+
+
+async def get_browser_ws_address(connection_port: int) -> str:
+    """Resolve a browser websocket endpoint through Pydoll's supported helper."""
+
+    from pydoll.utils.general import get_browser_ws_address
+
+    return await get_browser_ws_address(connection_port)
 
 
 async def register_runtime_callback(

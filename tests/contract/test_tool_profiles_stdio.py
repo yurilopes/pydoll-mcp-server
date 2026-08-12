@@ -20,7 +20,7 @@ pytestmark = pytest.mark.contract
 @pytest.mark.asyncio
 async def test_stdio_handshake_exposes_selected_profiles(tmp_path: Path) -> None:
     root = Path(__file__).parents[2]
-    expected_counts = {'full': 145, 'agent': 63, 'linkedin': 79}
+    expected_counts = {'full': 151, 'agent': 73, 'linkedin': 89}
 
     for profile, expected_count in expected_counts.items():
         environment = dict(os.environ)

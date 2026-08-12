@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 
 from pydoll.elements.web_element import WebElement
-from pydoll.exceptions import PydollException
+from pydoll.exceptions import ElementNotInteractable, ElementNotVisible, PydollException
 from pydoll.protocol.input.types import MouseButton
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import extract_script_object
+from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
 from pydoll_mcp_server.config import get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_bool, get_object, get_string
@@ -24,8 +24,11 @@ from pydoll_mcp_server.tools.click_observation import (
     observe_effects,
 )
 from pydoll_mcp_server.tools.element_resolver import resolve_element_for_action
+from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
 
-VALID_STRATEGIES = frozenset({'native', 'center_mouse', 'dispatch_pointer_sequence', 'trusted_fallback_if_safe'})
+VALID_STRATEGIES = frozenset(
+    {'auto', 'native', 'center_mouse', 'dispatch_pointer_sequence', 'trusted_fallback_if_safe'}
+)
 
 
 async def element_click_enhanced(
@@ -33,7 +36,7 @@ async def element_click_enhanced(
     tab_id: str,
     element_id: str,
     timeout: float | None = None,
-    click_strategy: str = 'native',
+    click_strategy: str = 'auto',
     expect_dialog: bool = False,
     expect_url_change: bool = False,
     expect_text: str = '',
@@ -67,6 +70,7 @@ async def element_click_enhanced(
     strategy_used = click_strategy
     clicked = False
     last_error: str | None = None
+    action_unknown = False
     baseline: JsonObject = {}
 
     async with tab_operation_lock(tab_id):
@@ -79,6 +83,7 @@ async def element_click_enhanced(
         element = resolution.element
         if element is None:
             return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
+        invalidate_review_tokens(client_id, tab_id)
         security_control = await inspect_element_security(element)
         if security_control:
             response = StructuredError(
@@ -103,7 +108,11 @@ async def element_click_enhanced(
                 expect_active_surface_change,
             )
 
-        choice_result = await set_choice_state(element, True)
+        choice_result: JsonObject = {}
+        try:
+            choice_result = await set_choice_state(element, True)
+        except (InvalidScriptResponseError, PydollException, TypeError, ValueError):
+            choice_result = {'error': 'not_checkable'}
         choice_error = get_string(choice_result, 'error', '')
         if not choice_error:
             clicked = get_bool(choice_result, 'verified')
@@ -126,10 +135,27 @@ async def element_click_enhanced(
                 break
             except (PydollException, ValueError, TypeError) as exc:
                 last_error = str(exc)
+                if (
+                    strategy == 'native'
+                    and click_strategy == 'auto'
+                    and not isinstance(exc, ElementNotVisible | ElementNotInteractable)
+                ):
+                    action_unknown = True
+                    break
                 if strategy != 'native':
                     fallbacks_attempted.append(strategy)
                 continue
 
+    if action_unknown:
+        response = StructuredError(
+            ErrorCode.ACTION_UNKNOWN,
+            'Native click transport failed after the action may have been dispatched. No click retry was attempted.',
+            retryable=False,
+            details={'strategy': 'native', 'error': last_error or 'unknown'},
+            recovery_hint='Observe the page manually before taking another action.',
+        ).to_dict()
+        response['failure_origin'] = 'transport'
+        return response
     if not clicked:
         response = StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -185,6 +211,8 @@ async def element_click_enhanced(
         'timestamp': time.time(),
         'strategy': strategy_used,
         'before': {'url': pre_click_url},
+        'after': {'url': await get_tab_url(tab_info.pydoll_tab) or ''},
+        'viewport': {},
     }
 
     missing = missing_effects(
@@ -227,6 +255,11 @@ async def element_click_enhanced(
         'missing': missing,
         'evidence': evidence,
     }
+    action_status = 'verified' if effect_observed else ('unknown' if has_effect_request else 'dispatched')
+    effect_kind = 'visible_effect' if effect_observed else 'no_effect'
+    if 'expect_selector_hidden' in matched_effects:
+        effect_kind = 'hidden_effect'
+    page_effect.update({'effect_status': effect_kind})
     if has_effect_request and missing:
         response = StructuredError(
             ErrorCode.NO_EFFECT,
@@ -243,14 +276,19 @@ async def element_click_enhanced(
                 'page_effect': page_effect,
                 'site_diagnostics': diagnostics,
                 'failure_origin': 'page',
+                'effect_status': effect_kind if effect_kind == 'hidden_effect' else 'unknown',
             }
         )
         return response
 
     return {
+        'contract_version': 2,
+        'operation_id': f'click_{int(time.time() * 1000)}',
         'success': True,
+        'status': action_status,
         'element_id': element_id,
         'clicked': clicked,
+        'verified': clicked,
         'effect_observed': effect_observed,
         'strategy_used': strategy_used,
         'fallbacks_attempted': list(fallbacks_attempted),
@@ -259,6 +297,7 @@ async def element_click_enhanced(
         'evidence': evidence,
         'mcp_action': mcp_action,
         'page_effect': page_effect,
+        'effect_status': effect_kind if has_effect_request else 'no_effect',
         'site_diagnostics': diagnostics,
         'failure_origin': '',
     }
@@ -275,7 +314,7 @@ async def _execute_click(tab_id: str, client_id: str, element: WebElement, strat
             'const r=this.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};',
             return_by_value=True,
         )
-        pos = extract_script_object(result)
+        pos = extract_normalized_object(result, 'click_center_bounds')
         x = float(str(pos.get('x', 0)))
         y = float(str(pos.get('y', 0)))
         await tab.mouse.click(x, y, button=MouseButton.LEFT)
@@ -298,6 +337,8 @@ async def _execute_click(tab_id: str, client_id: str, element: WebElement, strat
 
 
 def _strategy_order(requested: str) -> list[str]:
+    if requested == 'auto':
+        return ['native', 'center_mouse', 'dispatch_pointer_sequence']
     if requested == 'trusted_fallback_if_safe':
         return ['native', 'center_mouse', 'dispatch_pointer_sequence']
     return [requested]

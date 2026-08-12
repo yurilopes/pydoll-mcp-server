@@ -23,10 +23,24 @@ function choiceType(el) {
   const role = (el.getAttribute('role') || '').toLowerCase();
   if (type === 'radio' || type === 'checkbox') return type;
   if (role === 'radio' || role === 'checkbox') return role;
+  if (role === 'switch' || el.getAttribute('aria-pressed') !== null
+      || el.getAttribute('aria-checked') !== null) return 'checkbox';
+  if (choiceButtonGroup(el)) return 'radio';
   return '';
 }
 function choiceOptionSelector() {
-  return 'input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]';
+  return 'input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"], '
+    + '[role="switch"], button[aria-pressed], button[aria-checked], '
+    + '[data-field-path] button, .yesno button, .choice-group button, '
+    + '.radio-group button, .checkbox-group button';
+}
+function choiceButtonGroup(el) {
+  if (!el || el.tagName !== 'BUTTON') return null;
+  const group = el.closest('[data-field-path], .yesno, .choice-group, .radio-group, .checkbox-group');
+  if (!group) return null;
+  const buttons = [...group.querySelectorAll('button')];
+  const inputs = [...group.querySelectorAll('input[type="radio"], input[type="checkbox"]')];
+  return buttons.length >= 2 && inputs.length ? group : null;
 }
 function choiceOptionElements(group) {
   return [...group.querySelectorAll(choiceOptionSelector())]
@@ -56,7 +70,7 @@ function choiceOptionText(el) {
 function choiceGroupFor(el, root) {
   const grouped = el.closest(
     'fieldset, [role="radiogroup"], [role="group"], ' +
-    '.form-group, .radio-group, .checkbox-group, ' +
+    '[data-field-path], .form-group, .yesno, .choice-group, .radio-group, .checkbox-group, ' +
     '.jobs-easy-apply-form-section__grouping'
   );
   if (grouped && root.contains(grouped)) return grouped;
@@ -151,8 +165,22 @@ function choiceOptionMatches(group, optionText) {
 }
 function choiceChecked(el) {
   const type = choiceType(el);
+  const buttonGroup = choiceButtonGroup(el);
+  if (buttonGroup) {
+    const selectedByClass = [...el.classList].some((name) =>
+      /(^|[-_])(active|selected|checked|chosen)(?:$|[-_])/i.test(name)
+    );
+    if (selectedByClass) return true;
+    const input = buttonGroup.querySelector('input[type="radio"], input[type="checkbox"]');
+    const option = choiceFold(choiceOptionText(el));
+    if (input && ['yes', 'true'].includes(option)) return input.checked === true;
+    return false;
+  }
   return type === 'radio' || type === 'checkbox'
-    ? (el.checked === true || el.getAttribute('aria-checked') === 'true')
+    ? (el.checked === true || el.getAttribute('aria-checked') === 'true'
+      || el.getAttribute('aria-pressed') === 'true'
+      || ['checked','selected','active','on'].includes((el.getAttribute('data-state') || '').toLowerCase())
+      || el.classList.contains('selected') || el.classList.contains('is-selected'))
     : false;
 }
 function choiceSelectorHint(el) {

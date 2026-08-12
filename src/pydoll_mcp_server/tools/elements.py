@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import Field
+from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import (
@@ -15,8 +16,7 @@ from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.config import get_limits_config, get_timeout_config
 from pydoll_mcp_server.dom.element_cache import get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_bool, get_object, get_string
-from pydoll_mcp_server.logging import get_logger
+from pydoll_mcp_server.json_types import JsonObject, get_bool, get_object, get_string
 from pydoll_mcp_server.security.policy import is_sensitive_field
 from pydoll_mcp_server.security.site_signals import (
     inspect_element_security,
@@ -25,12 +25,10 @@ from pydoll_mcp_server.security.site_signals import (
 )
 from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import (
-    cache_element_with_reference,
     resolve_element,
-    safe_is_visible,
-    safe_text,
 )
 from pydoll_mcp_server.tools.element_screenshot import element_screenshot as element_screenshot
+from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
 from pydoll_mcp_server.tools.form_controls import fill_element_framework_safe
 
 
@@ -48,89 +46,9 @@ async def element_find(
     timeout: float | None = None,
     find_all: bool = False,
 ) -> JsonObject:
-    """Find elements with CSS or XPath; use semantic finders for intent-based lookup."""
-    config = get_timeout_config()
-    timeout = timeout or config.wait_selector
-    timeout = min(timeout, config.max_timeout)
-    registry = get_registry()
-    get_logger()
+    from pydoll_mcp_server.tools.element_find import element_find as implementation
 
-    try:
-        tab_info = registry.get_tab(client_id, tab_id)
-    except StructuredError as e:
-        return e.to_dict()
-
-    pydoll_tab = tab_info.pydoll_tab
-
-    try:
-        if strategy == 'css' or strategy == 'xpath':
-            elements = await pydoll_tab.query(
-                selector,
-                timeout=max(0, int(timeout)),
-                find_all=find_all,
-                raise_exc=False,
-            )
-        else:
-            return StructuredError(
-                error_code=ErrorCode.INVALID_INPUT,
-                message=f'Unknown strategy: {strategy}. Use css, xpath, or text.',
-                retryable=False,
-            ).to_dict()
-    except Exception as e:
-        return StructuredError(
-            error_code=ErrorCode.EXECUTION_ERROR,
-            message=f'Element find error: {e}',
-            retryable=True,
-        ).to_dict()
-
-    if elements is None:
-        return StructuredError(
-            error_code=ErrorCode.RESOURCE_NOT_FOUND,
-            message=f'No element found for selector: {selector}',
-            retryable=False,
-            details={'selector': selector, 'strategy': strategy},
-        ).to_dict()
-
-    if find_all and isinstance(elements, list):
-        cache = get_element_cache()
-        results: list[JsonObject] = []
-        for index, el in enumerate(elements):
-            element_id = await cache_element_with_reference(
-                cache,
-                tab_info,
-                el,
-                fallback_selector=selector,
-                match_index=index,
-            )
-            results.append(
-                {
-                    'element_id': element_id,
-                    'tag': el.tag_name,
-                    'text': (await safe_text(el))[:100],
-                    'visible': await safe_is_visible(el),
-                }
-            )
-        result_values: JsonArray = list(results)
-        return {
-            'success': True,
-            'found': len(results),
-            'elements': result_values,
-        }
-    el = elements[0] if isinstance(elements, list) else elements
-    cache = get_element_cache()
-    element_id = await cache_element_with_reference(
-        cache,
-        tab_info,
-        el,
-        fallback_selector=selector,
-    )
-    return {
-        'success': True,
-        'element_id': element_id,
-        'tag': el.tag_name,
-        'text': (await safe_text(el))[:100],
-        'visible': await safe_is_visible(el),
-    }
+    return await implementation(client_id, tab_id, selector, strategy, timeout, find_all)
 
 
 async def element_click(
@@ -143,10 +61,10 @@ async def element_click(
         Field(
             description='Click strategy. Use native normally; enhanced strategies are advanced fallbacks.',
             json_schema_extra={
-                'enum': ['native', 'center_mouse', 'dispatch_pointer_sequence', 'trusted_fallback_if_safe']
+                'enum': ['auto', 'native', 'center_mouse', 'dispatch_pointer_sequence', 'trusted_fallback_if_safe']
             },
         ),
-    ] = 'native',
+    ] = 'auto',
     expect_dialog: Annotated[bool, Field(description='Wait for a JavaScript dialog after the click.')] = False,
     expect_url_change: Annotated[bool, Field(description='Require the tab URL to change after the click.')] = False,
     expect_text: Annotated[str, Field(description='Optional visible text that must appear after the click.')] = '',
@@ -232,13 +150,17 @@ async def element_click(
                 security_control = await inspect_element_security(element)
                 if security_control:
                     return security_control_error(security_control)
+            invalidate_review_tokens(client_id, tab_id)
             try:
                 choice_result = await set_choice_state(element, True)
                 choice_error = get_string(choice_result, 'error', '')
                 if not choice_error:
                     diagnostics = await inspect_site_diagnostics(tab_info.pydoll_tab)
                     return {
+                        'contract_version': 2,
+                        'operation_id': f'click_{element_id}',
                         'success': True,
+                        'status': 'verified' if get_bool(choice_result, 'verified') else 'dispatched',
                         'element_id': element_id,
                         'clicked': True,
                         'checked': get_bool(choice_result, 'checked'),
@@ -246,6 +168,7 @@ async def element_click(
                         'strategy_used': get_string(choice_result, 'strategy_used'),
                         'mcp_action': {'event_sent': True, 'strategy_used': get_string(choice_result, 'strategy_used')},
                         'page_effect': {'expectation': {}, 'observed': False, 'missing': []},
+                        'effect_status': 'no_effect',
                         'site_diagnostics': diagnostics,
                     }
                 if choice_error != 'not_checkable':
@@ -259,30 +182,32 @@ async def element_click(
                 pass
             await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
             await element.click()
-    except Exception:
+    except Exception as exc:
         if element is None:
             return StructuredError(
                 error_code=ErrorCode.STALE_ELEMENT,
                 message=f'Element {element_id} could not be resolved before retry',
                 retryable=True,
             ).to_dict()
-        try:
-            async with tab_operation_lock(tab_id):
-                await element.execute_script('this.click(); return true;', return_by_value=True)
-        except Exception as e2:
-            return StructuredError(
-                error_code=ErrorCode.EXECUTION_ERROR,
-                message=f'Click failed: {e2}',
-                retryable=True,
-            ).to_dict()
+        return StructuredError(
+            ErrorCode.ACTION_UNKNOWN,
+            'Native click transport failed after the action may have been dispatched. No click retry was attempted.',
+            retryable=False,
+            details={'error': str(exc), 'strategy': 'native'},
+            recovery_hint='Observe the page manually before taking another action.',
+        ).to_dict()
 
     diagnostics = await inspect_site_diagnostics(tab_info.pydoll_tab)
     return {
+        'contract_version': 2,
+        'operation_id': f'click_{element_id}',
         'success': True,
+        'status': 'dispatched',
         'element_id': element_id,
         'clicked': True,
         'mcp_action': {'event_sent': True, 'strategy_used': 'native'},
         'page_effect': {'expectation': {}, 'observed': False, 'missing': []},
+        'effect_status': 'no_effect',
         'site_diagnostics': diagnostics,
     }
 
@@ -315,7 +240,16 @@ async def element_type(
             if security_control:
                 return security_control_error(security_control)
             await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
-            await element.type_text(text)
+            try:
+                await element.type_text(text)
+            except PydollException:
+                # Some custom controls report an invalid visibility result when clicked
+                # through WebElement, although the browser can focus them directly.
+                keyboard = getattr(tab_info.pydoll_tab, 'keyboard', None)
+                if keyboard is None:
+                    raise
+                await element.execute_script('this.focus(); return true;', return_by_value=True)
+                await keyboard.type_text(text)
     except Exception as e:
         return StructuredError(
             error_code=ErrorCode.EXECUTION_ERROR,
@@ -345,6 +279,13 @@ async def element_fill(
     ] = 'auto',
     validation_timeout: float = 3.0,
     expected_enabled_element_id: str = '',
+    state_verification: Annotated[
+        str,
+        Field(
+            description='Verification level: dom, framework_event, blurred, or submission_ready.',
+            json_schema_extra={'enum': ['dom', 'framework_event', 'blurred', 'submission_ready']},
+        ),
+    ] = 'submission_ready',
 ) -> JsonObject:
     return await fill_element_framework_safe(
         client_id,
@@ -355,6 +296,7 @@ async def element_fill(
         mode=mode,
         validation_timeout=validation_timeout,
         expected_enabled_element_id=expected_enabled_element_id,
+        state_verification=state_verification,
     )
 
 
