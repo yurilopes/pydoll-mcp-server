@@ -2029,6 +2029,51 @@ identity extraction should prefer the page heading and company context over a
 generic separator split, and should return a confidence or warning when those
 sources disagree.
 
+## Live retest: Anson McCade LinkedIn Easy Apply
+
+On 2026-08-13, the improved interaction path was used on Anson McCade's
+`Principal AI Engineer` vacancy, LinkedIn job `4449802535`. The visible page
+reported Easy Apply, and the description exposed a strong match for Python,
+LLM systems, agentic AI, prompt architecture, evaluation, production AI,
+cloud or CI/CD, and technical leadership.
+
+The test exercised the v2 behavior end to end:
+
+- The contact step preserved the authenticated LinkedIn account email
+  `yuh.lopes@gmail.com` without treating it as a candidate-data mismatch. The
+  professional email `yuriabreu.jl@gmail.com` remains the preferred value when
+  a form permits an explicit choice.
+- The forward action moved from contact information to resume selection. The
+  initial semantic action resolver did not recognize the localized `Revisar`
+  button as a forward action, but the response returned the exact visible
+  candidate and no click was made against an ambiguous target. A fresh
+  fingerprinted `element_find` followed by `element_click` with
+  `expect_active_surface_change` resolved the localized control and verified
+  the transition.
+- The exact Kake-specific AI and LLM resume already saved in LinkedIn was
+  selected. The optional `Siga a empresa Anson McCade` checkbox was explicitly
+  left unchecked.
+- The final Easy Apply step exposed `Enviar candidatura` as a visible,
+  enabled primary action with no pending required fields, inline validation
+  errors, security controls, or authorization-risk prompt.
+- One submit click was sent. The initial client process hit a local Unicode
+  output encoding error while printing the response, so the workflow correctly
+  treated the transport result as potentially unknown and did not retry. A
+  read-only snapshot then verified `submitted=true`, a closed form, and the
+  visible confirmation text `Candidatura enviada`.
+- A full-page confirmation artifact was recorded as
+  `artifact_c52c0bf789a44964`, relative path
+  `anson-mccade-principal-ai-engineer-confirmation.png`, SHA-256
+  `08b4c25e27afb5ad3c846e4e7900a60370ce9b6ce97a1ce73bb7b43c726cb406`.
+
+This test confirms that bounded resolution, localized control handling,
+optional-control safety, one-click submission, and post-transport state
+verification materially improve the workflow. It also exposes two follow-up
+items: the LinkedIn forward-action classifier should include localized labels
+such as `Revisar`, and the MCP client examples should force UTF-8 output or
+return structured data without allowing terminal encoding to obscure a
+successful tool call.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
