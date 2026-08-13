@@ -2259,6 +2259,43 @@ hide, bypass, or simulate a CAPTCHA. The correction is limited to avoiding a
 false blocker when the portal exposes only a passive marker and the candidate
 can proceed through the ordinary authorized submit flow.
 
+## Live retest: confirmation precedence after a passive security signal
+
+The Jobgether Senior AI Engineer Easy Apply flow repeated the same passive
+LinkedIn reCAPTCHA marker. The form was prepared through the public Pydoll
+operations, the dedicated resume was selected, and the final review exposed no
+missing required fields, attestation, authorization-risk prompt, or visible
+challenge. The submit button was visible and enabled.
+
+One authorized native click changed the URL and closed the dialog. The
+specialized LinkedIn snapshot then reported `submitted=true`,
+`form_present=false`, `dialog_present=false`, and the visible confirmation text
+`Candidatura enviada`. The confirmation screenshot was recorded as
+`artifact_5a1fb80e81de4c83` with SHA-256
+`b5349ed46bf6f318c3e72e4b7013a83edfb48652a52482509d9b0965947cc63c`.
+
+The generic `submission_wait_for_confirmation` operation instead returned
+`outcome=security_challenge` because it combined page-level LinkedIn security
+signals with the positive confirmation text. This is a second false positive,
+distinct from the preflight false positive. It shows that outcome precedence
+must be applied to the active submission surface, not to arbitrary text or
+navigation controls elsewhere in the page:
+
+- A high-confidence visible confirmation such as `Candidatura enviada`,
+  together with `submitted=true` and a closed Easy Apply dialog, must outrank
+  passive reCAPTCHA markers and unrelated page-chrome security descriptors.
+- `security_challenge` should require an active, relevant challenge surface or
+  explicit portal text requesting candidate verification. A source URL or an
+  invisible anchor alone is insufficient.
+- Keep all corroborating signals in diagnostic evidence, but expose the
+  decisive evidence and precedence rule in the public outcome.
+- Add a regression fixture that contains an invisible reCAPTCHA anchor,
+  generic LinkedIn navigation text, and a visible success confirmation. It
+  must return `confirmed`. A companion fixture with an active challenge and no
+  positive confirmation must return `security_challenge`.
+- Ensure the tracker and artifact records can preserve the raw classifier
+  warning without downgrading a visually confirmed submission.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
