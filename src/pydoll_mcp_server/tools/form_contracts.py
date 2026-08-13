@@ -131,7 +131,11 @@ def v2_envelope(operation: str, status: str, success: bool = True) -> JsonObject
     }
 
 
-def form_fingerprint(fields: JsonArray, primary_action: JsonObject | None = None) -> str:
+def form_fingerprint(
+    fields: JsonArray,
+    primary_action: JsonObject | None = None,
+    choices: JsonArray | None = None,
+) -> str:
     """Create a stable, non-sensitive fingerprint for the currently rendered form."""
 
     compact_fields: JsonArray = []
@@ -156,8 +160,37 @@ def form_fingerprint(fields: JsonArray, primary_action: JsonObject | None = None
                 'selector_hint': str(item.get('selector_hint', '')),
             }
         )
+    compact_choices: JsonArray = []
+    for item in choices or []:
+        if not isinstance(item, dict):
+            continue
+        options = item.get('options')
+        compact_options: JsonArray = []
+        if isinstance(options, list):
+            for option in options:
+                if not isinstance(option, dict):
+                    continue
+                compact_options.append(
+                    {
+                        'label': str(option.get('label', '')),
+                        'selected': bool(option.get('selected', False)),
+                        'enabled': bool(option.get('enabled', True)),
+                    }
+                )
+        compact_choices.append(
+            {
+                'field_label': str(item.get('field_label', item.get('label', ''))),
+                'type': str(item.get('type', '')),
+                'required': bool(item.get('required', False)),
+                'selected_label': str(item.get('selected_label', '')),
+                'selected_state': str(item.get('selected_state', '')),
+                'options': compact_options,
+                'selector_hint': str(item.get('selector_hint', '')),
+            }
+        )
     payload: JsonObject = {
         'fields': compact_fields,
+        'choices': compact_choices,
         'primary_action': {
             'name': str((primary_action or {}).get('name', '')),
             'role': str((primary_action or {}).get('role', '')),

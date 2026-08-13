@@ -7,8 +7,7 @@ def choice_group_helpers_script() -> str:
     """Return JavaScript helpers for controls with native or ARIA choice semantics."""
     return r"""
 function choiceFold(value) {
-  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9]+/g, ' ').trim().toLowerCase();
+  return String(value ?? '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
 }
 function choiceVisible(el) {
   if (!el || !el.isConnected) return false;
@@ -127,11 +126,25 @@ function choiceGroupsFor(root) {
     entries.push(control);
     map.set(group, entries);
   }
-  return [...map.entries()].map(([group, options]) => ({
-    group,
-    options,
-    label: choiceQuestionText(group, root),
-  }));
+  return [...map.entries()].map(([group, options]) => {
+    const renderedButtons = options.filter((option) =>
+      option.tagName === 'BUTTON' && choiceButtonGroup(option)
+    );
+    const source = renderedButtons.length >= 2 ? renderedButtons : options;
+    const unique = [];
+    const seen = new Set();
+    for (const option of source) {
+      const key = `${choiceSelectorHint(option)}|${choiceOptionText(option)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(option);
+    }
+    return {
+      group,
+      options: unique,
+      label: choiceQuestionText(group, root),
+    };
+  });
 }
 function choiceContainsPhrase(text, needle) {
   const haystack = ` ${choiceFold(text)} `;

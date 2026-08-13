@@ -84,6 +84,8 @@ async def form_review(
         {
             'stage': get_string(preflight, 'stage', ''),
             'fields': get_array(preflight, 'fields', []),
+            'choices': get_array(preflight, 'choices', []),
+            'choice_states': get_array(preflight, 'choice_states', []),
             'upload_states': get_array(preflight, 'upload_states', []),
             'pending_required': get_array(preflight, 'pending_required', []),
             'security_controls': get_array(preflight, 'security_controls', []),

@@ -867,6 +867,276 @@ The rerender regression is covered by a unit test that verifies recovery from an
 using stable field identity. A browser fixture should still cover a portal combobox whose trigger
 and option list are both recreated during the same interaction.
 
+### LinkedIn Easy Apply contact form rerun
+
+An additional live rerun on 2026-08-13 used the visible `curriculum` profile against a strong-fit
+European role at Redcare Pharmacy. The application was intentionally not submitted because the
+form offered a different account email and did not expose the candidate's canonical address as an
+editable choice. This was a safe application blocker, not a reason to guess or substitute a
+contact fact.
+
+Observed MCP and workflow issues:
+
+- A LinkedIn search with a German geo ID returned German results in the visible page, but the
+  semantic response reported an empty location, `remote=false`, and blank role and company fields.
+  The selected job detail also returned the whole page as `description_excerpt`. The page text and
+  deep tree contained the correct location, title, company, description, and application link.
+  Search and job snapshot responses need a canonicalization pass against the active surface before
+  returning metadata.
+- The LinkedIn Easy Apply helper could not resolve the visible application action even though the
+  deep tree exposed an exact link with an accessible label and an application URL. A generic
+  primary-action path eventually opened the contact dialog, but the action evidence identified a
+  generic next-step button instead of the application link that caused the transition. The helper
+  should resolve application links by href, accessible label, role, and active job identity, then
+  report the exact resolved control and transition.
+- `form_preflight` correctly found the contact fields and returned a v2 blocked response when the
+  required city was empty. It also returned `partial=true` because deep discovery attempted to
+  inspect an iframe using `http://localhost:None/json/version`. The live browser was attached and
+  usable, so a missing CDP port in lease metadata should not produce an invalid endpoint during
+  same-process discovery. The attach and discovery layers should refresh or reuse the live browser
+  endpoint before traversing iframes.
+- Native text fields for name, phone, and city were filled and verified with the v2 contract. The
+  form choice helper then returned `field_not_found` for the visible `Email address` select even
+  though preflight had returned the field and a stable element ID. The choice operation should
+  accept the preflight field key or element fingerprint, not depend only on a localized label.
+- The low-level select operation returned `success=true` for a requested email label that was not
+  present and returned inconsistent index and value evidence. The actual selected value remained a
+  different account address. A select operation must return `not_found` or `inconclusive` when the
+  requested option is absent, and must verify the final selected label and value after the native
+  change event. A success alias must never hide a mismatch between requested and observed options.
+
+Recommended follow-up tests and changes:
+
+- Add a LinkedIn fixture with an interop iframe or equivalent portal surface containing an Easy
+  Apply link, a localized accessible label, and a contact form with a select whose requested option
+  is absent.
+- Add a contract test asserting that search metadata is rejected or marked partial when the visible
+  result, URL filters, and semantic fields disagree.
+- Add select tests for absent labels, placeholder options, duplicate labels, Unicode normalization,
+  index and value mismatches, and post-change selected-state verification.
+- Add a lifecycle test where the browser registry is healthy but lease metadata has a null CDP port.
+  Discovery must not construct a `localhost:None` endpoint, and attach must either repair the lease
+  or return a clear handoff.
+- Make Easy Apply action resolution return the resolved href, job ID, surface, before and after URL,
+  and the exact effect classification. If the transport or effect is unknown, the caller must not
+  retry the application action.
+
+The JUPUS Ashby application provided a useful positive control for the field and upload layer. All
+required text fields survived stabilization with `framework_value=present`, the resume reached
+`state=accepted` and `rendered_state=present`, the visa-support and permanent-employment choices
+were rendered with the selected class, and the optional two-year retention consent remained
+unchecked. The review still returned `status=blocked` solely because the same missing CDP port and
+surface disagreement prevented a review token. This confirms that the mutation and upload layers
+are materially more reliable than the final lifecycle and discovery gate in the current runtime.
+
+### Teamtailor application widget rerun
+
+The SDG Group AI Architect role was tested through its visible LinkedIn application link and the
+observed Teamtailor career page. The role is a strong European fit and the dedicated resume passed
+the repository validation checks. The external page rendered the job details and a visible `APPLY`
+button, but the embedded application area remained at `Loading application form` after the button
+was resolved and clicked.
+
+Observed MCP issues:
+
+- Deep discovery returned the visible `APPLY` button with a stable semantic description and exact
+  bounds. The native click response classified the transport as `dispatched` and `verified`, but
+  page effect verification correctly returned `no_effect`. This is a useful distinction, but the
+  response should include a more explicit application-widget diagnostic when the target is a custom
+  element and the form remains in a loading state.
+- After the click, no actionable form controls or iframe appeared in the active surface, while the
+  page continued to expose `Loading application form`. The workflow could not safely call
+  `form_preflight` or prepare a review. It must keep this state blocked and must not retry the apply
+  click automatically.
+- The cookie modal produced a candidate during deep text discovery, but the subsequent cached
+  element could not be resolved by `element_click`, and the text helper returned no visible match.
+  Candidate IDs from discovery should carry a short-lived surface generation and the action layer
+  should either re-resolve them in the same surface or return a clear `stale` result instead of a
+  generic resolution failure.
+
+Recommended follow-up tests and changes:
+
+- Add a Teamtailor fixture in which a custom application widget remains loading after a successful
+  button dispatch. The expected result is `effect_status=no_effect`, `application_state=loading`,
+  and a retry recommendation that does not repeat the click blindly.
+- Detect loading placeholders and report the widget owner, observed custom element, URL, and last
+  successful network or surface transition in the evidence object.
+- Add a contract test for discovery candidates invalidated by a modal or surface generation change.
+  Actions should re-resolve by text, role, bounds, and context, or classify the candidate as stale.
+- Keep `form_preflight` read-only and blocked when the external form is not present. Do not infer
+  that a visible job page or enabled primary action means that an application form is ready.
+
+### SoSafe end-to-end v2 workflow rerun
+
+The SoSafe Staff Engineer for IT Automation and AI transformation application was used as a live
+regression after the MCP restart and form workflow changes. The browser remained visible on the
+persistent `curriculum` profile, and attach reconciled the Ashby target by target ID without
+creating a duplicate tab.
+
+Observed results:
+
+- The new choice discovery found both custom Yes or No groups, preserved their visible question
+  labels, and reported the selected states as `No` for EU or UK work authorization and `Yes` for
+  future sponsorship. The groups were included in the form fingerprint.
+- The deep surface comparison originally counted two invisible checkbox inputs and an invisible
+  `g-recaptcha-response` textarea as interactive controls. Ignoring invisible deep nodes for the
+  comparison removed the false disagreement while retaining the ignored count as evidence.
+- A deep iframe traversal still returned the known `http://localhost:None/json/version` error.
+  Because the active surface was consistent and no field was frame-scoped, the workflow retained
+  the error as a partial warning without blocking the review token. A frame-scoped field must
+  continue to block until the frame is accessible.
+- The custom choice resolver initially reported `ambiguous_option` for the first `No` because a
+  hidden input and a rendered button contributed the same semantic option. Filtering rendered
+  buttons and deduplicating option references fixed the resolver. Choice comparison now preserves
+  NFC Unicode text instead of applying implicit ASCII folding.
+- The v2 review verified the required text fields, the visible `Submit Application` action, the
+  selected custom choices, and the dedicated resume upload. The salary field was filled with
+  `70000`, the lower end of the caller's current conservative salary guidance.
+- The first authorized submit dispatched one click and returned `validation_failed` with visible
+  text identifying `Name`. The DOM contained the full name, but the portal's controlled state had
+  not accepted the earlier programmatic mutation. No automatic retry was made.
+- A single keyboard repair on the exact Name control returned `framework_value=present`,
+  `framework_event=true`, `controlled_value_survived=true`, `blurred=true`, and
+  `ready_for_submission=true`. The rendered portal error disappeared, the resume remained
+  accepted and visible, and a new review token was issued.
+- The second authorized submit dispatched exactly one click. The confirmation waiter returned
+  `unknown` because the portal used `Your application was successfully submitted.` while the
+  success matcher only covered shorter variants. A read-only page observation then found the
+  visible `Success` page and the full confirmation sentence. The application was therefore
+  recorded as `confirmed` in the tracker, with confirmation artifact
+  `artifact_5dcf4b258c2145dd`.
+
+Required follow-up changes from this regression:
+
+- Add `was successfully submitted` and equivalent high-confidence success phrases to the
+  submission classifier, with tests that keep URL-only changes and portal-limit text out of the
+  `confirmed` outcome.
+- Make final review expose framework verification details for fields previously mutated by
+  `form_prepare`, or perform a bounded post-stabilization state read before issuing the token.
+  A DOM value alone must not be enough when a controlled field can be rejected by the portal.
+- Keep the post-validation recovery path explicit: identify the rendered field error, re-resolve
+  the exact control, allow one evidence-backed repair, verify the upload again, and require a new
+  review token before another submit click.
+- Treat an accepted upload on a replaced native input as a new upload identity and preserve its
+  visible filename in the final confirmation evidence.
+
+### Admiral Attrax and Filestack application rerun
+
+The Admiral Group Solution Architect for GenAI application was opened from the visible LinkedIn
+posting and navigated to the real three-page application flow. The role was a strong fit, and the
+dedicated resume was generated and validated. The form was prepared with canonical data and a
+conservative salary expectation of GBP 70,000 per year because the form required a value and the
+posting did not publish a range.
+
+Observed results:
+
+- The v2 fill workflow verified the forename, surname, location, postal code, email, phone, salary,
+  and notice fields with `verification=verified` and `ready_for_submission=true`. This validates
+  the unified fill contract on a non-React multi-page form.
+- The v2 choice operation verified `Degree` and the explicit Disability Confident answer `Yes`.
+  Native select handling verified the support or consideration answer `No`.
+- The portal uses a Filestack picker. The form field itself is a hidden `js-filestack-input`,
+  not a native file input. Calling `upload_files` on that field first returned a state conflict,
+  then correctly rejected it as not a file input. Opening the visible Filestack picker, resolving
+  its transient `#fsp-fileUpload` input, selecting the dedicated PDF, and clicking the picker
+  `Upload` control completed the widget flow. The filename became visible in the form.
+- After the widget upload, `file_upload_state` still reported `native_input_state=empty` and
+  `rendered_state=present`, with a warning that the browser input had no accepted file. This is
+  not a reliable rejection because the portal stores the Filestack result in a hidden application
+  field. The upload contract must support third-party picker identities and distinguish a pending
+  or accepted remote asset from an empty native input.
+- The declaration checkbox text included privacy notice acceptance, application notifications,
+  permission to hold sensitive personal data, fraud prevention agency sharing, and a truthful
+  information declaration. It was left unchecked because it is a candidate confirmation and
+  sensitive consent. No Save, Next, or final submission action was clicked.
+- Despite that visible declaration, `form_preflight` and `form_review` returned no attestation
+  handoff, no blockers, and `ready_for_submission=true`. The entire fieldset was incorrectly
+  grouped as a non-required checkbox group, and the surrounding text was not classified as a
+  sensitive declaration.
+- Required markers rendered as asterisks were also not reflected in the native `required` flag.
+  Required detection must use native validity, visible mandatory markers, portal validation rules,
+  and semantic labels together. A ready review must never be issued while an unchecked sensitive
+  declaration is visible in the active form.
+
+Required follow-up changes from this regression:
+
+- Add a dedicated third-party upload adapter boundary for Filestack-like pickers. It should track
+  the logical field, picker input, picker session, remote asset name, remote asset status, and the
+  hidden portal field separately. It must return `processing`, `accepted`, `rendered`, or
+  `accepted_with_verification_warning` instead of treating the native input as the only source of
+  truth.
+- Detect sensitive declaration text in containing fieldsets even when the fieldset also contains
+  education, diversity, or other radio controls. Split child controls into logical groups and
+  associate the declaration checkbox with its own full text, rather than using the containing
+  fieldset label as the group label.
+- Expand attestation detection for privacy, employment checks, sensitive personal data, fraud
+  prevention, notifications, truthful declarations, and permission statements. The result must
+  include `requires_candidate_confirmation` and block review-token issuance until the candidate
+  confirms the declaration through an allowed handoff.
+- Treat visible asterisk markers and portal validation metadata as mandatory signals when the DOM
+  `required` attribute is absent. Keep the raw source of the mandatory inference in evidence.
+- Add an Attrax and Filestack fixture covering a hidden portal field, transient picker input,
+  remote upload completion, mixed logical groups in one fieldset, and a mandatory sensitive
+  declaration. The acceptance test must assert that `form_review` is blocked and never issues a
+  submit token while the declaration remains unchecked.
+
+### EPAM AI Solution Architect application rerun
+
+The EPAM AI Solution Architect application was opened from the visible LinkedIn posting and
+tested in the real EPAM Careers modal. The role was a strong technical match, but the posting is
+restricted to Latvia and the form contained a mandatory Candidate Privacy Notice acceptance.
+The dedicated resume was used and no consent checkbox or submit control was activated.
+
+Observed results:
+
+- The visible Apply button ignored the native click and the centered mouse fallback. The
+  `dispatch_pointer_sequence` strategy opened the application dialog and verified the visible
+  `Application` effect. The click contract therefore recovered the interaction without a blind
+  repeat.
+- The v2 fill workflow verified name, surname, email, phone, and years of experience. The phone
+  field has a separate `+55` country selector and rejects the full international string. The local
+  number `21 99833 0989` was accepted and survived input, change, blur, and stabilization.
+- The React Select controls initially returned `option_not_found` or left the popup open even
+  when the portal had rendered the desired option. A reliable directed sequence was to open the
+  field, locate the rendered option by its current role and fingerprint, click that exact option,
+  and use Enter only when the component required keyboard commitment. This verified Latvia as
+  the preferred work country, AI Solution Engineering as the primary skill, Proficient (C2) as
+  the form equivalent of the canonical Fluent level, and One week as the notice period.
+- Current City remained unresolved. Typing Brasilia or Brasília did not produce a rendered option,
+  and the combobox helper returned a retryable no-match result. The workflow correctly avoided
+  inventing a city or reporting a selection that was not visible.
+- The resume input is hidden and its first upload attempt returned a state conflict because the
+  runtime registry still described a rendered upload while the native input was empty. An
+  explicit replacement attempt returned a stale element, after which the page displayed the
+  filename and a visible portal error: `The file shouldn't be less than 0.01 Mb.` The final
+  `form_review` correctly classified this as a validation blocker and did not issue a review token.
+- The form visibly displayed the required Candidate Privacy Notice checkbox and text stating that
+  the applicant consents to EPAM processing personal data. The checkbox was left unchecked. The
+  review response still returned no attestation handoff, so privacy attestation detection remains
+  incomplete even though the independent upload validation blocker prevented readiness.
+- The iframe discovery warning for `http://localhost:None/json/version` was retained as evidence
+  without blocking the active form, because no field was scoped to that iframe. This is the
+  intended partial-discovery behavior, but the warning should remain visible to the caller.
+
+Required follow-up changes from this regression:
+
+- Add an autocomplete adapter for asynchronous location fields. It should preserve query text,
+  wait for loading completion, observe the portal option list, and return `not_found`,
+  `timed_out`, or `inconclusive` with the active country context rather than silently leaving a
+  required city empty.
+- Make React Select option operations wait for the portal list after each query, resolve the
+  current role option by label and bounds, and report whether click or keyboard commitment was
+  required. Do not let a successful text observation substitute for selected state.
+- Reconcile upload state after a rerender by resolving the current input and its rendered preview
+  as one logical upload. If the portal imposes a minimum size, return the visible validation text,
+  measured byte size, and a recovery instruction. Do not classify a filename alone as accepted.
+- Detect privacy notice acceptance as `requires_candidate_confirmation` even when the checkbox is
+  not exposed through native `required` metadata. A visible asterisk and consent language must
+  block review-token issuance until the candidate performs the handoff.
+- Add fixtures for an async city autocomplete, a React Select portal list, a hidden upload with a
+  minimum-size validation, and an EPAM-style privacy checkbox. The acceptance test must assert
+  that no submit token is issued while the city or privacy declaration remains unresolved.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

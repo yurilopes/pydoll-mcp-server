@@ -32,6 +32,16 @@ def test_choice_helper_returns_verified_strategy() -> None:
     assert 'choice_state_not_verified' in script
 
 
+def test_choice_group_script_deduplicates_rendered_custom_options_and_preserves_nfc() -> None:
+    from pydoll_mcp_server.tools.choice_group_scripts import choice_group_helpers_script
+
+    script = choice_group_helpers_script()
+
+    assert ".normalize('NFC')" in script
+    assert 'renderedButtons' in script
+    assert 'const unique = []' in script
+
+
 def test_form_select_choice_returns_cached_verified_option() -> None:
     tab = MagicMock()
     tab.execute_script = AsyncMock(

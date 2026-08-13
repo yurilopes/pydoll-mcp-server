@@ -90,6 +90,10 @@ async def form_submit_after_review(
         tab_id,
         success_text_any=[
             'application submitted',
+            'application successfully submitted',
+            'application was successfully submitted',
+            'your application was successfully submitted',
+            'your application has been successfully submitted',
             'thank you for applying',
             'thanks for applying',
             'received your application',

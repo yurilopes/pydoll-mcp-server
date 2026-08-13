@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_object, get_string
+from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_bool, get_object, get_string
 
 
 def surface_disagreement(fields: JsonArray, deep: JsonObject) -> JsonObject:
@@ -18,6 +18,9 @@ def surface_disagreement(fields: JsonArray, deep: JsonObject) -> JsonObject:
         attrs = get_object(value, 'attrs', {})
         input_type = get_string(attrs, 'type', '').casefold()
         if input_type in {'hidden', 'button', 'submit', 'reset'}:
+            ignored_hidden += 1
+            continue
+        if not get_bool(value, 'visible', True):
             ignored_hidden += 1
             continue
         if get_array(value, 'frame_path', []):

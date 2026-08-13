@@ -108,6 +108,14 @@ def test_submission_outcome_precedence_is_conservative() -> None:
         classify_submission_outcome('application submitted', ['application submitted'], [])
         is SubmissionOutcome.CONFIRMED
     )
+    assert (
+        classify_submission_outcome(
+            'success your application was successfully submitted',
+            ['your application was successfully submitted'],
+            [],
+        )
+        is SubmissionOutcome.CONFIRMED
+    )
     assert classify_submission_outcome('the page changed', [], []) is SubmissionOutcome.UNKNOWN
 
 
