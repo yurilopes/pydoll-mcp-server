@@ -2074,6 +2074,49 @@ such as `Revisar`, and the MCP client examples should force UTF-8 output or
 return structured data without allowing terminal encoding to obscure a
 successful tool call.
 
+## Live retest: email correction and external micro1 handoff
+
+The prior TensorOps `Principal AI/ML Architect` blocker was retested after the
+email-role correction. The LinkedIn Easy Apply account email was no longer
+treated as a mismatch, but the tracking navigation still ended with no dialog,
+form, or submit surface after the bounded wait. No submit click was sent. The
+diagnostic artifact is `artifact_0e3f72c49f414cf5`,
+`tensorops-email-rule-retest-no-surface.png`, SHA-256
+`bae6d8acb3c816527f0e0cf9a4621df1480822bb418768772f9a8007ccc85469`.
+
+Quik Hire Staffing's `Python Backend Developer (Remote)` was then retested
+through the observed micro1 destination. The external form exposed a complete
+description, Python, PostgreSQL, AWS, and Django requirements, and a visible
+statement that clicking `Next` confirms agreement with the micro1 Candidate
+Terms and Candidate Privacy Policy. The session had explicit candidate
+authorization for those terms.
+
+The v2 form path produced the following evidence:
+
+- First name, last name, professional email, Brazil phone, and LinkedIn URL
+  were filled one at a time with native events and `submission_ready`
+  verification. Each field survived the stabilization window.
+- The Python resume was accepted by the native file input. The upload state
+  was `accepted_with_verification_warning` because the portal did not render
+  the filename, even though the input reported the file and its size.
+- `form_preflight` reported no blockers and no attestation handoff, despite
+  the visible implied terms sentence. The attestation detector must recognize
+  consent language attached to a submit or advance button, not only a checkbox
+  or a visible consent control.
+- One exact native click on `Next` was sent after the explicit authorization.
+  The URL and active surface did not change, and the MCP correctly stopped
+  without a fallback click because the transport result was unknown.
+- The form remains open in the visible `curriculum` browser profile for a
+  manual candidate click. The diagnostic artifact is
+  `artifact_5e4ac5352269425b`, `quik-hire-micro1-next-no-effect.png`, SHA-256
+  `a4a8713b9cd96778e2ebab8d3bfa756af361e7bb650dd189b97a2bba75ead27a`.
+
+This retest confirms that the improvements make field preparation and upload
+state observable, but the external portal still needs a stronger click effect
+adapter for its React or shadow-root `Next` control. The safe recovery is a
+manual click followed by a fresh read-only review, not an automatic duplicate
+click.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
