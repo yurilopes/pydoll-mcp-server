@@ -1702,6 +1702,55 @@ independently from outcome polling.
 The diagnostic artifact was `artifact_8b09505ab75b43f7` with SHA-256
 `825e97f6a2c53d4035e80d5515bb484f01450248b93f9f52c7fc39d109ef653a`.
 
+### Software Mind SmartRecruiters live form and mandatory consent handoff
+
+Software Mind was tested through the real SmartRecruiters OneClick form for an AI Engineer
+role in Krakow. The form used Angular-like custom elements and open shadow roots. The browser
+profile remained visible and the ordinary identity fields, phone country code, LinkedIn URL, and
+resume were prepared through Pydoll.
+
+The initial surface inspection exposed several adapter gaps:
+
+- `page_get_active_surface` failed while the deep form was visible.
+- `form_preflight` initially reported missing required fields and could not find the visible
+  `Next` action, even after the exact shadow-root inputs had been filled. The discovery result was
+  partial or disputed because the deep tree included many hidden custom-element descendants.
+- Generic selectors can return both a custom-element host and the real inner input. Filling the
+  host produced a false success or an execution error with no value, while a specific selector
+  such as `input#first-name-input` produced framework events, blur, controlled-value survival,
+  and `ready_for_submission=true`.
+- `element_click` returned `no_effect` for the fresh `Next` button, but the page advanced to
+  `Preliminary questions` immediately afterward. Click observation must allow a short delayed
+  route or surface transition before classifying an action as no effect.
+
+The screening page contained factual questions for work authorization in Poland, residence in
+Poland, availability, contract type, salary in PLN, and language proficiency. The run verified
+the following without inventing candidate data:
+
+- `No` for authorization to work in Poland and `No` for current residence in Poland, both
+  confirmed by the final `aria-checked` state.
+- `1 week and less` for availability and `B2B contract` for the contract type.
+- A conservative `180` PLN net per hour expectation for the B2B field, verified with `input`,
+  `change`, and `blur` events, native validity, and controlled-value survival.
+- `English` in the multi-select, verified by the selected tag after the option click.
+
+The semantic combobox path still had a false-negative. `combobox_select_option` could not match
+the visible `1 week and less` option even though the option text was present in the deep tree. A
+fresh exact `div[role=option]` reference and one pointer-sequence click selected it successfully.
+The same technique selected `B2B contract` and `English`. The adapter should preserve option text
+and logical field identity across the shadow tree, prefer nonzero bounds, and verify the resulting
+trigger text or selected tag before returning `selected`.
+
+The final page required a privacy declaration checkbox and two mandatory personal-data processing
+consent radio groups. These are legal or candidate attestations, so the run left them untouched,
+did not click `Submit`, and recorded a candidate handoff. No CAPTCHA or other security challenge
+was detected in this run. The workflow must distinguish these required consent blockers from
+optional marketing consent, while still refusing to select either category automatically.
+
+The diagnostic artifact was `artifact_53f7ba9ac9a34c88` at
+`softwaremind-pre-consent-filled.png` with SHA-256
+`7f53a3981fa50d5d8b66fde14029dbade7b3f8573f16c134f92c3d49306c1f9a`.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
