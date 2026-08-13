@@ -2373,6 +2373,122 @@ when the page exposes a materially different surface, while preserving the
 previous diagnostic event and preventing duplicate clicks within the same
 generation.
 
+## Live retest: EPAM external form after the previous upload blocker
+
+The EPAM Systems AI Solution Architect application in Latvia was reopened
+after a previous preparation stopped on two real form defects: the dedicated
+PDF was below the portal minimum and the visible privacy attestation had not
+been included in the review. The live retest used the same visible browser
+profile and the public Pydoll operations.
+
+The retest produced the following results:
+
+- The dedicated resume was regenerated from canonical evidence, validated at
+  two pages, and increased from `4,847` bytes to `106,090` bytes by using an
+  embedded Unicode-capable font. The portal then rendered `0.1 Mb` and
+  accepted the file.
+- After the invalid upload was removed, the original file input became stale.
+  A fresh input was discovered and the upload eventually completed, but the
+  `upload_files` call exceeded its client timeout even though the browser
+  completed the operation asynchronously. The surface later showed the
+  accepted filename and no upload error.
+- React-style comboboxes were selected through trigger re-resolution and
+  option verification. The final visible values were Rio de Janeiro, Latvia,
+  AI Solution Engineering, Proficient (C2), and One week.
+- The mandatory EPAM privacy checkbox was selected under the candidate's
+  explicit session authorization and verified after rerender. The optional
+  career marketing checkbox remained unchecked.
+- `form_preflight` and `form_review` still returned `status=blocked` because
+  they treated the invisible LinkedIn reCAPTCHA anchor as a candidate-action
+  security blocker. There was no visible CAPTCHA or other challenge on the
+  active form.
+- One fresh native click on `SUBMIT` opened a visible dialog stating
+  `Thank you! Your application has been submitted.` The confirmation artifact
+  is `artifact_27c632c43fa54200`, with relative path
+  `epam-ai-solution-architect-submission-confirmation.png`.
+- Despite the visible high-confidence success dialog, the generic
+  `submission_wait_for_confirmation` operation returned
+  `outcome=security_challenge` because the passive reCAPTCHA signal had
+  higher precedence than the confirmation text.
+
+Required changes:
+
+- Make upload operations return a durable `upload_id`, explicit pending state,
+  and a polling or wait contract when the file chooser transport outlives the
+  request. A stale input must return the fresh control and never imply that a
+  completed asynchronous upload failed.
+- Include mandatory privacy and legal attestations in the active-surface
+  review. Keep optional marketing consent separate and unchecked by default.
+- Treat a passive invisible reCAPTCHA as a diagnostic signal when no visible
+  challenge exists. A visible success dialog on the same post-submit surface
+  must outrank the passive signal and classify the submission as `confirmed`.
+- Preserve the successful click evidence and raw security warning together so
+  the tracker can explain a classifier false positive without asking for a
+  duplicate submission.
+- Add fixtures for a minimum-size upload error, stale file input after a
+  rerender, React-select portal options, mandatory privacy consent, passive
+  reCAPTCHA, and a visible success dialog containing the same passive marker.
+
+## Live retest: Admiral external form with passive reCAPTCHA
+
+The Admiral Group Plc Solution Architect - GenAI flow opened an external
+Admiral Jobs form from the LinkedIn job page. The form requested first name,
+last name, professional email, and a candidate message. The public
+`form_fill_fields` operation wrote all four values and returned
+`verified=true`, but also returned `verification=inconclusive` and
+`fallback_error=target_not_found` for every field. A subsequent fresh surface
+read confirmed the exact labels, lengths, visible state, and empty error lists.
+
+One native click on the visible `Sign Up` action caused the candidate form to
+disappear and returned the page to the job description. No visible success
+message, receipt, or candidate-form error was present. The classifier returned
+`security_challenge` because of the passive `g-recaptcha` class and an
+unrelated newsletter form error. The tracker therefore records the event as
+`submitted` with confirmation unknown, and no retry was performed.
+
+Required changes:
+
+- Do not return `verified=true` together with `verification=inconclusive`
+  without a precise distinction between DOM persistence, event observation,
+  and submission readiness. The envelope should expose the state that caused
+  the inconclusion and the next safe observation.
+- Classify a form disappearance without a positive receipt as `unknown`, not
+  `security_challenge`, when the only security signal is a passive marker.
+- Scope validation errors to the active application form. A required field in
+  an unrelated newsletter must not influence submission classification.
+- Keep the submit token terminal after an unknown transport or effect so a
+  later agent cannot repeat the application blindly.
+- Add an external-form fixture where the application form closes with no
+  receipt while a passive reCAPTCHA and unrelated newsletter error remain on
+  the page.
+
+## Live retest: SCC login and registration handoff
+
+The SCC Application Architect (AI) vacancy opened an external application
+page. The visible `Apply` action opened a registration modal backed by the
+iframe `registration.aspx?vacancyID=2166&modal=true`. The shallow active-surface
+operation exposed only the modal label and close button, while deep discovery
+found the registration form inside the iframe.
+
+The registration surface requested account authentication and additional
+candidate data, including a required mobile telephone and a pronoun field.
+No field was mutated, no account was created, and no submit was attempted.
+The modal was closed and the tracker records a manual login or registration
+handoff. This is a legitimate boundary, not a browser interaction failure.
+
+Required changes:
+
+- Promote login and registration surfaces from deep frame discovery into a
+  concise public handoff with frame provenance, required actions, and the
+  exact fields that block progress.
+- Keep authentication, password creation, email verification, and sensitive
+  demographic fields outside autonomous preparation. The workflow should
+  pause without trying to guess or populate them.
+- Ensure a cross-origin or iframe registration dialog does not disappear from
+  `form_review` merely because the top-level active surface has no fields.
+- Add a fixture for an external Apply link that opens a registration iframe
+  with required mobile and optional or sensitive demographic questions.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
