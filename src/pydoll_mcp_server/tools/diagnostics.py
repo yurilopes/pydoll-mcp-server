@@ -295,12 +295,15 @@ async def browser_attach(client_id: str, browser_id: str = '', profile_id: str =
     allowed_roots = (config.profiles_dir.resolve(strict=False), config.tmp_dir.resolve(strict=False))
     if not _inside_any(profile_path, allowed_roots):
         return StructuredError(ErrorCode.PERMISSION_DENIED, 'Lease profile path is outside managed roots.').to_dict()
-    if not isinstance(raw_port, int) or raw_port <= 0:
-        return _handoff(profile_id, 'Lease metadata has no valid CDP port.')
     browser_pid = _safe_int(metadata.get('browser_pid'))
     if browser_pid is not None and not _process_is_alive(browser_pid):
         get_profile_lease_manager().release_by_profile(str(profile_path))
         return _stale_lease(profile_id, 'The leased browser process is no longer alive.')
+    if not isinstance(raw_port, int) or raw_port <= 0:
+        if browser_pid is None:
+            get_profile_lease_manager().release_by_profile(str(profile_path))
+            return _stale_lease(profile_id, 'The lease has no browser process or CDP endpoint metadata.')
+        return _handoff(profile_id, 'Lease metadata has no valid CDP port while the browser process is alive.')
     try:
         ws_address = await asyncio.wait_for(get_browser_ws_address(raw_port), timeout=5.0)
     except (OSError, RuntimeError, TimeoutError, ValueError) as exc:

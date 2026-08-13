@@ -669,6 +669,50 @@ framework-safe filling and element fallback behavior. They should be reviewed in
 from this report. The report is not an assertion that those changes are complete, and it does
 not replace focused tests, full quality gates, or a design review of the lifecycle work.
 
+## Live validation on 2026-08-12
+
+The v2 workflow was exercised against the previously blocked Starbridge AI Engineer
+application in a visible persistent browser using the `curriculum` profile. No submit click
+was attempted because the page exposed a reCAPTCHA verification challenge.
+
+Observed behavior and resulting changes:
+
+- An immediate preflight after navigation could run before the Ashby form was ready and return
+  no interactive fields. Waiting for a concrete required selector made the same page discoverable.
+  The workflow should continue to expose this as a retryable readiness state rather than treating
+  it as a permanent form failure.
+- The active surface originally selected the visible `Upload file` button as the primary action,
+  even though the final `Submit Application` button existed lower in the page. Final-action text
+  is now prioritized across the complete active surface, including actions outside the viewport.
+- Deep discovery found the application controls and optional diversity controls. Radio groups and
+  non-actionable hidden or cross-origin frame nodes are now compared semantically so they do not
+  create a false inventory dispute. A real form control inside an inaccessible frame must still
+  remain a blocking disagreement.
+- Deep discovery also found visible reCAPTCHA content inside an iframe. The workflow now returns
+  an explicit security handoff, keeps the primary action as `Submit Application`, and refuses to
+  issue a review token. It does not click or attempt to solve the challenge.
+- Safe preparation is allowed to continue while a passive security control is present. The live
+  run filled Name, Email, Phone Number, LinkedIn, the exceptional-work textarea, and the expected
+  annual rate, selected B2B SaaS and both required `Yes` choices, selected Brazil, and accepted
+  the dedicated resume PDF. All requested field operations returned verified v2 results, and a
+  read-only review confirmed the values by length and the resume by native and rendered state.
+- The final review remained blocked only by the security handoff, with no review token and no
+  submit attempt. This confirms that preparation and submission are separated in practice.
+
+Remaining follow-up items from this run:
+
+- Reduce duplicate CAPTCHA signals from the same iframe into one compact security record while
+  preserving source and frame provenance.
+- Reconcile the fill result's nested state fields. The top-level verification and post-review
+  value lengths were correct, but some fill responses reported an empty nested `dom_value` while
+  reporting a present framework value. The public state should be internally consistent.
+- The combobox returned the selected Unicode option and a new element ID, but its immediate state
+  still reported `popup_open=true`. Add a close-state observation or a clear inconclusive result
+  before a review can claim the popup was closed.
+- Add a browser fixture for an Ashby-style page with a final action below the viewport, optional
+  diversity groups, and a cross-origin reCAPTCHA iframe. This should cover the readiness retry,
+  action selection, security handoff, and safe preparation sequence together.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

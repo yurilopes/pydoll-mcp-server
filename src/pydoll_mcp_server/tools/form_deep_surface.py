@@ -7,7 +7,23 @@ from pydoll_mcp_server.json_types import JsonObject, get_array, get_bool, get_in
 _FIELD_TAGS = frozenset({'input', 'textarea', 'select'})
 _FIELD_ROLES = frozenset({'textbox', 'combobox', 'radio', 'checkbox', 'switch'})
 _ACTION_TAGS = frozenset({'button', 'a'})
-_FINAL_WORDS = frozenset({'submit', 'apply', 'enviar', 'candidatar', 'continue', 'next', 'avançar', 'avancar'})
+_FINAL_WORDS = frozenset(
+    {
+        'submit',
+        'submit application',
+        'apply',
+        'apply now',
+        'send application',
+        'enviar',
+        'enviar candidatura',
+        'candidatar',
+        'candidatar-se',
+        'continue',
+        'next',
+        'avançar',
+        'avancar',
+    }
+)
 
 
 def enrich_surface_from_deep(surface: JsonObject, deep: JsonObject) -> JsonObject:
@@ -82,9 +98,32 @@ def enrich_surface_from_deep(surface: JsonObject, deep: JsonObject) -> JsonObjec
             name = label or get_string(value, 'text', '')
             if not deep_primary and _is_primary_name(name, tag, attrs):
                 deep_primary = _action_from_deep(value, name, role or ('button' if tag == 'button' else 'link'))
-        descriptor = f'{label} {get_string(attrs, "name", "")} {get_string(attrs, "type", "")}'.casefold()
+        descriptor = ' '.join(
+            (
+                label,
+                get_string(value, 'text', ''),
+                get_string(attrs, 'name', ''),
+                get_string(attrs, 'type', ''),
+                get_string(attrs, 'title', ''),
+                get_string(attrs, 'src', ''),
+            )
+        ).casefold()
         if any(marker in descriptor for marker in ('captcha', 'recaptcha', 'hcaptcha', 'turnstile', 'one-time', 'otp')):
-            security_controls.append({'label': label, 'kind': 'security_control', 'automation_allowed': False})
+            signal: JsonObject = {
+                'label': label or get_string(value, 'text', '')[:160],
+                'kind': 'security_control',
+                'automation_allowed': False,
+                'requires_user_action': True,
+                'source': descriptor[:240],
+                'frame_path': get_array(value, 'frame_path', []),
+            }
+            if not any(
+                isinstance(existing, dict)
+                and get_string(existing, 'kind', '') == 'security_control'
+                and get_string(existing, 'source', '') == get_string(signal, 'source', '')
+                for existing in security_controls
+            ):
+                security_controls.append(signal)
     result = dict(surface)
     result['fields'] = fields
     if not primary and deep_primary:

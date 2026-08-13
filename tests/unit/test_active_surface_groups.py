@@ -51,3 +51,6 @@ def test_script_groups_choices_and_excludes_dismiss_primary_actions() -> None:
     assert 'options,' in script
     assert 'findPendingRequired(fields)' in script
     assert 'dismissWords.test' in script
+    assert 'finalActionWords' in script
+    assert 'finalCandidates.find(inViewport)' in script
+    assert 'preferredFallback = chooseAction(fallbackCandidates)' in script

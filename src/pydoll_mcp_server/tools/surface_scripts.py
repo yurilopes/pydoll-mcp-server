@@ -216,18 +216,26 @@ function collectContainers() {{
 }}
 function findPrimaryAction() {{
     const dismissWords = /^(close|fechar|cancel|cancelar|dismiss|discard|descartar|x)$/i;
+    const finalActionWords = /^(submit(?: application)?|apply(?: now)?|send application|enviar(?: candidatura)?|candidatar(?:-se)?|enviar inscricao)$/i;
+    const actionText = (el) => norm(el.innerText || el.value || el.getAttribute('aria-label') || '');
+    const selectableAction = (el) => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true' && !dismissWords.test(actionText(el));
+    const chooseAction = (candidates) => {{
+        const finalCandidates = candidates.filter((el) => finalActionWords.test(actionText(el)));
+        if (finalCandidates.length) return finalCandidates.find(inViewport) || finalCandidates[0];
+        return candidates.find(inViewport) || candidates[0] || null;
+    }};
     const primarySelectors = [
         'button.primary', 'button.btn-primary', 'button[type="submit"]',
         'input[type="submit"]', '.btn.primary',
     ];
+    const primaryCandidates = [];
     for (const sel of primarySelectors) {{
         for (const el of surface.querySelectorAll(sel)) {{
-            if (!visible(el)) continue;
-            if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
-            if (dismissWords.test(norm(el.innerText || el.value || el.getAttribute('aria-label') || ''))) continue;
-            return actionMeta(el);
+            if (selectableAction(el) && !primaryCandidates.includes(el)) primaryCandidates.push(el);
         }}
     }}
+    const preferredPrimary = chooseAction(primaryCandidates);
+    if (preferredPrimary) return actionMeta(preferredPrimary);
     const fallbackOrder = ['button','input[type="submit"]','input[type="button"]','a[role="button"]','[role="button"]'];
     const primaryWords = /^(next|continue|avançar|avancar|prosseguir|submit|enviar|apply|candidatar-se)$/i;
     for (const sel of fallbackOrder) {{
@@ -240,6 +248,14 @@ function findPrimaryAction() {{
             return actionMeta(el);
         }}
     }}
+    const fallbackCandidates = [];
+    for (const sel of fallbackOrder) {{
+        for (const el of surface.querySelectorAll(sel)) {{
+            if (selectableAction(el) && !fallbackCandidates.includes(el)) fallbackCandidates.push(el);
+        }}
+    }}
+    const preferredFallback = chooseAction(fallbackCandidates);
+    if (preferredFallback) return actionMeta(preferredFallback);
     for (const sel of fallbackOrder) {{
         for (const el of surface.querySelectorAll(sel)) {{
             if (!visible(el)) continue;

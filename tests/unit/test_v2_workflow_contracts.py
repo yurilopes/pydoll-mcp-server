@@ -257,6 +257,19 @@ def test_disputed_inventory_does_not_require_primary_action_during_prepare() -> 
     assert hard_prepare_blockers(preflight, [{'label_contains': 'Name', 'value': 'Yuri'}]) == []
 
 
+def test_security_handoff_does_not_block_safe_preparation() -> None:
+    from pydoll_mcp_server.tools.form_workflow_helpers import hard_prepare_blockers
+
+    preflight: JsonObject = {
+        'fields': [{'label': 'Name', 'field_key': 'name', 'element_id': 'name-1'}],
+        'do_not_touch': [],
+        'blockers': [{'kind': 'security_control', 'reason': 'requires_candidate_action'}],
+        'attestation_handoffs': [],
+        'missing_candidate_data': [],
+    }
+    assert hard_prepare_blockers(preflight, [{'label_contains': 'Name', 'value': 'Yuri'}]) == []
+
+
 def test_form_preflight_contract_rejects_page_without_form_fields() -> None:
     from pydoll_mcp_server.tools.form_contracts import v2_envelope
 

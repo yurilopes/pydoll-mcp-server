@@ -387,6 +387,11 @@ def hard_prepare_blockers(preflight: JsonObject, plans: list[JsonObject] | None 
             continue
         if kind == 'primary_action' and get_string(value, 'reason', '') == 'not_found' and plans:
             continue
+        if kind == 'security_control':
+            # A passive CAPTCHA or similar control blocks submission, but it does not
+            # make safe field preparation impossible. The review remains blocked and
+            # no submit token can be issued until the candidate completes the control.
+            continue
         if kind not in {'required_field', 'missing_candidate_data'}:
             if kind == 'attestation' and attestations:
                 protected_attestations = all(
