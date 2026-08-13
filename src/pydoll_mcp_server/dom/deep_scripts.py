@@ -54,6 +54,12 @@ DEEP_TREE_JS = """
             }
             attrs[name] = value.slice(0, 500);
         }
+        const sectionText = (el.closest && el.closest('section,fieldset')?.innerText || '').slice(0, 4000);
+        if (el.required || el.getAttribute('aria-required') === 'true'
+            || /(^|\\s)\\*\\s*(resume|cv|curriculum vitae)\\b/i.test(sectionText))
+            attrs.required = 'true';
+        if (el.disabled) attrs.disabled = 'true';
+        if (el.readOnly) attrs.readonly = 'true';
         return attrs;
     }
 
@@ -241,6 +247,12 @@ DEEP_FIND_JS = """
                 attrs[name] = (attr.value || '').slice(0, 500);
             }
         }
+        const sectionText = (el.closest && el.closest('section,fieldset')?.innerText || '').slice(0, 4000);
+        if (el.required || el.getAttribute('aria-required') === 'true'
+            || /(^|\\s)\\*\\s*(resume|cv|curriculum vitae)\\b/i.test(sectionText))
+            attrs.required = 'true';
+        if (el.disabled) attrs.disabled = 'true';
+        if (el.readOnly) attrs.readonly = 'true';
         return attrs;
     }
 

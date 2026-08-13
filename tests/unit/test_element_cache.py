@@ -82,6 +82,25 @@ class TestElementCache:
             )
         assert cache.size == 3
 
+    def test_default_capacity_preserves_surface_references_after_deep_inventory(self) -> None:
+        cache = ElementCache()
+        cache.store(
+            ElementCacheEntry(
+                element_id='surface-name',
+                tab_id='tab_001',
+                document_generation=1,
+            )
+        )
+        for i in range(2000):
+            cache.store(
+                ElementCacheEntry(
+                    element_id=f'deep-{i}',
+                    tab_id='tab_001',
+                    document_generation=1,
+                )
+            )
+        assert cache.get('surface-name') is not None
+
     def test_clear(self) -> None:
         for i in range(5):
             self.cache.store(

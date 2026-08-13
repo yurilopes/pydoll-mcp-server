@@ -151,7 +151,7 @@ class LimitsConfig(BaseSettings):
     max_tree_depth: int = Field(default=6, description='Default max depth for page_get_tree')
     max_tree_nodes: int = Field(default=300, description='Default max nodes for page_get_tree')
     max_deep_depth: int = Field(default=10, description='Default max depth for page_get_tree_deep')
-    max_deep_nodes: int = Field(default=1000, description='Default max nodes for page_get_tree_deep')
+    max_deep_nodes: int = Field(default=2000, description='Default max nodes for page_get_tree_deep')
     max_text_chars: int = Field(default=20000, description='Default max chars for page_get_text')
     max_js_code: int = Field(default=20000, description='Max JS code characters')
     max_js_result: int = Field(default=262144, description='Max JS result size in bytes (256 KiB)')

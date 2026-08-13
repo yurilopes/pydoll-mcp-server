@@ -38,7 +38,7 @@ class ElementCacheEntry:
 
 
 class ElementCache:
-    def __init__(self, max_entries: int = 1000, max_age_seconds: float = 3600.0) -> None:
+    def __init__(self, max_entries: int = 5000, max_age_seconds: float = 3600.0) -> None:
         self._entries: dict[str, ElementCacheEntry] = {}
         self._max_entries = max_entries
         self._max_age = max_age_seconds

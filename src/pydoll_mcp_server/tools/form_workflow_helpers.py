@@ -116,7 +116,7 @@ async def prepare_actions(
     actions: JsonArray = []
     fallback_fields: list[FormFillField] = []
     for plan in fields:
-        field = match_field(plan, observed_fields)
+        field = match_field(plan, observed_fields, prefer_direct_control=True)
         label = field_label(field, plan)
         if protected(label, do_not_touch):
             actions.append({'kind': 'field', 'label': label, 'status': 'requires_candidate_confirmation'})
@@ -178,9 +178,14 @@ async def prepare_actions(
         element_id = str(plan.get('element_id', '') or (match_field(plan, observed_fields) or {}).get('element_id', ''))
         raw_paths = plan.get('paths', [])
         paths = [item for item in raw_paths if isinstance(item, str)] if isinstance(raw_paths, list) else []
-        if not element_id or not paths:
+        clear_existing = bool(plan.get('clear_existing', False))
+        if not element_id or (not paths and not clear_existing):
             actions.append(
-                {'kind': 'upload', 'status': 'stale', 'message': 'Upload requires a current element_id and paths.'}
+                {
+                    'kind': 'upload',
+                    'status': 'stale',
+                    'message': 'Upload requires a current element_id and paths, or clear_existing=true.',
+                }
             )
             continue
         actions.append(
@@ -192,6 +197,7 @@ async def prepare_actions(
                     element_id,
                     paths,
                     replace_existing=bool(plan.get('replace_existing', False)),
+                    clear_existing=clear_existing,
                 ),
             }
         )
@@ -269,9 +275,10 @@ def covered_by_plans(field: JsonObject, plans: list[JsonObject]) -> bool:
     return False
 
 
-def match_field(plan: JsonObject, fields: JsonArray) -> JsonObject | None:
+def match_field(plan: JsonObject, fields: JsonArray, prefer_direct_control: bool = False) -> JsonObject | None:
     key = str(plan.get('field_key', '')).casefold()
     label_hint = str(plan.get('field_label', plan.get('label_contains', plan.get('question_contains', '')))).casefold()
+    label_matches: list[JsonObject] = []
     for value in fields:
         if not isinstance(value, dict):
             continue
@@ -280,8 +287,19 @@ def match_field(plan: JsonObject, fields: JsonArray) -> JsonObject | None:
         if key and key == field_key:
             return value
         if label_hint and label_hint in label:
-            return value
+            label_matches.append(value)
+    if prefer_direct_control:
+        for value in label_matches:
+            if _is_direct_control(value):
+                return value
+    if label_matches:
+        return label_matches[0]
     return None
+
+
+def _is_direct_control(field: JsonObject) -> bool:
+    tag = get_string(field, 'tag', '').casefold()
+    return tag in {'input', 'textarea', 'select'} or get_bool(field, 'contenteditable', False)
 
 
 def field_label(field: JsonObject | None, plan: JsonObject) -> str:

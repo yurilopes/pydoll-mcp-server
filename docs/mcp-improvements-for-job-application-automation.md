@@ -766,6 +766,50 @@ Recommended live-regression fixtures:
 - Existing selector present before click, followed by no state change, to ensure the result is
   `no_effect` rather than `verified`.
 
+### Workable reapplication and long-form regression
+
+The Walter Senior Full Stack AI Engineer application was retried in the same visible
+persistent browser after the previous run had been invalidated. The form was a useful
+end-to-end regression because it combined a long DOM, duplicate label representations, a
+required resume upload, an optional photo upload, several required text questions, and a
+post-submit confirmation page.
+
+Observed results:
+
+- The original deep discovery cap produced a partial inventory on the long Workable page.
+  Increasing the deep node budget to 2,000, allowing a bounded eight-second traversal, and
+  increasing the element cache capacity prevented valid controls from becoming stale during
+  reconciliation.
+- Required state was preserved from both the native control and nearby visible context. The
+  Resume input was correctly identified as required while the Photo input remained optional.
+  This prevented the earlier mistake of associating the resume PDF with the photo control.
+- The form snapshot no longer treated ordinary address helper text as a validation error.
+  Validation evidence now requires an invalid state, an error role or live region, an error
+  descriptor, or an explicit validation phrase.
+- The same visible label appeared on a container and on its actual input. Scalar field plans
+  now prefer the direct input, textarea, or select when no explicit element ID is supplied.
+  This removed the duplicate Phone action observed during the live run.
+- The review token was issued only after required fields, the required resume, visible errors,
+  and the final action were revalidated. The submit operation consumed the token and dispatched
+  exactly one click.
+- Workable briefly exposed `required field` while the submission was settling, then rendered
+  `Thank you!` and `Your application has been submitted successfully.` The confirmation waiter
+  now gives a short bounded grace period to validation-like text when a positive confirmation
+  pattern is configured. It still preserves security, authentication, attestation, portal
+  limit, and permanent validation precedence, and it never retries the click.
+- The final read-only confirmation returned `outcome=confirmed` and `confirmed=true`. The
+  confirmation screenshot is available as artifact `artifact_982e149bed4b4c54` with SHA-256
+  `17179d6f54d4adb6992a5f3d3fb6b289f02b9141ba76d004f1670228134a14d2`.
+- The application used a conservative salary posture. No unsupported salary fact was invented,
+  and the live run followed the caller's current USD 70,000 to USD 120,000 guidance when a
+  salary response was required. The Walter form did not require a salary answer.
+
+Regression tests now cover transient validation followed by visible confirmation and duplicate
+label matching in favor of a direct form control. The named screenshot export attempt also
+exposed a small API issue: a relative name without an explicit `.png` extension was interpreted
+as an extension. Future screenshot naming should validate or append the requested format before
+passing the path to the browser artifact layer.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

@@ -104,9 +104,22 @@ def read_filled_state_reference_script(reference: str) -> str:
         const value = target.type === 'password' ? '' : (target.value ?? target.textContent ?? '');
         const errors = [];
         const described = (target.getAttribute('aria-describedby') || '').split(/\\s+/).filter(Boolean);
+        const isErrorNode = (node) => {{
+            if (!node) return false;
+            const descriptor = [
+                node.id || '', node.className || '', node.getAttribute?.('role') || '',
+                node.getAttribute?.('aria-live') || '', node.getAttribute?.('aria-label') || ''
+            ].join(' ').toLowerCase();
+            const text = (node.innerText || node.textContent || '').trim().toLowerCase();
+            return node.getAttribute?.('aria-invalid') === 'true'
+                || node.getAttribute?.('role') === 'alert'
+                || node.getAttribute?.('aria-live') === 'assertive'
+                || /(^|[\\s_-])(error|errors|invalid|validation|required)([\\s_-]|$)/.test(descriptor)
+                || /please use a different|is required|is invalid|cannot be|must be/.test(text);
+        }};
         for (const id of described) {{
             const node = document.getElementById(id);
-            if (node && (node.innerText || node.textContent || '').trim())
+            if (isErrorNode(node) && (node.innerText || node.textContent || '').trim())
                 errors.push((node.innerText || node.textContent || '').trim());
         }}
         const selected = target.tagName === 'SELECT' && target.selectedIndex >= 0
@@ -237,14 +250,28 @@ def form_snapshot_script(max_fields: int) -> str:
     function errorsFor(el) {{
         const errors = [];
         const ids = (el.getAttribute('aria-describedby') || '').split(/\\s+/).filter(Boolean);
+        function isErrorNode(node) {{
+            if (!node) return false;
+            const descriptor = [
+                node.id || '', node.className || '', node.getAttribute('role') || '',
+                node.getAttribute('aria-live') || '', node.getAttribute('aria-label') || ''
+            ].join(' ').toLowerCase();
+            const text = (node.innerText || node.textContent || '').trim().toLowerCase();
+            return node.getAttribute('aria-invalid') === 'true'
+                || node.getAttribute('role') === 'alert'
+                || node.getAttribute('aria-live') === 'assertive'
+                || /(^|[\\s_-])(error|errors|invalid|validation|required)([\\s_-]|$)/.test(descriptor)
+                || /please use a different|is required|is invalid|cannot be|must be/.test(text);
+        }}
         for (const id of ids) {{
             const described = document.getElementById(id);
-            if (described && visible(described)) errors.push(described.innerText.trim());
+            if (isErrorNode(described) && visible(described)) errors.push(described.innerText.trim());
         }}
         let next = el.nextElementSibling;
         for (let i = 0; next && i < 3; i++, next = next.nextElementSibling) {{
             const marker = `${{next.className || ''}} ${{next.getAttribute('role') || ''}}`;
-            if (visible(next) && /error|alert|invalid|required/i.test(marker)) errors.push(next.innerText.trim());
+            if (visible(next) && isErrorNode(next) && /error|alert|invalid|required/i.test(marker))
+                errors.push(next.innerText.trim());
         }}
         return [...new Set(errors.filter(Boolean))];
     }}

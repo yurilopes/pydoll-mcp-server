@@ -106,7 +106,7 @@ class TestLimitsConfig:
         assert config.max_tree_depth == 6
         assert config.max_tree_nodes == 300
         assert config.max_deep_depth == 10
-        assert config.max_deep_nodes == 1000
+        assert config.max_deep_nodes == 2000
         assert config.max_text_chars == 20000
         assert config.max_js_code == 20000
         assert config.max_js_result == 262144

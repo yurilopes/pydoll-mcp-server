@@ -84,8 +84,9 @@ async def upload_files(
     expect_filename_visible: bool = False,
     verify_timeout: float | None = None,
     replace_existing: bool = False,
+    clear_existing: bool = False,
 ) -> JsonObject:
-    if not paths:
+    if not paths and not clear_existing:
         return StructuredError(ErrorCode.INVALID_INPUT, 'At least one upload path is required.').to_dict()
     if expect_filename_visible or verify_timeout is not None:
         from pydoll_mcp_server.tools.upload_prep import upload_files_enhanced
@@ -125,6 +126,7 @@ async def upload_files(
     if (
         current_status in {'accepted', 'accepted_with_verification_warning', 'processing', 'rendered'}
         and not replace_existing
+        and not clear_existing
     ):
         return StructuredError(
             ErrorCode.UPLOAD_STATE_CONFLICT,
@@ -154,6 +156,7 @@ async def upload_files(
         'count': len(paths),
         'accepted': accepted,
         'replace_existing': replace_existing,
+        'clear_existing': clear_existing,
         'state': state if state.get('success') else {},
     }
 

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -108,6 +109,59 @@ def test_submission_outcome_precedence_is_conservative() -> None:
         is SubmissionOutcome.CONFIRMED
     )
     assert classify_submission_outcome('the page changed', [], []) is SubmissionOutcome.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_submission_wait_allows_transient_validation_before_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydoll_mcp_server.tools import submission
+
+    bodies = iter(
+        [
+            'required field',
+            'required field',
+            'Thank you! Your application has been submitted successfully.',
+        ]
+    )
+
+    async def visible_body(_tab: object) -> str:
+        return next(bodies, 'Thank you! Your application has been submitted successfully.')
+
+    def get_tab(_client: str, _tab: str) -> SimpleNamespace:
+        return SimpleNamespace(pydoll_tab=object())
+
+    registry = SimpleNamespace(get_tab=get_tab)
+    monkeypatch.setattr(submission, 'get_registry', lambda: registry)
+    monkeypatch.setattr(submission, 'get_tab_url', _fake_url)
+    monkeypatch.setattr(submission, '_visible_body_text', visible_body)
+
+    result = await submission.submission_wait_for_confirmation(
+        'client',
+        'tab',
+        success_text_any=['application has been submitted successfully'],
+        status_text_any=['required field'],
+        timeout=2,
+    )
+
+    assert result['outcome'] == 'confirmed'
+    assert result['confirmed'] is True
+
+
+async def _fake_url(_tab: object) -> str:
+    return 'https://example.test/apply'
+
+
+def test_label_matching_prefers_direct_control_for_scalar_fields() -> None:
+    from pydoll_mcp_server.tools.form_workflow_helpers import match_field
+
+    fields: JsonArray = [
+        {'label': 'Phone', 'tag': 'div', 'element_id': 'phone-container'},
+        {'label': 'Phone', 'tag': 'input', 'element_id': 'phone-input'},
+    ]
+    match = match_field({'field_label': 'Phone'}, fields, prefer_direct_control=True)
+    assert match is not None
+    assert match['element_id'] == 'phone-input'
 
 
 def test_combobox_matching_preserves_unicode_and_reports_ambiguity() -> None:
@@ -284,6 +338,23 @@ def test_form_preflight_contract_rejects_page_without_form_fields() -> None:
     assert result['status'] == 'blocked'
     blocker = require_json_object(get_array(result, 'blockers')[0], 'form blocker')
     assert blocker['kind'] == 'form_surface'
+
+
+def test_form_helper_text_is_not_classified_as_a_validation_error() -> None:
+    from pydoll_mcp_server.tools.form_scripts import form_snapshot_script
+
+    script = form_snapshot_script(10)
+    assert 'Include your city, region, and country' not in script
+    assert 'isErrorNode' in script
+
+
+def test_deep_discovery_preserves_control_properties() -> None:
+    from pydoll_mcp_server.dom.deep_scripts import DEEP_FIND_JS, DEEP_TREE_JS
+
+    for script in (DEEP_TREE_JS, DEEP_FIND_JS):
+        assert "attrs.required = 'true';" in script
+        assert "el.required || el.getAttribute('aria-required')" in script
+        assert "if (el.disabled) attrs.disabled = 'true';" in script
 
 
 def test_missing_candidate_data_remains_a_review_blocker_not_a_prepare_abort() -> None:

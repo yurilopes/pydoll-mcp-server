@@ -59,6 +59,7 @@ _VALIDATION_MARKERS = (
 )
 _REJECTION_MARKERS = ('application rejected', 'not selected', 'no longer accepting')
 _CANCEL_MARKERS = ('cancelled', 'canceled', 'application withdrawn')
+_VALIDATION_SETTLE_GRACE_SECONDS = 4.0
 
 
 async def submission_wait_for_confirmation(
@@ -106,6 +107,7 @@ async def submission_wait_for_confirmation(
     modal_gone = False
     outcome = SubmissionOutcome.UNKNOWN
     body = ''
+    validation_started_at: float | None = None
 
     while time.monotonic() < deadline:
         body = await _visible_body_text(tab_info.pydoll_tab)
@@ -117,6 +119,15 @@ async def submission_wait_for_confirmation(
             modal_gone = not bool(await _visible_dialog_text(tab_info.pydoll_tab))
 
         outcome = classify_submission_outcome(body_lower, success_texts, status_texts)
+        if outcome is SubmissionOutcome.VALIDATION_FAILED and success_texts:
+            if validation_started_at is None:
+                validation_started_at = time.monotonic()
+            if any(text in body_lower for text in success_texts):
+                outcome = SubmissionOutcome.CONFIRMED
+                break
+            if time.monotonic() - validation_started_at < min(_VALIDATION_SETTLE_GRACE_SECONDS, limit):
+                await asyncio.sleep(0.3)
+                continue
         if outcome is not SubmissionOutcome.UNKNOWN or (url_changed and not expect_url_change and modal_gone):
             break
         if outcome is SubmissionOutcome.UNKNOWN and not (url_changed or modal_gone):
