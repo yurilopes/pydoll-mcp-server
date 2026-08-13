@@ -2117,6 +2117,78 @@ adapter for its React or shadow-root `Next` control. The safe recovery is a
 manual click followed by a fresh read-only review, not an automatic duplicate
 click.
 
+## Cross-cutting requirement: shadow DOM must be transparent to the agent
+
+Shadow DOM support is a platform capability, not a workflow detail that the
+calling agent should need to know. The MCP must present controls inside open
+shadow roots through the same logical field, action, and evidence contracts as
+light-DOM controls. A caller should be able to use the same `element_id`, label,
+role, fingerprint, fill, click, choice, combobox, upload, preflight, review,
+and submit operations without adding a shadow-specific flag or JavaScript
+fallback.
+
+The adapter must therefore:
+
+- traverse open shadow roots during discovery and re-resolution;
+- preserve `shadow_path` internally while exposing one stable logical identity
+  for the visible control;
+- associate shadow controls with their visible labels, fieldsets, errors,
+  required state, and rendered component state;
+- resolve the exact current node immediately before every mutation, including
+  controls recreated by framework rendering or portal updates;
+- observe click effects, value survival, blur, validity, popup closure, and
+  upload rendering across the shadow boundary;
+- merge light-DOM and shadow-DOM results without duplicate candidates or false
+  ambiguity, while reporting partial discovery errors explicitly;
+- return the same v2 semantic states for stale, hidden, blocked,
+  inconclusive, verified, and unknown outcomes regardless of the underlying
+  DOM surface.
+
+Acceptance criterion: a fixture whose complete application form is hosted in
+an open shadow root must be preparable, reviewed, and safely advanced through
+the public workflow without `js_evaluate`, shadow-specific caller knowledge,
+or manual element discovery. The evidence should identify the logical field
+and active surface, with the implementation details such as `shadow_path`
+available only as diagnostic metadata.
+
+## Live retest: shadow-root questions and final review scope
+
+After the candidate manually advanced the Micro1 form, the next page exposed
+three numeric questions inside a React surface reported with
+`open_shadow_root` diagnostics. Fresh selector resolution followed by one
+field-at-a-time v2 filling verified all values and framework events:
+
+- expected hourly rate: `50` USD;
+- availability: `40` hours per week;
+- start: `7` days.
+
+The field interaction itself is an effective shadow-DOM test: the caller did
+not need to inspect a shadow root or execute page JavaScript. The server merged
+the controls into the public surface and verified DOM presence, framework
+events, blur, validity, controlled-value survival, and submission readiness.
+
+The final review exposed a separate workflow defect. `form_review(scope="auto")`
+selected the visible `-` counter button as the primary action because the
+submit button is outside the first form container. `form_review(scope="main")`
+correctly selected the visible enabled `Submit` button and reported no
+blockers, but `form_submit_after_review` compared that token against the
+fingerprint generated for the `auto` form scope and returned
+`REVIEW_TOKEN_INVALID`. The safe adapter must bind the review token to the
+same normalized active-surface scope used during submission, or carry the
+review scope in the token and use it consistently. It must never require a
+direct low-level click as a workaround for this mismatch.
+
+Required regression coverage:
+
+- a form with counter buttons and a final submit outside the form element;
+- equivalent fingerprints for `auto`, `form`, and `main` when they describe
+  the same logical application surface;
+- a review token that records its scope and is accepted only against the same
+  scope and document generation;
+- shadow-root controls that remain invisible to the caller's workflow schema;
+- a final review that reports `Submit` as the primary action and permits the
+  single authorized submit click without a token scope false positive.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
