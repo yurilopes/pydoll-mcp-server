@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -13,15 +14,24 @@ from pydoll.exceptions import PydollException
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
-from pydoll_mcp_server.dom.reference_scripts import ELEMENT_REFERENCE_HELPERS
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_string, normalize_json_value
+from pydoll_mcp_server.json_types import (
+    JsonArray,
+    JsonObject,
+    get_array,
+    get_bool,
+    get_string,
+    normalize_json_value,
+)
+from pydoll_mcp_server.tools.form_fill_script import fill_script as _fill_script
 from pydoll_mcp_server.tools.form_input_modes import (
-    keyboard_fallback_allowed,
+    keyboard_fallback_decision,
     keyboard_fill,
     read_filled_state,
+    value_equivalent,
     wait_expected_enabled,
 )
+from pydoll_mcp_server.tools.form_scripts import read_filled_state_reference_script
 
 
 class FormFillField(TypedDict, total=False):
@@ -116,6 +126,7 @@ async def form_fill_fields(
         async with tab_operation_lock(tab_id):
             result = await tab_info.pydoll_tab.execute_script(_fill_script(payload), return_by_value=True)
             data = extract_normalized_object(result, 'form_fill')
+            filled_items = get_array(data, 'filled', [])
             if expected_enabled_element_id:
                 dependent_control_enabled = await wait_expected_enabled(
                     tab_info,
@@ -123,29 +134,61 @@ async def form_fill_fields(
                     min(max(validation_timeout, 0.1), 30.0),
                 )
             keyboard_requests: list[JsonObject] = []
-            for item in get_array(data, 'filled', []):
+            for item in filled_items:
                 if isinstance(item, dict) and (
                     str(item.get('mode_requested', mode)) == 'keyboard' or mode == 'keyboard'
                 ):
                     keyboard_requests.append(item)
-            if mode == 'auto' and dependent_control_enabled is False:
+            if mode == 'auto':
                 keyboard_requests = []
-                for item in get_array(data, 'filled', [])[:1]:
-                    if isinstance(item, dict):
-                        keyboard_requests.append(item)
+                if dependent_control_enabled is False:
+                    for item in filled_items[:1]:
+                        if isinstance(item, dict):
+                            keyboard_requests.append(item)
+                elif state_verification != 'dom':
+                    for item in filled_items:
+                        if isinstance(item, dict) and keyboard_verification_needed(item, state_verification):
+                            keyboard_requests.append(item)
             for item_value in keyboard_requests:
                 selector = str(item_value.get('selector_hint', ''))
                 if not selector:
                     continue
                 element = await tab_info.pydoll_tab.query(selector, timeout=1, find_all=False, raise_exc=False)
-                if element is None or not await keyboard_fallback_allowed(element):
+                if element is None:
+                    item_value['fallback_error'] = 'target_not_found'
+                    continue
+                decision = await keyboard_fallback_decision(element)
+                if not get_bool(decision, 'allowed', False):
+                    item_value['fallback_blocked'] = get_string(decision, 'reason', 'inspection_unavailable')
                     continue
                 request_value = str(item_value.get('requested_value', ''))
                 await keyboard_fill(tab_info.pydoll_tab, element, request_value)
-                state = await read_filled_state(element)
+                await asyncio.sleep(0.12)
+                state: JsonObject | None = None
+                try:
+                    response = await tab_info.pydoll_tab.execute_script(
+                        read_filled_state_reference_script(selector),
+                        return_by_value=True,
+                    )
+                    referenced = extract_normalized_object(response, 'read_filled_state')
+                    if not get_string(referenced, 'error', ''):
+                        state = referenced
+                except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+                    state = None
+                if state is None:
+                    refreshed = await tab_info.pydoll_tab.query(
+                        selector,
+                        timeout=1,
+                        find_all=False,
+                        raise_exc=False,
+                    )
+                    state = await read_filled_state(refreshed or element)
                 item_value['mode_used'] = 'keyboard'
                 item_value['fallback_used'] = True
-                item_value['verified'] = get_string(state, 'value', '') == request_value
+                item_value['framework_event'] = True
+                item_value['controlled_value_survived'] = value_equivalent(state, request_value)
+                item_value['blurred'] = True
+                item_value['verified'] = item_value['controlled_value_survived']
                 item_value['field_valid'] = item_value['verified']
                 fallback_used = True
             if expected_enabled_element_id and fallback_used:
@@ -166,7 +209,7 @@ async def form_fill_fields(
     ambiguous: JsonArray = []
     validation_errors: JsonArray = []
 
-    for item in get_array(data, 'filled', []):
+    for item in filled_items:
         if isinstance(item, dict):
             if 'field_valid' not in item:
                 item['field_valid'] = bool(item.get('verified', item.get('selected', item.get('checked', True))))
@@ -249,202 +292,11 @@ def _field_to_json(field: FormFillField) -> JsonObject:
     return {str(key): normalize_json_value(value, f'fields.{key}') for key, value in field.items()}
 
 
-def _fill_script(payload_json: str) -> str:
-    return (
-        'const opts = '
-        + payload_json
-        + """;
-const results = { filled: [], unfilled: [], ambiguous: [], validation_errors: [], pending_required: [], security_controls: [] };
+def keyboard_verification_needed(item: JsonObject, level: str) -> bool:
+    """Request keyboard fallback when the requested observable signals are absent."""
 
-function norm(v) { return String(v || '').normalize('NFC').trim().replace(/\\s+/g, ' '); }
-function fold(v) { return norm(v).normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase(); }
-"""
-        + ELEMENT_REFERENCE_HELPERS
-        + """
-function visible(el) {
-    const rect = el.getBoundingClientRect();
-    const style = getComputedStyle(el);
-    return rect.width > 0 && rect.height > 0 && style.display !== 'none'
-        && style.visibility !== 'hidden' && parseFloat(style.opacity) > 0;
-}
-
-function findField(request) {
-    let candidates = [];
-    const inputs = document.querySelectorAll(
-        'input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]),'
-        + 'textarea, select, [contenteditable="true"]'
-    );
-    for (const el of inputs) {
-        if (!visible(el)) continue;
-        let score = 0;
-        const label = norm(
-            (el.id ? (document.querySelector('label[for="' + CSS.escape(el.id) + '"]')?.innerText || '') : '')
-            || el.closest('label')?.innerText
-            || el.getAttribute('aria-label')
-            || el.placeholder || el.name || ''
-        );
-        const foldedLabel = fold(label);
-        if (request.label_contains && foldedLabel.includes(fold(request.label_contains)))
-            score += 100;
-        if (request.question_contains) {
-            const parent = el.closest('.form-group, fieldset, .field, div');
-            const parentText = parent ? fold(parent.innerText || '') : '';
-            if (parentText.includes(fold(request.question_contains))) score += 50;
-        }
-        if (request.placeholder_contains
-            && fold(el.placeholder || '').includes(fold(request.placeholder_contains)))
-            score += 80;
-        if (request.selector && (el.matches(request.selector) || el.id === request.selector))
-            score += 200;
-        if (request.role && (el.getAttribute('role') || '') === request.role) score += 70;
-        if (request.name && el.name === request.name) score += 150;
-        if (score > 0) {
-            candidates.push({ el, score, label });
-        }
-    }
-    if (candidates.length === 0) return null;
-    candidates.sort((a, b) => b.score - a.score);
-    if (candidates.length > 1 && candidates[0].score - candidates[1].score < 15
-        && !request.selector) {
-        return { ambiguous: candidates.slice(0, 3).map(c => ({
-            label: c.label, score: c.score, tag: c.el.tagName.toLowerCase(), type: c.el.type || ''
-        })) };
-    }
-    return { el: candidates[0].el, label: candidates[0].label };
-}
-
-function setValue(el, request) {
-    const tag = el.tagName;
-    const type = (el.type || '').toLowerCase();
-    const value = String(request.value ?? '');
-
-    if (tag === 'INPUT' && type === 'checkbox') {
-        const shouldCheck = request.checked === true
-            || value === 'true' || value === '1';
-        el.checked = shouldCheck;
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { checked: shouldCheck };
-    }
-
-    if (tag === 'INPUT' && type === 'radio') {
-        const radioGroup = document.querySelectorAll(
-            'input[name="' + (el.name || '') + '"][type="radio"]'
-        );
-        for (const radio of radioGroup) {
-            const radioText = norm(radio.closest('label')?.innerText || radio.value || '');
-            const match = fold(radioText) === fold(request.option_text || value || '')
-                || fold(radio.value || '') === fold(value || '');
-            if (match && visible(radio)) {
-                radio.checked = true;
-                radio.dispatchEvent(new Event('change', { bubbles: true }));
-                return { selected: true };
-            }
-        }
-        el.checked = true;
-        return { selected: true };
-    }
-
-    if (tag === 'SELECT') {
-        for (const opt of el.options) {
-            const optText = norm(opt.text || '');
-            const optVal = (opt.value || '');
-            const target = fold(request.option_text || value || '');
-            if (fold(optText) === target || fold(optVal) === target) {
-                el.value = opt.value;
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                return { selected: optText };
-            }
-        }
-        return { error: 'option_not_found' };
-    }
-
-    if (tag === 'TEXTAREA' || (tag === 'INPUT' && (
-        type === 'text' || type === 'email' || type === 'number'
-        || type === 'tel' || type === 'url'))) {
-        const valuePrototype = tag === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-        const nativeSetter = Object.getOwnPropertyDescriptor(valuePrototype, 'value');
-        if (nativeSetter && nativeSetter.set) {
-            nativeSetter.set.call(el, value);
-        } else {
-            el.value = value;
-        }
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
-        return { value_length: value.length, verified: el.value === value };
-    }
-
-    if (el.isContentEditable) {
-        el.textContent = value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        return { value_length: value.length };
-    }
-
-    return { error: 'unsupported_control' };
-}
-
-for (const request of opts.fields) {
-    const match = findField(request);
-    if (!match) {
-        results.unfilled.push({ label_contains: request.label_contains || '(none)', reason: 'no_match' });
-        continue;
-    }
-    if (match.ambiguous) {
-        results.ambiguous.push({ candidates: match.ambiguous });
-        continue;
-    }
-    const el = match.el;
-    const context = norm(el.closest('label, fieldset, .form-group, .field, div')?.innerText || '') + ' '
-        + [el.getAttribute('name'), el.getAttribute('aria-label'), el.getAttribute('placeholder')].filter(Boolean).join(' ');
-    if (/captcha|recaptcha|hcaptcha|turnstile|one[- ]time|otp|2fa|two[- ]factor|payment|credit card|cvv|cvc|biometric|identity verification/i.test(context)) {
-        results.security_controls.push({ label: match.label, kind: 'security_control', automation_allowed: false });
-        results.unfilled.push({ label: match.label, tag: el.tagName.toLowerCase(), type: el.type || '', reason: 'security_control_present' });
-        continue;
-    }
-    const result = setValue(el, request);
-    if (result.error) {
-        results.unfilled.push({
-            label: match.label,
-            tag: el.tagName.toLowerCase(),
-            type: el.type || '',
-            reason: result.error,
-        });
-        continue;
-    }
-    results.filled.push({
-        label: match.label,
-        tag: el.tagName.toLowerCase(),
-        type: el.type || '',
-        value_length: (request.value || '').length,
-        requested_value: String(request.value ?? ''),
-        selector_hint: structuralSelector(el),
-        mode_requested: request.mode || opts.mode || 'auto',
-        mode_used: request.mode === 'keyboard' || opts.mode === 'keyboard' ? 'keyboard' : 'framework_safe',
-        fallback_used: false,
-        ...result,
-    });
-}
-
-if (opts.validate) {
-    const pending = [];
-    const required = document.querySelectorAll(
-        'input[required], textarea[required], select[required], [aria-required="true"]'
-    );
-    for (const el of required) {
-        if (!visible(el)) continue;
-        if (el.type === 'hidden' || el.type === 'file') continue;
-        if (!el.value.trim()) {
-            const lbl = norm(
-                el.closest('label')?.innerText
-                || el.getAttribute('aria-label')
-                || el.placeholder || ''
-            );
-            if (lbl) pending.push(lbl);
-        }
-    }
-    if (pending.length) results.pending_required = pending;
-}
-
-return results;
-"""
-    )
+    if level == 'dom':
+        return False
+    if not get_bool(item, 'framework_event', False) or not get_bool(item, 'controlled_value_survived', False):
+        return True
+    return level in {'blurred', 'submission_ready'} and not get_bool(item, 'blurred', False)

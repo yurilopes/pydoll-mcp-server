@@ -177,9 +177,13 @@ async def inspect_site_diagnostics(tab: ScriptExecutor | None, active_surface: s
 
 async def inspect_element_security(element: WebElement) -> JsonObject:
     script = """
-    const text = String(this.innerText || this.textContent || '').normalize('NFC');
+    const tag = String(this.tagName || '').toLowerCase();
+    const formControl = ['input', 'textarea', 'select', 'option'].includes(tag)
+        || this.isContentEditable === true;
+    const text = formControl ? '' : String(this.innerText || this.textContent || '').normalize('NFC');
     const attrs = [this.getAttribute('aria-label'), this.getAttribute('title'), this.getAttribute('name'),
-        this.getAttribute('placeholder'), this.getAttribute('role')].filter(Boolean).join(' ');
+        this.getAttribute('placeholder'), this.getAttribute('role'), this.getAttribute('autocomplete')]
+        .filter(Boolean).join(' ');
     const source = (text + ' ' + attrs).trim();
     const patterns = [
         ['captcha', /captcha|recaptcha|hcaptcha|turnstile|i am not a robot|verify you are human/i],

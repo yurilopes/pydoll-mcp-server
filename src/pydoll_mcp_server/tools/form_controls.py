@@ -7,11 +7,9 @@ import json
 import time
 from typing import Annotated
 
-from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
-from pydoll_mcp_server.browser.models import TabInfo
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import (
     InvalidScriptResponseError,
@@ -34,37 +32,18 @@ from pydoll_mcp_server.tools.form_element_references import (
     read_filled_state_via_page_reference,
 )
 from pydoll_mcp_server.tools.form_input_modes import (
-    keyboard_fallback_allowed,
     keyboard_fill,
     read_filled_state,
     value_equivalent,
     verification_satisfied,
     wait_expected_enabled,
 )
+from pydoll_mcp_server.tools.form_keyboard import read_keyboard_state, safe_keyboard_target
 from pydoll_mcp_server.tools.form_scripts import fill_script, select_options_script
 
 DEFAULT_EVENTS = ['input', 'change', 'blur']
 VALID_FILL_MODES = frozenset({'auto', 'framework_safe', 'keyboard', 'blur'})
 VALID_STATE_VERIFICATIONS = frozenset({'dom', 'framework_event', 'blurred', 'submission_ready'})
-
-
-async def _safe_keyboard_target(
-    tab_info: TabInfo,
-    element_id: str,
-    original: WebElement,
-) -> WebElement | None:
-    """Re-resolve a field before keyboard fallback and re-check its safety."""
-
-    try:
-        refreshed = await resolve_element(tab_info, element_id)
-        target = refreshed or original
-        if await inspect_element_security(target):
-            return None
-        if not await keyboard_fallback_allowed(target):
-            return None
-        return target
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
-        return None
 
 
 async def fill_element_framework_safe(
@@ -127,8 +106,16 @@ async def fill_element_framework_safe(
                 if not page_reference(tab_info, element_id):
                     raise
             if mode == 'keyboard':
-                keyboard_target = await _safe_keyboard_target(tab_info, element_id, element)
+                keyboard_target, keyboard_reason = await safe_keyboard_target(tab_info, element_id, element)
                 if keyboard_target is None:
+                    if keyboard_reason != 'security_control':
+                        return StructuredError(
+                            ErrorCode.EXECUTION_ERROR,
+                            'Keyboard fallback safety could not be verified.',
+                            retryable=True,
+                            details={'reason': keyboard_reason},
+                            recovery_hint='Re-observe the field and retry with a fresh element reference.',
+                        ).to_dict()
                     return StructuredError(
                         ErrorCode.SECURITY_CONTROL_PRESENT,
                         'Keyboard fallback is disabled for security-sensitive controls.',
@@ -136,7 +123,7 @@ async def fill_element_framework_safe(
                         recovery_hint='Complete the security control manually and resume the workflow.',
                     ).to_dict()
                 await keyboard_fill(tab_info.pydoll_tab, keyboard_target, value)
-                result = await read_filled_state(keyboard_target)
+                result = await read_keyboard_state(tab_info, element_id, keyboard_target)
                 result.update(
                     {
                         'framework_event': True,
@@ -162,11 +149,11 @@ async def fill_element_framework_safe(
                         mode_used = 'blur' if mode == 'blur' else 'framework_safe'
                         page_reference_used = True
                     else:
-                        keyboard_target = await _safe_keyboard_target(tab_info, element_id, element)
+                        keyboard_target, _ = await safe_keyboard_target(tab_info, element_id, element)
                         if mode != 'auto' or keyboard_target is None:
                             raise
                         await keyboard_fill(tab_info.pydoll_tab, keyboard_target, value)
-                        result = await read_filled_state(keyboard_target)
+                        result = await read_keyboard_state(tab_info, element_id, keyboard_target)
                         result.update(
                             {
                                 'framework_event': True,
@@ -197,10 +184,10 @@ async def fill_element_framework_safe(
                     )
                     verified = verification_satisfied(result, expected, state_verification)
                 if mode == 'auto' and not verified and not fallback_used:
-                    keyboard_target = await _safe_keyboard_target(tab_info, element_id, element)
+                    keyboard_target, _ = await safe_keyboard_target(tab_info, element_id, element)
                     if keyboard_target is not None:
                         await keyboard_fill(tab_info.pydoll_tab, keyboard_target, value)
-                        result = await read_filled_state(keyboard_target)
+                        result = await read_keyboard_state(tab_info, element_id, keyboard_target)
                         result.update(
                             {
                                 'framework_event': True,
@@ -217,10 +204,10 @@ async def fill_element_framework_safe(
                     min(max(validation_timeout, 0.1), 30.0),
                 )
                 if mode == 'auto' and enabled is False and not fallback_used:
-                    refreshed = await _safe_keyboard_target(tab_info, element_id, element)
+                    refreshed, _ = await safe_keyboard_target(tab_info, element_id, element)
                     if refreshed is not None:
                         await keyboard_fill(tab_info.pydoll_tab, refreshed, value)
-                        result = await read_filled_state(refreshed)
+                        result = await read_keyboard_state(tab_info, element_id, refreshed)
                         result.update(
                             {
                                 'framework_event': True,

@@ -8,9 +8,12 @@ import time
 
 from pydoll.constants import Key
 from pydoll.elements.web_element import WebElement
+from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.models import TabInfo
+from pydoll_mcp_server.browser.pydoll_compat import get_element_attribute
 from pydoll_mcp_server.browser.script_utils import (
+    InvalidScriptResponseError,
     extract_normalized_bool,
     extract_normalized_object,
 )
@@ -97,22 +100,43 @@ def value_equivalent(state: JsonObject, expected: str) -> bool:
     return bool(expected_digits) and actual_digits == expected_digits
 
 
-async def keyboard_fallback_allowed(element: WebElement) -> bool:
-    result = await element.execute_script(
-        """
-        return {tag:this.tagName || '', type:this.type || '', name:this.name || '',
-            autocomplete:this.getAttribute('autocomplete') || '', aria:this.getAttribute('aria-label') || ''};
-        """,
-        return_by_value=True,
-    )
-    data = extract_normalized_object(result, 'keyboard_fallback_allowed')
-    descriptor = ' '.join(get_string(data, key, '') for key in ('type', 'name', 'autocomplete', 'aria'))
+def classify_keyboard_fallback(data: JsonObject) -> JsonObject:
+    """Classify a keyboard fallback without inspecting field values."""
+
+    descriptor = ' '.join(get_string(data, key, '') for key in ('type', 'name', 'autocomplete', 'aria', 'placeholder'))
     blocked = re.compile(
         r'captcha|recaptcha|hcaptcha|turnstile|otp|one[- ]time|2fa|two[- ]factor|'
-        r'payment|card|cvv|cvc|biometric|identity',
+        r'payment|card|cvv|cvc|biometric|identity verification|government id|passport|driver.?s license',
         re.I,
     )
-    return not blocked.search(descriptor) and get_string(data, 'type', '').lower() not in {'password'}
+    input_type = get_string(data, 'type', '').lower()
+    if input_type == 'password':
+        return {'allowed': False, 'known': True, 'reason': 'password_control'}
+    if blocked.search(descriptor):
+        return {'allowed': False, 'known': True, 'reason': 'security_control'}
+    return {'allowed': True, 'known': True, 'reason': 'ordinary_form_control'}
+
+
+async def keyboard_fallback_decision(element: WebElement) -> JsonObject:
+    """Inspect whether keyboard fallback is safe, preserving unknown state."""
+
+    try:
+        data: JsonObject = {
+            'tag': str(element.tag_name or ''),
+            'type': get_element_attribute(element, 'type') or '',
+            'name': get_element_attribute(element, 'name') or '',
+            'autocomplete': get_element_attribute(element, 'autocomplete') or '',
+            'aria': get_element_attribute(element, 'aria-label') or '',
+            'placeholder': get_element_attribute(element, 'placeholder') or '',
+        }
+    except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+        return {'allowed': False, 'known': False, 'reason': 'inspection_unavailable'}
+    return classify_keyboard_fallback(data)
+
+
+async def keyboard_fallback_allowed(element: WebElement) -> bool:
+    decision = await keyboard_fallback_decision(element)
+    return get_bool(decision, 'allowed', False)
 
 
 async def wait_expected_enabled(tab_info: TabInfo, element_id: str, timeout: float) -> bool:

@@ -1137,6 +1137,88 @@ Required follow-up changes from this regression:
   minimum-size validation, and an EPAM-style privacy checkbox. The acceptance test must assert
   that no submit token is issued while the city or privacy declaration remains unresolved.
 
+### JUPUS AI Lead application rerun
+
+The JUPUS AI Lead application was used as a real end-to-end test of the v2 workflow after the
+server restart and after the earlier Ashby failure. The form was a remote permanent employee
+role with Germany, Portugal, Romania, Spain, and the United Kingdom listed as hiring locations.
+
+Observed results:
+
+- The Ashby form exposed a stable interactive surface through open shadow roots. `form_preflight`
+  identified required text fields, the resume input, two radio groups, optional pronouns, and the
+  optional two-year data-retention consent.
+- The normal framework-safe fill changed every planned field and returned a DOM-valid result, but
+  the aggregate `form_fill_fields` result was `inconclusive` for an Ashby form even though each
+  field was present. The workflow must keep this distinction and must not report the aggregate as
+  ready without a stronger post-stabilization signal.
+- Direct `element_fill` with `mode="keyboard"` successfully verified Name and several textareas,
+  including `framework_value=present`, `framework_event=true`, `controlled_value_survived=true`,
+  and `blurred=true`. This confirms that the per-element keyboard path is effective when the
+  aggregate fallback path is bypassed.
+- The aggregate keyboard fallback path returned `EXECUTION_ERROR` while evaluating
+  `keyboard_fallback_allowed`. This is a production defect in the fallback orchestration. It
+  should re-resolve the element after each rerender, isolate the security descriptor failure, and
+  return a structured per-field error instead of aborting the whole operation.
+- The direct keyboard path incorrectly classified some ordinary Ashby fields, including phone,
+  notice period, current location, and the applied-AI leadership textarea, as security controls.
+  The security gate must inspect the fresh element's type, name, autocomplete, and accessible
+  label, and must not use a stale handle or a broad descriptor that creates false positives.
+- Choice selection worked reliably. `form_select_choice` selected the truthful `No` answer for
+  visa support and `Yes` for permanent employment, returning `selected_state="selected"` and a
+  visible selected label. This is a positive result for custom button controls.
+- Upload handling worked reliably in this fixture. The resume returned `accepted`, native input
+  state `present`, rendered state `present`, filename evidence, and MIME and size metadata.
+- `form_review` produced a review token and `ready_for_submission=true` while leaving the optional
+  retention consent unchecked. It included the pre-submission screenshot artifact and retained the
+  iframe warning as a nonblocking discovery warning.
+- `form_submit_after_review` executed exactly one click, consumed the token, and classified the
+  portal response as `requires_candidate_confirmation` because the visible form still required
+  the two-year data-retention declaration. No retry was attempted. This is the desired safety
+  behavior for sensitive consent, although the review phase should surface the exact attestation
+  text before submit so the handoff is clearer.
+
+Required follow-up changes:
+
+- Fix the `form_fill_fields` keyboard fallback orchestration and add a fixture where a controlled
+  Ashby or React-like input rerenders after each field.
+- Make `keyboard_fallback_allowed` return a typed result with `allowed`, `reason`, and `descriptor`
+  classification, while redacting the descriptor in public responses. Test ordinary phone,
+  location, notice, and textarea fields against CAPTCHA, OTP, payment, and identity controls.
+- Re-resolve the target immediately before the keyboard fallback and after every rerender. A stale
+  handle must produce `stale` or `inconclusive`, never a generic security block.
+- Include optional but submission-blocking privacy or retention declarations in
+  `attestation_handoffs` with their exact visible text before an authorized submit is attempted.
+- Add an Ashby fixture with a custom button radio group, shadow-root resume input, optional privacy
+  retention consent, and a submit response requiring candidate confirmation.
+
+### Follow-up fix validated on the live JUPUS form
+
+The Ashby fallback defects above were fixed and validated against the same visible browser session
+after restarting the MCP server and reconnecting the persistent `curriculum` profile:
+
+- Ordinary form controls now use a native attribute safety descriptor. Phone, notice period,
+  current location, and textarea controls no longer depend on a fragile JavaScript inspection
+  result or become false security handoffs. Explicit password, CAPTCHA, OTP, payment, biometric,
+  and identity-verification signals remain blocked.
+- Cache fallback now preserves the original XPath or selector when metadata collection fails. This
+  gives the resolver a usable reference instead of silently falling back to an unrecoverable stale
+  handle.
+- Keyboard verification reads the current post-rerender node through the page reference before
+  using a cached Pydoll element. This prevents `read_filled_state` from failing after an Ashby or
+  React controlled input replaces its DOM node.
+- Aggregate `form_fill_fields` now requests keyboard fallback whenever the requested verification
+  level lacks framework-event, controlled-value-survival, or blur evidence. The operation keeps
+  the same normalized `filled` records instead of losing per-field updates during JSON
+  normalization.
+- Live validation on the JUPUS form passed for notice period, current location, and applied-AI
+  leadership fields. All three fields used the keyboard fallback, returned `verified`,
+  `framework_event=true`, `controlled_value_survived=true`, `blurred=true`, and
+  `ready_for_submission=true`. No submit was issued during this validation.
+
+The remaining JUPUS blocker is the separate two-year data-retention declaration. It is a sensitive
+candidate confirmation and must remain a handoff rather than an automated choice.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

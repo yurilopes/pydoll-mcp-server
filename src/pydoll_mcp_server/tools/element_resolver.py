@@ -307,7 +307,14 @@ def _attribute(element: WebElement, name: str) -> str:
     return str(value or '')
 
 
-def cache_element(cache: ElementCache, tab_info: TabInfo, element: WebElement) -> str:
+def cache_element(
+    cache: ElementCache,
+    tab_info: TabInfo,
+    element: WebElement,
+    *,
+    fallback_selector: str = '',
+    match_index: int = 0,
+) -> str:
     element_id = f'el_{uuid.uuid4().hex[:12]}'
     text_summary = ''
     tag = ''
@@ -324,6 +331,11 @@ def cache_element(cache: ElementCache, tab_info: TabInfo, element: WebElement) -
     elif attrs.get('name') and tag:
         selector_hint = f'{tag}[name="{attrs["name"]}"]'
         xpath_hint = f'//{tag}[@name="{attrs["name"]}"]'
+    if fallback_selector:
+        if fallback_selector.lstrip().startswith(('/', '(')):
+            xpath_hint = fallback_selector
+        elif not selector_hint:
+            selector_hint = fallback_selector
     entry = ElementCacheEntry(
         element_id=element_id,
         tab_id=tab_info.tab_id,
@@ -332,6 +344,7 @@ def cache_element(cache: ElementCache, tab_info: TabInfo, element: WebElement) -
         text_summary=text_summary,
         selector_hint=selector_hint,
         xpath_hint=xpath_hint,
+        match_index=match_index,
         pydoll_element=element,
     )
     cache.store(entry)
@@ -364,7 +377,13 @@ async def cache_element_with_reference(
             pydoll_element=element,
         )
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
-        return cache_element(cache, tab_info, element)
+        return cache_element(
+            cache,
+            tab_info,
+            element,
+            fallback_selector=fallback_selector,
+            match_index=match_index,
+        )
 
 
 async def safe_text(element: WebElement) -> str:

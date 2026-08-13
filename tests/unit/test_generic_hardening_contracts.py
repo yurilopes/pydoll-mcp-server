@@ -35,6 +35,35 @@ def test_security_diagnostics_are_passive_and_localized_by_kind() -> None:
     assert 'requires_user_action: true' in script
 
 
+def test_keyboard_fallback_keeps_ordinary_contact_fields_automatable() -> None:
+    from pydoll_mcp_server.tools.form_input_modes import classify_keyboard_fallback
+
+    ordinary = classify_keyboard_fallback(
+        {
+            'tag': 'INPUT',
+            'type': 'tel',
+            'name': 'phone',
+            'autocomplete': 'tel',
+            'aria': 'Phone Number',
+            'placeholder': 'Phone Number',
+        }
+    )
+    security = classify_keyboard_fallback(
+        {
+            'tag': 'INPUT',
+            'type': 'text',
+            'name': 'identity_verification',
+            'autocomplete': '',
+            'aria': 'Identity verification code',
+            'placeholder': '',
+        }
+    )
+
+    assert ordinary == {'allowed': True, 'known': True, 'reason': 'ordinary_form_control'}
+    assert security['allowed'] is False
+    assert security['reason'] == 'security_control'
+
+
 def test_existing_interaction_tools_publish_hardening_parameters() -> None:
     from pydoll_mcp_server.tools.elements import element_click, element_fill
     from pydoll_mcp_server.tools.form_fill import form_fill_fields
