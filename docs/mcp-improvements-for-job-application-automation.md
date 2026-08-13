@@ -713,6 +713,59 @@ Remaining follow-up items from this run:
   diversity groups, and a cross-origin reCAPTCHA iframe. This should cover the readiness retry,
   action selection, security handoff, and safe preparation sequence together.
 
+### Greenhouse, Lever, and custom-control validation
+
+The workflow was also exercised against live Greenhouse, Lever, and custom application pages
+in the same visible persistent browser. No CAPTCHA or hCaptcha was clicked, and no final submit
+was attempted when the portal required candidate action.
+
+Observed results:
+
+- Greenhouse discovery correctly exposed the final `Submit application` action and required
+  fields on Nortal and Cresteo pages. It also detected reCAPTCHA as a security handoff. A role
+  with unsupported exact technology thresholds was not filled or submitted because the canonical
+  candidate evidence did not support inventing years for Jest, Terraform, GitLab, or named AWS
+  services.
+- On Cresteo, `form_prepare` stopped before mutation when the normal and deep inventories both
+  contained duplicate representations of the same required fields. The planned labels were
+  unique on the active surface, but the discovery safety check still treated them as ambiguous.
+  The high-level workflow should accept a unique active-surface match when the plan includes the
+  current element fingerprint or selector, while continuing to reject genuinely ambiguous fields.
+- Direct `element_fill` on the Cresteo Greenhouse controls emitted top-level `verified=true` and
+  correct value lengths. The nested state still reported an empty `dom_value` and
+  `ready_for_submission=false` for the same operation. A subsequent review saw the values and no
+  pending required fields, but the public state object must be made internally consistent before
+  agents can trust it without a second observation.
+- Greenhouse's custom Yes or No field was a combobox, not a radio choice group. Calling the choice
+  tool returned `field_not_found`. Opening the custom flyout exposed one `Yes` option and the page
+  then showed `option Yes, selected`. The combobox helper returned `option_not_found` even though
+  the visible option had been selected, so selection must re-observe the trigger and popup after
+  rerender and return the final semantic state rather than the intermediate lookup error.
+- The Greenhouse resume input was created or replaced after the attach interaction. A first upload
+  attempt returned a stale state, while the page visibly showed the correct filename. Subsequent
+  state lookup using the old upload handle correctly returned `stale`. Upload verification should
+  return the new control or upload identity after a portal replaces the native file input and should
+  associate the visible filename with that new identity.
+- On Talentus Global's Lever form, the workflow filled the confirmed identity fields, selected
+  Brazil, accepted the dedicated PDF, and refused to select optional marketing consent. A second
+  upload was rejected unless `replace_existing=true`, and explicit replacement returned state
+  `accepted` with native and rendered evidence. The form remained blocked by hCaptcha and by an
+  unsupported requirement for prior US-client experience, which was correctly not invented.
+- On N-iX, the `EASY APPLY` action dispatched but produced no URL, tab, modal, or visible form
+  effect. The click result was classified as `no_effect`, so no blind retry occurred. TeamStation's
+  existing sidebar selector similarly demonstrated that an expectation selector already present
+  before the click can create a false positive `visible_effect`; effect expectations must compare
+  before and after identity, visibility, bounds, or content rather than presence alone.
+
+Recommended live-regression fixtures:
+
+- Greenhouse duplicate active and deep field representations with a custom portal combobox.
+- Greenhouse upload control replacement after selecting a file.
+- Lever hCaptcha form with optional marketing consent and a monthly or hourly salary field.
+- Custom application action whose click opens no observable effect.
+- Existing selector present before click, followed by no state change, to ensure the result is
+  `no_effect` rather than `verified`.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
