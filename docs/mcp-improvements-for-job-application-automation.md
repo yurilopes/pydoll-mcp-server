@@ -1284,6 +1284,83 @@ The remaining improvement is to make result-card selection itself accept a calle
 and resolve only the matching card before clicking. The post-click guard is the safety boundary for
 callers that still use the current public contract.
 
+### Tech Mahindra live validation and link-based Easy Apply fallback
+
+The next live test used the visible `curriculum` profile for Tech Mahindra's `Sr. Engineer - Python
+with Prompt Engineering` vacancy, LinkedIn job ID `4451666938`. The job identity was checked before
+opening the application and remained consistent through the confirmation page.
+
+The test exposed a remaining portal variation. LinkedIn rendered the Easy Apply CTA as an anchor
+with localized text `Candidatura simplificada` and a job-specific `/apply/` href. The specialized
+`linkedin_easy_apply_open` action resolver did not recognize that control in the active surface and
+returned a retryable resource-not-found result. The generic click resolver also produced no page
+effect. No form field was touched during those failed attempts.
+
+The fallback now searches for the localized anchor, requires exactly one candidate whose href
+contains the same active LinkedIn job ID, and navigates only to that verified URL. It then waits for
+the application surface and applies the existing job identity guard. Ambiguous links or links for a
+different job are rejected without navigation.
+
+Live result after the fallback was used:
+
+- The application dialog opened and was recognized as a one-step Easy Apply form.
+- The dedicated resume was uploaded and verified by the selected visible resume filename.
+- LinkedIn's optional company-follow checkbox was explicitly unchecked.
+- The form contained no security challenge, attestation, or authorization question.
+- Exactly one submit click was sent, and LinkedIn visibly displayed `Candidatura enviada agora`.
+- Pre-submit and confirmation screenshots were captured as PNG artifacts with artifact IDs and
+  SHA-256 hashes.
+
+The regression suite covers the link fallback, job-ID validation, and the existing no-effect and
+wrong-job protections. The live result indicates that the interaction layer is materially more
+reliable, while portal-specific localized labels and iframe-backed surfaces remain an area for
+continued fixture coverage.
+
+### CAS Training live validation and security handoff
+
+The next live test used LinkedIn job `4448757468` for CAS Training's `Software Engineer Python
+Senior - IA / Agentes de IA` after restarting the MCP server and reconnecting the visible persistent
+`curriculum` profile. The previously opened Easy Apply dialog survived the reconnect and remained
+associated with the correct job.
+
+This form exposed several additional interaction defects and one correct safety stop:
+
+- After the resume step, `linkedin_easy_apply_click_next` timed out even though the dialog remained
+  visible at 67 percent and had advanced to `Preguntas adicionales`. The specialized
+  `linkedin_easy_apply_snapshot` also reported `surface=none` and `dialog_present=false` while
+  `page_get_text`, `page_get_active_surface(scope="dialog")`, and the interactive summary all
+  showed the live dialog and its seven required fields. Surface detection for this LinkedIn
+  question step is therefore inconsistent.
+- `linkedin_easy_apply_fill_questions` returned `surface_not_found` for the same visible dialog.
+  The aggregate `form_fill_fields` path also failed to match the Unicode question labels. The
+  generic active-surface resolver returned fresh element IDs, and direct `element_fill` plus
+  `element_select_option` then filled and verified all three numeric fields and all four select
+  fields. The numeric fields reported `framework_event=true`, `controlled_value_survived=true`,
+  `blurred=true`, and `ready_for_submission=true`.
+- The specialized resume upload initially treated the visible `Cargar currículum` wrapper as a
+  file input and returned `native_upload_transport_error`. The generic
+  `upload_files_from_trigger` operation successfully used `chooser_intercept`, confirmed one
+  file input, and verified the visible dedicated PDF filename. The localized trigger fallback was
+  added to the LinkedIn adapter and covered by regression tests, but should receive a fresh live
+  adapter-level check on a new form.
+- The final read-only preflight correctly found an invisible LinkedIn reCAPTCHA security control.
+  It returned a structured `security_control` blocker and did not issue a review or submit click.
+  This is the expected safety behavior. No CAPTCHA or other security mechanism was bypassed.
+
+The diagnostic screenshot was recorded as artifact `artifact_f513fc0a3ff146c7` with SHA-256
+`adc4d200bb3afbec4cc188a0c94e67524dae5af210cb82388f5fb4361d8c51d7`.
+
+Required follow-up changes:
+
+- Make the LinkedIn Easy Apply snapshot and question filler reuse the common active-surface
+  resolver, including dialog portals and localized Unicode labels.
+- Normalize question matching with Unicode NFC while preserving the exact text sent to the page.
+- Treat a successful next-step transition as verified when the active dialog and progress changed,
+  even if the specialized snapshot schema cannot classify the new step.
+- Add a fixture for a LinkedIn-style question dialog with numeric inputs, native selects, localized
+  labels, and a reCAPTCHA iframe. The fixture must assert that the security handoff prevents submit.
+- Add a live adapter-level test for the localized upload trigger fallback after the server restart.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

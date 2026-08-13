@@ -29,6 +29,8 @@ from pydoll_mcp_server.tools.linkedin_runtime import (
     upload_with_file_chooser as _upload_with_file_chooser,
 )
 from pydoll_mcp_server.tools.linkedin_scripts import resolve_action_script
+from pydoll_mcp_server.tools.text_ranking import element_find_by_text_candidates
+from pydoll_mcp_server.tools.upload_trigger import upload_files_from_trigger
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,17 @@ async def _linkedin_easy_apply_upload_resume(
                 timeout_ms,
             )
         else:
-            click_result = await _click_resolved_action(client_id, tab_id, 'upload', timeout_ms, require_effect=False)
+            localized_result = await upload_from_localized_trigger(client_id, tab_id, path, filename, timeout_ms)
+            if localized_result is None:
+                click_result = await _click_resolved_action(
+                    client_id,
+                    tab_id,
+                    'upload',
+                    timeout_ms,
+                    require_effect=False,
+                )
+            else:
+                click_result = localized_result
         if not get_bool(click_result, 'success'):
             return click_result
         input_deadline = time.monotonic() + max(1, timeout_ms) / 1000
@@ -153,14 +165,18 @@ async def _linkedin_easy_apply_upload_resume(
             upload_target = get_object(upload_resolution, 'target', {})
             upload_selector = get_string(upload_target, 'selector_hint')
             if not upload_selector:
-                return upload_result
-            click_result = await _upload_with_file_chooser(
-                client_id,
-                tab_id,
-                upload_selector,
-                path,
-                timeout_ms,
-            )
+                localized_result = await upload_from_localized_trigger(client_id, tab_id, path, filename, timeout_ms)
+                if localized_result is None:
+                    return upload_result
+                click_result = localized_result
+            else:
+                click_result = await _upload_with_file_chooser(
+                    client_id,
+                    tab_id,
+                    upload_selector,
+                    path,
+                    timeout_ms,
+                )
             if not get_bool(click_result, 'success'):
                 return click_result
             strategy_used = get_string(click_result, 'strategy_used')
@@ -207,6 +223,44 @@ async def _linkedin_easy_apply_upload_resume(
         result['message'] = 'LinkedIn did not provide upload confirmation within the timeout'
         result['retryable'] = True
     return result
+
+
+async def upload_from_localized_trigger(
+    client_id: str,
+    tab_id: str,
+    path: str,
+    filename: str,
+    timeout_ms: int,
+) -> JsonObject | None:
+    """Use the visible upload label when a portal hides or replaces its file input."""
+    labels = ('Upload resume', 'Cargar currículum', 'Carregar currículo', 'Carregar curriculo')
+    for label in labels:
+        candidates = await element_find_by_text_candidates(
+            client_id,
+            tab_id,
+            label,
+            exact=False,
+            tag='label',
+            prefer_modal=True,
+            prefer_visible_center=True,
+            max_candidates=5,
+        )
+        for candidate in get_array(candidates, 'candidates', []):
+            if not isinstance(candidate, dict):
+                continue
+            trigger_element_id = get_string(candidate, 'element_id')
+            if not trigger_element_id or not get_bool(candidate, 'enabled', True):
+                continue
+            return await upload_files_from_trigger(
+                client_id=client_id,
+                tab_id=tab_id,
+                trigger_element_id=trigger_element_id,
+                paths=[path],
+                picker_strategy='auto',
+                expected_filenames=[filename],
+                timeout_ms=timeout_ms,
+            )
+    return None
 
 
 async def linkedin_easy_apply_upload_resume(

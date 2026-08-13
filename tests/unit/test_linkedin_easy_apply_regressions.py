@@ -37,6 +37,101 @@ def test_open_recovers_when_modal_appears_after_no_effect() -> None:
     assert result['recovery_attempted'] is True
 
 
+def test_open_uses_verified_apply_anchor_when_action_resolver_misses_link() -> None:
+    from pydoll_mcp_server.tools.linkedin import linkedin_easy_apply_open
+
+    with (
+        patch(
+            'pydoll_mcp_server.tools.linkedin.linkedin_easy_apply_snapshot',
+            new=AsyncMock(return_value={'success': True, 'form_present': False, 'submitted': False}),
+        ),
+        patch(
+            'pydoll_mcp_server.tools.linkedin.linkedin_job_snapshot',
+            new=AsyncMock(return_value={'success': True, 'linkedin_job_id': '123'}),
+        ),
+        patch(
+            'pydoll_mcp_server.tools.linkedin._click_resolved_action',
+            new=AsyncMock(return_value={'success': False, 'error_code': 'RESOURCE_NOT_FOUND'}),
+        ),
+        patch(
+            'pydoll_mcp_server.tools.linkedin_apply_link.element_find_by_text',
+            new=AsyncMock(
+                return_value={
+                    'success': True,
+                    'elements': [
+                        {'element_id': 'el_apply', 'tag': 'a', 'text': 'Candidatura simplificada'},
+                    ],
+                }
+            ),
+        ),
+        patch(
+            'pydoll_mcp_server.tools.linkedin_apply_link.element_get_attribute',
+            new=AsyncMock(
+                return_value={'success': True, 'value': 'https://www.linkedin.com/jobs/view/123/apply/'},
+            ),
+        ),
+        patch(
+            'pydoll_mcp_server.tools.linkedin_apply_link.page_goto',
+            new=AsyncMock(return_value={'success': True, 'url': 'https://www.linkedin.com/jobs/view/123/'}),
+        ) as goto,
+        patch(
+            'pydoll_mcp_server.tools.linkedin.linkedin_easy_apply_wait_ready',
+            new=AsyncMock(
+                return_value={
+                    'success': True,
+                    'surface': 'dialog',
+                    'form_present': True,
+                    'url': 'https://www.linkedin.com/jobs/view/123/',
+                }
+            ),
+        ),
+    ):
+        result = asyncio.run(linkedin_easy_apply_open('client', 'tab', timeout_ms=1000))
+
+    assert result['success'] is True
+    assert result['open_mode'] == 'direct_apply_link'
+    assert result['navigation_fallback'] is True
+    assert result['click_sent'] is False
+    goto.assert_awaited_once()
+
+
+def test_upload_falls_back_to_localized_visible_trigger() -> None:
+    from pydoll_mcp_server.tools.linkedin_upload import upload_from_localized_trigger
+
+    with (
+        patch(
+            'pydoll_mcp_server.tools.linkedin_upload.element_find_by_text_candidates',
+            new=AsyncMock(
+                return_value={
+                    'success': True,
+                    'candidates': [
+                        {'element_id': 'el_upload', 'tag': 'label', 'enabled': True},
+                    ],
+                }
+            ),
+        ),
+        patch(
+            'pydoll_mcp_server.tools.linkedin_upload.upload_files_from_trigger',
+            new=AsyncMock(return_value={'success': True, 'strategy_used': 'chooser_intercept'}),
+        ) as upload,
+    ):
+        result = asyncio.run(
+            upload_from_localized_trigger(
+                'client',
+                'tab',
+                'C:/resume.pdf',
+                'resume.pdf',
+                1000,
+            )
+        )
+
+    assert result is not None
+    assert result['success'] is True
+    upload.assert_awaited_once()
+    assert upload.await_args is not None
+    assert upload.await_args.kwargs['trigger_element_id'] == 'el_upload'
+
+
 def test_open_rejects_non_modal_inline_surface() -> None:
     from pydoll_mcp_server.tools.linkedin import linkedin_easy_apply_open
 

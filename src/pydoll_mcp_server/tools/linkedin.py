@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 from typing import TypedDict
 
@@ -17,6 +16,15 @@ from pydoll_mcp_server.json_types import (
     get_string,
     normalize_json_value,
     require_json_object,
+)
+from pydoll_mcp_server.tools.linkedin_apply_link import (
+    job_id_from_snapshot as _job_id_from_snapshot,
+)
+from pydoll_mcp_server.tools.linkedin_apply_link import (
+    job_identity_error as _job_identity_error,
+)
+from pydoll_mcp_server.tools.linkedin_apply_link import (
+    open_verified_apply_link as _open_verified_apply_link,
 )
 from pydoll_mcp_server.tools.linkedin_runtime import (
     click_linkedin_choice as _click_linkedin_choice,
@@ -78,6 +86,20 @@ async def linkedin_easy_apply_open(
         return current
     expected_job_id = _job_id_from_snapshot(await linkedin_job_snapshot(client_id, tab_id))
     click_result = await _click_resolved_action(client_id, tab_id, 'apply', timeout_ms)
+    if get_string(click_result, 'error_code') in {
+        ErrorCode.RESOURCE_NOT_FOUND.value,
+        ErrorCode.NO_EFFECT.value,
+    }:
+        link_fallback = await _open_verified_apply_link(
+            client_id,
+            tab_id,
+            expected_job_id,
+            timeout_ms,
+            linkedin_easy_apply_wait_ready,
+            _is_easy_apply_surface,
+        )
+        if link_fallback is not None:
+            return link_fallback
     if get_string(click_result, 'error_code') == ErrorCode.NO_EFFECT.value:
         delayed = await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=max(1000, timeout_ms // 2))
         if _is_easy_apply_surface(delayed):
@@ -115,41 +137,6 @@ async def linkedin_easy_apply_open(
             recovery_hint='Select a job detail card and retry after the Easy Apply dialog is visible.',
         ).to_dict()
     return ready
-
-
-def _job_id_from_snapshot(snapshot: JsonObject) -> str:
-    job_id = get_string(snapshot, 'linkedin_job_id')
-    if job_id:
-        return job_id
-    for key in ('canonical_url', 'url'):
-        value = get_string(snapshot, key)
-        match = re.search(r'(?:/jobs/view/|[?&]currentJobId=)(\d+)', value)
-        if match:
-            return match.group(1)
-    return ''
-
-
-def _job_identity_error(
-    expected_job_id: str,
-    snapshot: JsonObject,
-    click_result: JsonObject,
-) -> JsonObject | None:
-    actual_job_id = _job_id_from_snapshot(snapshot)
-    if not expected_job_id or not actual_job_id or expected_job_id == actual_job_id:
-        return None
-    return StructuredError(
-        ErrorCode.STALE_ELEMENT,
-        'LinkedIn Easy Apply opened a different job than the active detail',
-        retryable=True,
-        details={
-            'expected_job_id': expected_job_id,
-            'actual_job_id': actual_job_id,
-            'surface': get_string(snapshot, 'surface'),
-            'url': get_string(snapshot, 'url'),
-            'click_sent': get_bool(click_result, 'click_sent'),
-        },
-        recovery_hint='Navigate to the canonical job URL, re-read its detail, and retry only after the job ID matches.',
-    ).to_dict()
 
 
 def _is_easy_apply_surface(snapshot: JsonObject) -> bool:
