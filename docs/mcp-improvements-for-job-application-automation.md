@@ -1876,6 +1876,109 @@ identify the employer domain, the evidence text, the candidate eligibility
 conflict, and a terminal `not_eligible` recommendation. This avoids spending
 interaction time on a form that cannot lead to a valid application.
 
+### Current Europe search and regression retest findings
+
+The current Europe-focused search exposed a second LinkedIn interaction failure in
+addition to the no-surface behavior described above. The visible search page showed
+more than 99 results, but `linkedin_jobs_page_snapshot` and
+`linkedin_jobs_search_results` returned an empty result list after the page had
+hydrated. Read-only DOM inspection found visible result cards with internal
+`componentkey` values and stable job IDs, but native and centered mouse clicks on
+the visible cards did not change the selected detail panel. The adapter should
+model the search list as a virtualized surface, expose the card identity directly,
+and verify a selected-job transition before reporting that a result was opened.
+It should not require the caller to infer an ID from a private component
+attribute, and it should not return an empty result set when visible cards are
+present.
+
+The same search page also produced repeated `two_factor` security findings from
+ordinary filter and locality text. No authentication control, challenge, or
+security handoff was visible. This corroborates the earlier false-positive
+detector finding: security classification must require a visible relevant
+control, a challenge-specific label, or corroborating state in the active form.
+Page-level text containing words that resemble authentication labels is
+insufficient evidence.
+
+Several direct job pages in the same search batch exposed only the heading,
+location, application type, and footer. The description was absent even after
+network idle and active-surface inspection, so the workflow correctly refused
+to claim a fit or begin a form. This occurred for Jobgether, FirstIgnite,
+Proxify, AFFINITY, Production AI, Xcede, Newcode.ai, CUBE AI, and TensorOps.
+The adapter should distinguish `description_unavailable` from an empty or
+invalid description and return the observed surface, partial discovery errors,
+and a compact recovery instruction. It should not silently promote a heading
+only page into an application-ready candidate.
+
+The diagnostic artifacts from this batch include `artifact_63a7703973bb4b75`
+(`proxify-description-unavailable.png`, SHA-256
+`09ce0a3e7c247f9a3a47ab5936dcc2c9d6a21f34ba1dbf6d4727cc3fa3cd0d7`),
+`artifact_37c59ee83fe54a1a` (`affinity-description-unavailable.png`),
+`artifact_f7866e6494334b6d` (`g3d-description-unavailable.png`, SHA-256
+`344a069b828a0361ac2b2c7da1c31117c124e8c29b67b5da35ed0d7ce9e58b72`),
+`artifact_4f17a04d79514ff3` (`xcede-description-unavailable.png`, SHA-256
+`0107eb349382cd6ead95bf57a768d1d04ed80ba2af6026707d66b6728ebd7f84`),
+`artifact_404738d8c8f04e05` (`newcode-description-unavailable.png`, SHA-256
+`e580e7fe128c87735b13e30ef0c490fd8741070f692072c3f7e817c44c83bdbe`),
+`artifact_411bc4509b344fbd` (`cube-ai-description-unavailable.png`, SHA-256
+`4d68f1f2ff71d1ae12b9586fb0e7fd34d344697c145ad5aedb4213e74b709427`),
+and `artifact_b5687dd2f6644494`
+(`tensorops-description-unavailable.png`, SHA-256
+`a3c7f63f80e1e4ff783458c7ff433ba41f10472faa63e5e6de5e89f64ebf4c13`).
+The exact artifact record should remain the source of truth if a future report
+needs the full hash for an item whose abbreviated diagnostic output was
+truncated.
+
+The Decskill and Provectus regression retests also confirmed that exact button
+resolution and bounded click classification work, while LinkedIn still leaves
+the application surface absent. The Provectus diagnostic artifact is
+`artifact_b8207f6ff7ae4730` at
+`provectus-easy-apply-retest-no-surface.png`, SHA-256
+`18b08202e0a1063a9861b1348b3c80d32ee4c9bbf8e850a3fbfe66c05117361e`.
+Newcode.ai added a distinct virtualized-list failure: the selected result
+remained unchanged after a native click and a centered mouse fallback, so the
+workflow stopped without attempting the wrong job.
+
+The following live retests were made after the candidate clarified that
+`yuh.lopes@gmail.com` is the valid LinkedIn account and Easy Apply email when it
+is the only value offered, while `yuriabreu.jl@gmail.com` remains the
+professional contact email:
+
+- Redcare Pharmacy, AI Solutions Engineer, no longer had an email-role blocker.
+  The Easy Apply link navigated to a tracking URL, but no form appeared. A fresh
+  visible-button resolution matched the job heading and fingerprint, and the
+  native click plus the bounded mouse fallback did not expose a surface. No
+  CAPTCHA, login, consent, or submit action was encountered. The diagnostic
+  artifact is `artifact_43450d574a0e4275` at
+  `redcare-easy-apply-retest-no-surface.png`, SHA-256
+  `43864b485aa9e28821c54acd81692b7e3dd61cd917db87212f14958aa7d6116a`.
+- NineTwoThree AI Studio, AI Automations Product Engineer, received the same
+  retest. The previous email mismatch blocker is resolved, but the current
+  LinkedIn session returned `NO_EFFECT` and a structured timeout with no form,
+  dialog, security challenge, or submit control. The diagnostic artifact is
+  `artifact_7c4c326208c94207` at
+  `ninethree-easy-apply-retest-no-surface.png`, SHA-256
+  `c08de89aa96c65d6692079003aa963475c44e3aa4b9885366c3b51087d2c0ac2`.
+- HCLTech, Senior Python Developer, was a new direct search candidate. Its
+  visible Easy Apply control navigated to a tracking URL and remained without
+  an application surface after the bounded wait. No form mutation or submit
+  was attempted.
+
+These retests confirm that the email-role correction removes a false data
+blocker, but it cannot repair a LinkedIn surface that the portal does not expose
+to the session. The correct terminal state is `application_surface_not_opened`
+with a retryable observation hint, not `candidate_data_mismatch` and not a
+successful application. A future adapter should preserve the original job URL,
+tracking URL, active surface state, selected-job identity, and effect evidence
+in one compact diagnostic result.
+
+The live search also reproduced a semantic snapshot issue for pipe-delimited
+titles. On the Provectus listing, the visible heading contained the company and
+role correctly, but the snapshot temporarily split `Python and GenAI` into the
+company field and returned only `Senior Solutions Architect` as the role. Job
+identity extraction should prefer the page heading and company context over a
+generic separator split, and should return a confidence or warning when those
+sources disagree.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
