@@ -1361,6 +1361,40 @@ Required follow-up changes:
   labels, and a reCAPTCHA iframe. The fixture must assert that the security handoff prevents submit.
 - Add a live adapter-level test for the localized upload trigger fallback after the server restart.
 
+### ReflexAI live regression validation
+
+ReflexAI was selected as a direct regression case because an earlier attempt had been blocked when
+the required AI-project textarea could not be edited through native Pydoll interaction. The same
+visible persistent `curriculum` profile was used with the dedicated resume for `Sr. Software
+Engineer (Latin America)`.
+
+The revised interaction path succeeded on the previously failing control:
+
+- `form_fill_fields` filled Name, Email, and the 406-character AI-project textarea.
+- All three fields returned `verified`, `framework_event=true`,
+  `controlled_value_survived=true`, `blurred=true`, and `ready_for_submission=true`.
+- The form used the single keyboard fallback for each field after the automatic path was
+  inconclusive. No stale handle or raw JavaScript result was exposed.
+- `form_select_choice` selected and verified `7+ years` for B2B SaaS experience.
+- The generic upload trigger path used the visible `Upload File` control and a native desktop
+  picker fallback. A fresh deep lookup then reported the resume as `accepted`, with one file,
+  PDF MIME type, 5,453-byte size, and visible filename evidence.
+- `form_review` captured a pre-submission screenshot artifact and reported no missing required
+  fields. It correctly remained `blocked` because Ashby exposed an invisible reCAPTCHA security
+  control.
+
+This is a successful interaction-layer regression result, not a submitted application. No CAPTCHA
+was solved or bypassed, no submit click was sent, and the tracker records the vacancy as blocked
+with the screenshot handoff.
+
+Remaining follow-up:
+
+- Keep the Ashby reCAPTCHA signal in the review result while making the visible candidate handoff
+  clearer when the control is invisible.
+- Add a browser fixture for a controlled textarea plus native upload trigger and an iframe-backed
+  reCAPTCHA marker, asserting that all safe preparation actions can complete while submit remains
+  blocked.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
