@@ -1659,6 +1659,49 @@ The pre-submission artifact was `artifact_70b8b03ae5ac4e54` with SHA-256
 The post-submit diagnostic artifact was `artifact_8b137ad7308d49b5` with SHA-256
 `b5de8f333253a943a4e35e145e49e39c0d33373ff165f35b11752a25a22b7bfa`.
 
+### Coforge LinkedIn Easy Apply live retry
+
+Coforge exposed a visible `Candidatura simplificada` button for the Senior Generative AI
+Engineer role. The dedicated Easy Apply operation first navigated to the job detail but did not
+expose an application surface. After re-reading the page, the exact button was resolved again by
+its fingerprint and received one native click. The click was dispatched, but no modal, form,
+CAPTCHA, security handoff, or submit control appeared. The page remained on the job detail.
+
+This is a useful negative result for the click contract. `element_click` correctly re-resolved the
+element and returned `no_effect` with evidence instead of claiming that Easy Apply was ready. The
+workflow then stopped without an unbounded retry. The Easy Apply adapter should expose the same
+bounded lifecycle explicitly: `button_visible`, `click_dispatched`, `surface_opened`,
+`surface_timeout`, and `blocked`, with a short diagnostic screenshot at the terminal state. A
+visible button alone must not count as an available application surface.
+
+The diagnostic artifact was `artifact_330719b1df3a4eb0` with SHA-256
+`321efd871809c8a2db98e98ec8ce0a666152eccbf8ff40183351cd10d66126bd`.
+
+### Archer Loxo form and optional contact consent
+
+The Archer external Loxo form was a compact real application surface with name, email, phone,
+an optional `contact_consent` checkbox, and an `Apply` action. `form_preflight` correctly detected
+the optional phone and email marketing consent as an attestation handoff, and `form_prepare`
+filled the three candidate fields with verified framework events, blur, validity, and value
+survival while leaving the checkbox unchecked.
+
+The workflow still returned `ready_for_submission=false` because an optional, explicitly untouched
+consent was treated as a global submission blocker. The adapter needs a distinction between
+`required_attestation_blocker` and `optional_attestation_handoff`. The latter should remain visible
+in the review and never be selected automatically, but it should not prevent a normal application
+submit when the portal allows the form to be submitted without it and the caller has authorized
+the application. This distinction preserves privacy while avoiding unnecessary handoffs.
+
+One authorized click was then sent to the fresh `Apply` control. The form stayed on the same page,
+with no visible confirmation, validation error, CAPTCHA, or security challenge. No second click was
+made. The result must remain terminal `unknown`, with a diagnostic artifact, rather than being
+reported as confirmed or retried. The submission wait path also exposed a timeout risk when a
+short observation window requested screenshot evidence, so evidence capture should be bounded
+independently from outcome polling.
+
+The diagnostic artifact was `artifact_8b09505ab75b43f7` with SHA-256
+`825e97f6a2c53d4035e80d5515bb484f01450248b93f9f52c7fc39d109ef653a`.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
