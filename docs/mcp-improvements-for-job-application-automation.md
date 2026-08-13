@@ -1626,6 +1626,39 @@ after one real submit click. The classifier produced a terminal `unknown` result
 did not retry. The submit wait should distinguish an ongoing portal update from a transport failure,
 while preserving the same no-blind-retry rule.
 
+### Storyblok Greenhouse live retry and security-challenge classification
+
+Storyblok was used as a second live retry after the iframe handoff was observed through `frame_list`.
+The cross-origin Greenhouse application URL was navigated with `page_goto`, preserving the parent-page
+relationship in the handoff evidence. Ordinary text fields were verified through the centralized fill
+path, and the resume became visibly accepted after the upload control was re-resolved. The upload
+operation itself returned `stale` because the React form replaced the hidden file input during the
+upload, even though the rendered filename and `Remove file` control proved that the file was present.
+The upload adapter should return `accepted_with_verification_warning` in this case, with a fresh
+semantic upload record, instead of exposing a generic stale state that loses the rendered evidence.
+
+The React Select controls exposed a repeatable false positive. `combobox_type_and_select` reported a
+verified selected option while the trigger still displayed `Select...` and the popup remained open.
+Re-resolving the option and sending one pointer sequence to the exact option committed the selection
+and closed the popup. The improved adapter must verify the trigger text, `aria-selected`, popup closure,
+and the associated serialized value after the option click. A preselection or focused option must not
+be reported as `selected`.
+
+After all required fields, choices, location, salary range, and resume were visually verified, one
+normal submit click was sent with the session's explicit autonomy. No CAPTCHA or security code was
+solved, read, hidden, bypassed, or retried. The portal then displayed an 8-character human-verification
+code request sent to the candidate's email. The workflow correctly stopped, but
+`submission_wait_for_confirmation` classified the state as `validation_failed` because generic
+`required field` and submit-button text took precedence over the visible security challenge. Security
+and authentication signals must take precedence over validation, and the result should be
+`security_challenge` with a clear candidate handoff. The server must never read email or request the
+code without a separately authorized connector and explicit candidate action.
+
+The pre-submission artifact was `artifact_70b8b03ae5ac4e54` with SHA-256
+`b7296c3b5f934748741ce0e00cedf705d1e47bf960e0e506f4e138a036dc4899`.
+The post-submit diagnostic artifact was `artifact_8b137ad7308d49b5` with SHA-256
+`b5de8f333253a943a4e35e145e49e39c0d33373ff165f35b11752a25a22b7bfa`.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
