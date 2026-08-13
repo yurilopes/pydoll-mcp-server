@@ -1530,6 +1530,34 @@ control blocker instead of reporting the form as ready merely because ordinary f
 The diagnostic screenshot was recorded as artifact `artifact_53062c20442646d6` with SHA-256
 `6f19a7a9edb2f8ecc370611dbb091b0c197bf9935080fc730e270cb5166cbffd`.
 
+The Remote Crew form was retested on 2026-08-13 after the interaction changes and after the
+candidate clarified the separate LinkedIn account and professional email roles. This time the
+custom control was resolved successfully:
+
+- `dispatch_pointer_sequence` opened the button combobox and exposed the portal options.
+- `combobox_select_option` selected the exact observed option `Brazil` and verified the selected
+  label and popup state.
+- The native picker strategy uploaded the dedicated resume and kept one file in the native input.
+  Because the portal did not render a filename in the page, the semantic state was correctly
+  `accepted_with_verification_warning`, not fully rendered acceptance.
+- `form_preflight` and `form_review` found the real `Submit Your Application` action. The review
+  produced a token, but the form also contained an unchecked `I agree to Candidate Terms` legal
+  declaration.
+
+The declaration was intentionally left untouched and the application was not submitted. This is
+the correct safety outcome, but it exposed a contract defect: the current preflight and review
+responses did not classify the visible Candidate Terms control as an attestation handoff and still
+issued a review token. Attestation detection must inspect nearby visible text, linked terms anchors,
+fieldset context, and checkbox semantics before issuing a submission-ready token. A legal checkbox
+must remain a blocker requiring candidate confirmation even when the portal does not mark it as
+HTML-required.
+
+The live evidence is `artifact_168cb9f60ab24786` at
+`remote-crew-location-dropdown-resolved-no-submit.png`, SHA-256
+`16fb8db7d96ccdf8263669aa769df36e787ebe65bf59f2e67cea2f2f7b982323`, and
+`artifact_51b0d639312249f2` at `remote-crew-pre-submit-uploaded-manual-terms.png`, SHA-256
+`4e392561f4be39075c36f277204ea79140583f2aed53ddeb5c1f183edccd3bb8`.
+
 ### BJAK live submit test and controlled-field state loss
 
 BJAK was used as a live test of the complete preparation path for an Applied AI Engineer role
