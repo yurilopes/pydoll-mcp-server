@@ -2189,6 +2189,34 @@ Required regression coverage:
 - a final review that reports `Submit` as the primary action and permits the
   single authorized submit click without a token scope false positive.
 
+## Live retest: manual final submission with tab closure
+
+After the final Micro1 review, the candidate changed the expected hourly rate
+from `50` to `35` USD and clicked the visible `Submit` button manually. The
+candidate then closed the tab before a confirmation surface could be captured.
+The application tracker therefore records the vacancy as `submitted`, not
+`confirmed`, and records `35` USD as the submitted expectation. No automatic
+retry was attempted.
+
+The persistent browser profile was reattached after the MCP server restart,
+but the original Micro1 tab was no longer present. Reopening the observed
+external URL produced a fresh, unfilled application form with `Next`, not a
+confirmation page. This is not evidence that the application failed, and it
+is not evidence that it succeeded. The workflow must preserve this terminal
+uncertainty and direct later verification toward a portal status or recruiter
+confirmation rather than allowing a duplicate submission.
+
+Required regression coverage:
+
+- preserve a terminal `submitted` state when a candidate reports a final click
+  but the tab closes before confirmation;
+- distinguish a newly opened blank form from a positive confirmation page;
+- record the final candidate-edited answer separately from earlier prepared
+  values;
+- prevent automatic resubmission when the original tab or transport is gone;
+- expose a concise recovery instruction for checking a portal or recruiter
+  confirmation later.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
