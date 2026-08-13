@@ -2345,6 +2345,34 @@ return a structured validation error before touching the browser. Regression
 coverage should include a full-page review screenshot with and without an
 explicit extension.
 
+## Live retest: re-opening a previously blocked Easy Apply surface
+
+The Omnis Partners Artificial Intelligence Engineer vacancy had previously
+been recorded as blocked because the Easy Apply control produced no observable
+surface. A fresh navigation to the same LinkedIn job later exposed the full
+description and the Easy Apply dialog. The current server successfully opened
+the dialog, uploaded the dedicated resume, and advanced through the form.
+
+The form contained an important semantic mismatch: although the role was
+advertised for Germany, one required question asked whether the candidate was
+legally authorized to work in the United Kingdom. The workflow must preserve
+the exact country in the question rather than infer it from the job location.
+The truthful answers were authorization `No` and future sponsorship `Yes`.
+
+The review also showed the optional `Siga a empresa Omnis Partners` checkbox
+preselected by LinkedIn. The agent explicitly cleared it and verified the
+unchecked state. Optional follow-company, alert, marketing, newsletter and
+demographic controls should be classified separately from required application
+fields and should never be carried into a submission by default.
+
+After one revalidated native click, the specialized snapshot returned
+`surface=confirmation`, `submitted=true` and `Candidatura enviada`. This
+retest confirms that a prior transport or surface failure should not permanently
+poison a vacancy record. The server should allow a new evaluation generation
+when the page exposes a materially different surface, while preserving the
+previous diagnostic event and preventing duplicate clicks within the same
+generation.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
