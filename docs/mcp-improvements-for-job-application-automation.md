@@ -2217,6 +2217,48 @@ Required regression coverage:
 - expose a concise recovery instruction for checking a portal or recruiter
   confirmation later.
 
+## Live retest: passive LinkedIn reCAPTCHA misclassified as a blocking challenge
+
+On the AI/R LinkedIn Easy Apply form, the candidate reported that no CAPTCHA
+challenge was visible. The form was prepared with the required identity fields
+and the dedicated resume. A read-only `form_preflight` nevertheless returned
+`status=blocked` with a `security_control` blocker and
+`requires_user_action=true` because it found an invisible reCAPTCHA Enterprise
+anchor in the page. The primary `Enviar candidatura` button was visible and
+enabled, and there was no visible challenge to solve.
+
+The candidate clicked the button manually. The subsequent LinkedIn snapshot
+reported `form_present=false`, `dialog_present=false`, `submitted=true`, and
+the visible confirmation text `Candidatura enviada`. The independent
+`submission_wait_for_confirmation` operation classified the result as
+`outcome=confirmed` and captured the confirmation artifact
+`artifact_209dab45e118497b` with SHA-256
+`111824e8ba22d3335af1d5dad18d5d30e28207dd1529b3d0feb25e7b9c0d30e2`.
+
+This is a false-positive security handoff, not evidence that a CAPTCHA was
+bypassed. The server must distinguish a passive invisible security resource
+from an active candidate challenge:
+
+- Keep the reCAPTCHA source, frame provenance, and confidence as diagnostic
+  metadata, but use `requires_user_action` only when a visible challenge,
+  explicit portal handoff, or an equivalent active control is observed.
+- Classify passive signals as `security_signal=passive` or a warning rather
+  than a submission blocker when the active form is complete, the primary
+  action is visible and enabled, and no challenge surface is rendered.
+- Permit one explicitly authorized submit click in this passive state. If the
+  portal renders a challenge after that click, classify the resulting state as
+  `security_challenge`, stop, and never retry automatically.
+- Deduplicate repeated reCAPTCHA nodes and ignore page-level LinkedIn
+  navigation text that is unrelated to the active application surface.
+- Add a regression fixture and an adapter test covering an invisible
+  reCAPTCHA marker with no visible challenge, plus a companion fixture where a
+  visible challenge must still produce a hard handoff.
+
+The existing safety boundary remains unchanged: the MCP must never solve,
+hide, bypass, or simulate a CAPTCHA. The correction is limited to avoiding a
+false blocker when the portal exposes only a passive marker and the candidate
+can proceed through the ordinary authorized submit flow.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
