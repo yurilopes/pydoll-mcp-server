@@ -1558,6 +1558,28 @@ The live evidence is `artifact_168cb9f60ab24786` at
 `artifact_51b0d639312249f2` at `remote-crew-pre-submit-uploaded-manual-terms.png`, SHA-256
 `4e392561f4be39075c36f277204ea79140583f2aed53ddeb5c1f183edccd3bb8`.
 
+After the candidate explicitly authorized acceptance of the Candidate Terms, the same live form
+was resumed. The exact checkbox was marked with `element_check`, revalidated as checked in the
+DOM, and the review was regenerated. `form_submit_after_review` then consumed the review token and
+sent exactly one native click. The portal displayed both `You have successfully applied to AI
+Engineer` and `Thanks For Applying, We Will Reach Out To You Soon`, so this application was
+classified as `confirmed`. The confirmation screenshot is `artifact_883cfd38e7554460` at
+`curriculum/screenshot_e7a5d58922a2.png`, SHA-256
+`9cd84655ef1bc73133cf47c1ac1273d9f18bf37f5c034ebb0bf781bef97b2424`.
+
+The final run exposed three follow-up defects for the implementation backlog:
+
+- The upload state retained the filename but reported a zero byte size after the native picker,
+  although the source PDF was 9,105 bytes. The adapter should reconcile file metadata from the
+  selected path or CDP state before returning `accepted_with_verification_warning`.
+- Deep discovery returned a duplicate checkbox record for the same selector with `checked=false`
+  while the exact native control and the shallow form record were checked. Merging should dedupe
+  by stable selector and prefer the freshest native state.
+- The review still did not classify the visible Candidate Terms declaration as an attestation
+  handoff. Explicit authorization allowed this run to proceed, but future review contracts should
+  expose the handoff and its authorization provenance instead of treating the control as an
+  ordinary unchecked field.
+
 ### BJAK live submit test and controlled-field state loss
 
 BJAK was used as a live test of the complete preparation path for an Applied AI Engineer role
