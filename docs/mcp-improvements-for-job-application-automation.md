@@ -1751,6 +1751,57 @@ The diagnostic artifact was `artifact_53f7ba9ac9a34c88` at
 `softwaremind-pre-consent-filled.png` with SHA-256
 `7f53a3981fa50d5d8b66fde14029dbade7b3f8573f16c134f92c3d49306c1f9a`.
 
+### Decskill LinkedIn Easy Apply live no-surface finding
+
+The Decskill AI Enablement Engineer (Senior) listing was a strong live fit. Its visible
+description requested production AI services, Python or TypeScript, LLM and AI API integration,
+prompt engineering, RAG, MCP, AI agents, CI/CD, testing, containerization, cloud-native delivery,
+and AI adoption across engineering teams. The role was remote in Portugal and exposed LinkedIn
+Easy Apply.
+
+The high-level Easy Apply operation navigated the observed link to a tracking URL but did not
+expose a dialog or application surface within the wait window. A fresh active-surface inspection
+then found hidden and visible text duplicates. The resolver selected the visible native button,
+revalidated its fingerprint, and sent one click. The click was dispatched but the surface remained
+absent. No form, CAPTCHA, authentication prompt, or security challenge was visible. The workflow
+correctly stopped without another click and classified the application surface as unavailable.
+
+This run confirms that the Easy Apply adapter needs a deterministic state machine that distinguishes
+`link_navigation`, `button_visible`, `click_dispatched`, `surface_opened`, and `surface_timeout`.
+The visible-control resolver must exclude hidden duplicates using bounds, visibility, active
+surface, and job heading context. A tracking URL change alone must not be reported as a successful
+Easy Apply opening. The terminal response should preserve the job URL, tracking URL, candidate
+count, surface state, and screenshot artifact so a later retry can be explicitly authorized by a
+new observation rather than by a generic retryable flag.
+
+The diagnostic artifact was `artifact_0153bf9ee2384053` at
+`decskill-linkedin-easy-apply-no-surface.png` with SHA-256
+`ec9ec58da235f6e9d07459a554fbe91002310f998910068a280eb794a04a7152`.
+
+### Digital Waffle LinkedIn Easy Apply and security-detector finding
+
+The Digital Waffle AI Applications Specialist listing was remote in the United Kingdom with a
+visible range of GBP 70,000 to GBP 80,000. The description focused on production AI systems,
+agent workflows, multi-agent infrastructure, API and database integrations, and internal
+automation. It also requested specific tools such as Clay, n8n, and OpenClaw that were not
+confirmed in the candidate repository, so the role was recorded as partial fit.
+
+The first interactive summary reported several possible two-factor controls, but the page had no
+visible authentication text or challenge. A second inspection found no security controls, and the
+live page showed the ordinary job details and Easy Apply button. This is a false-positive security
+signal caused by discovery noise in the LinkedIn page and must not block a normal application by
+itself. Security blockers should require a visible, relevant control or a corroborating semantic
+signal tied to the active surface.
+
+The Easy Apply link again navigated to a tracking URL without opening a form. A fresh visible
+button was resolved and clicked once with fingerprint revalidation. No modal, form, CAPTCHA,
+security handoff, or confirmation appeared. The click result was terminal unknown and was not
+retried. The same bounded no-effect policy used for Decskill is appropriate here.
+
+The diagnostic artifact was `artifact_bd78da22a17c4ffe` at
+`digital-waffle-linkedin-easy-apply-no-surface.png` with SHA-256
+`f2c83cb230f44a20accb4b753d43d21d98efaa30b40e0960d5a27c73d16b1bf3`.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
