@@ -70,7 +70,13 @@ async def get_opened_tabs(browser: Browser) -> list[Tab]:
 
 
 async def get_element_text(element: WebElement) -> str:
-    text = await element.text
+    try:
+        text = await element.text
+    except (KeyError, PydollException, OSError, TypeError, ValueError):
+        # Hidden native controls can disappear between query and outerHTML
+        # retrieval. Text is diagnostic only, so keep the element usable for
+        # a subsequent fingerprinted action instead of failing discovery.
+        return ''
     return unicodedata.normalize('NFC', str(text)) if text else ''
 
 
@@ -80,17 +86,20 @@ def get_element_attribute(element: WebElement, name: str) -> str | None:
 
 
 async def is_element_visible(element: WebElement) -> bool:
-    response = await element.execute_script(
-        """
-        const rect = this.getBoundingClientRect();
-        const style = window.getComputedStyle(this);
-        return rect.width > 0 && rect.height > 0
-            && style.display !== 'none'
-            && style.visibility !== 'hidden';
-        """,
-        return_by_value=True,
-    )
-    return extract_script_bool(response)
+    try:
+        response = await element.execute_script(
+            """
+            const rect = this.getBoundingClientRect();
+            const style = window.getComputedStyle(this);
+            return rect.width > 0 && rect.height > 0
+                && style.display !== 'none'
+                && style.visibility !== 'hidden';
+            """,
+            return_by_value=True,
+        )
+        return extract_script_bool(response)
+    except (KeyError, PydollException, OSError, TypeError, ValueError):
+        return False
 
 
 async def enable_network_events(tab: Tab) -> None:

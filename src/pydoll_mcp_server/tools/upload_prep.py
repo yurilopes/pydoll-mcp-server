@@ -133,10 +133,11 @@ async def upload_files_enhanced(
     try:
         invalidate_review_tokens(client_id, tab_id)
         await set_input_files(element, paths)
-    except (PydollException, ValueError, OSError) as exc:
+    except (PydollException, InvalidScriptResponseError, KeyError, TypeError, ValueError, OSError) as exc:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
             message=f'Upload failed: {exc}',
+            details={'reason': 'native_upload_transport_error'},
             retryable=True,
         ).to_dict()
 
@@ -217,7 +218,7 @@ async def _get_upload_state_native(tab_info: TabInfo, element_id: str) -> JsonOb
         )
         data = extract_normalized_object(result, 'upload_native_state')
         return {'success': True, 'count': data.get('count', 0)}
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+    except (PydollException, InvalidScriptResponseError, KeyError, TypeError, ValueError):
         return {'success': False, 'count': 0}
 
 
@@ -271,7 +272,7 @@ async def _wait_filename_visible(
             nearby = get_string(data, 'nearby', '')
             if visible:
                 break
-        except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+        except (PydollException, InvalidScriptResponseError, KeyError, TypeError, ValueError):
             pass
         await asyncio.sleep(0.2)
 

@@ -1219,6 +1219,52 @@ after restarting the MCP server and reconnecting the persistent `curriculum` pro
 The remaining JUPUS blocker is the separate two-year data-retention declaration. It is a sensitive
 candidate confirmation and must remain a handoff rather than an automated choice.
 
+### Square One Resources LinkedIn upload regression and live validation
+
+The visible LinkedIn Easy Apply form for Gen AI Solution Architect was used to test the resume
+upload path after the server restart. The first attempt exposed two distinct defects:
+
+- The LinkedIn adapter returned `KeyError: 'result'` when Pydoll attempted to read `outerHTML` or
+  text from the hidden file input. The input had been discovered, but diagnostic text collection
+  failed before the upload operation could continue.
+- The generic upload path also reported that the resolved element was not a file input because the
+  hidden control had been replaced between discovery and mutation. The public result correctly
+  did not claim that the PDF had been accepted.
+
+The fixes were implemented and tested as follows:
+
+- The Pydoll compatibility boundary now treats transient `KeyError`, transport, and stale-element
+  failures while reading diagnostic text as an empty text value. Visibility diagnostics fail closed
+  to `false`, while the element remains available for a fingerprinted action.
+- Enhanced upload handling now converts native upload transport failures into structured retryable
+  errors with a reason instead of leaking a raw exception. The LinkedIn adapter can then continue
+  to its chooser interception path.
+- A regression test covers the LinkedIn native transport failure followed by chooser interception.
+  The compatibility resilience test covers an unavailable hidden-element text response.
+
+Live result on the visible `curriculum` browser profile:
+
+- The dedicated PDF `Yuri_Abreu__gen_ai_solution_architect__square_one_resources.pdf` was accepted
+  by LinkedIn through `chooser_intercept`.
+- The filename became visible in the resume step and the upload result returned
+  `upload_verified=true` with `verification_basis=["selected_resume"]`.
+- The workflow advanced through required Microsoft Azure, Microsoft Products, and management
+  questions, removed the optional follow-company checkbox, and submitted once.
+- LinkedIn displayed the visible confirmation `Candidatura enviada`. A full-page confirmation
+  artifact was captured with an artifact ID and SHA-256.
+
+Additional follow-up work remains:
+
+- The specialized LinkedIn forward resolver did not recognize the localized `Revisar` action even
+  though it was the correct final review transition. The generic element resolver handled the
+  exact button safely in this run, but the LinkedIn adapter should recognize localized review
+  labels and return a typed transition result.
+- The LinkedIn screenshot tool requires a relative name with an explicit `.png` extension even
+  when `fmt="png"`. The contract should append or validate the extension consistently.
+- Upload verification should expose the difference between a selected server-side resume and a
+  native input whose `files` list is empty. In this run the visible filename and selected resume
+  were sufficient portal evidence, but the warning should remain available to callers.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

@@ -312,7 +312,7 @@ async def file_upload_state(client_id: str, tab_id: str, element_id: str = '', u
                 else 'Retry only after resolving the upload control again.'
             ),
         }
-    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
+    except (PydollException, InvalidScriptResponseError, KeyError, TypeError, ValueError) as exc:
         return StructuredError(ErrorCode.EXECUTION_ERROR, f'Upload state failed: {exc}', retryable=True).to_dict()
 
 

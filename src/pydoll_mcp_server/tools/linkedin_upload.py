@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from pydoll_mcp_server.tools.linkedin_runtime import (
     upload_with_file_chooser as _upload_with_file_chooser,
 )
 from pydoll_mcp_server.tools.linkedin_scripts import resolve_action_script
+
+logger = logging.getLogger(__name__)
 
 
 async def _linkedin_easy_apply_upload_resume(
@@ -223,6 +226,7 @@ async def linkedin_easy_apply_upload_resume(
             timeout_ms,
         )
     except (KeyError, PydollException, OSError, TypeError, ValueError) as exc:
+        logger.exception('LinkedIn resume upload adapter error')
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
             f'LinkedIn resume upload failed: {exc}',
