@@ -1802,7 +1802,7 @@ The diagnostic artifact was `artifact_bd78da22a17c4ffe` at
 `digital-waffle-linkedin-easy-apply-no-surface.png` with SHA-256
 `f2c83cb230f44a20accb4b753d43d21d98efaa30b40e0960d5a27c73d16b1bf3`.
 
-### Kake LinkedIn Easy Apply delayed surface and canonical email mismatch
+### Kake LinkedIn Easy Apply delayed surface and role-specific email handling
 
 The Kake Senior AI/LLM Engineer listing was a strong fit for the candidate's
 production Python, LLM, RAG, API, evaluation, and agent experience. The role
@@ -1815,22 +1815,51 @@ asynchronously. The previously resolved visible button was stale by then,
 which shows that the adapter must re-snapshot after a delayed surface event
 and must invalidate cached element references when the dialog is replaced.
 
-The opened contact form exposed only an email different from the candidate's
-canonical repository email. The workflow correctly refused to replace the
-personal data with an unverified value and did not advance or submit the
-application. This should be represented as a structured
-`candidate_data_mismatch` blocker, rather than as a generic click or timeout
-failure.
+The opened contact form exposed only the authenticated LinkedIn account email,
+which is a valid candidate fact for LinkedIn Easy Apply. The professional email
+and the LinkedIn account email serve different purposes, so the previous
+workflow incorrectly treated the account email as a `candidate_data_mismatch`
+and paused a viable application. The machine-facing candidate configuration
+must expose both roles explicitly.
 
 The Easy Apply state machine should use a short bounded stabilization period
 after the initial timeout, then return the observed surface state, refreshed
-field fingerprints, and any canonical-data mismatch. A delayed dialog must
-not cause a blind second click, and a stale element must trigger re-resolution
-only when the new observation proves that the action remains safe.
+field fingerprints, and the semantic role of each contact value. A delayed
+dialog must not cause a blind second click, and a stale element must trigger
+re-resolution only when the new observation proves that the action remains
+safe. Email validation must compare against the correct role, not require
+every portal to use the professional email.
 
 The diagnostic artifact was `artifact_a67c97d8e8c44778` at
 `kake-linkedin-contact-email-mismatch.png` with SHA-256
 `183f04b5f93ef99f9e8d463d1a0f7bbfbefa99144e7fa0a504c6732fcda31881`.
+
+The candidate then clarified that the account email is an authorized and
+intentional LinkedIn contact value. The repository now records the
+professional email and LinkedIn account email as separate roles. After that
+clarification, the application was resumed and the form completed through
+its contact, resume, questions, and review stages. A dedicated Kake resume was
+uploaded and verified, the optional company-follow checkbox was cleared, and
+one submit click produced the visible LinkedIn confirmation `Candidatura
+enviada agora`.
+
+This live run validated several v2 behaviors: delayed Easy Apply recovery,
+fresh element resolution after a stale reference, explicit upload verification,
+semantic checkbox state verification, pre-submit evidence, and confirmation
+classification. The high-level forward helper also exposed a remaining gap:
+the final intermediate action was labeled `Revisar` rather than `Avançar`, so
+the helper returned `target_not_found` even though the button was visible and
+enabled. A generic forward operation must discover the active primary action
+from the current surface and accept localized labels such as `Revisar`,
+`Review`, `Next`, and `Avançar` without weakening fingerprint or effect
+verification.
+
+The pre-submission artifact was `artifact_93a6ba673dba4656` at
+`kake-pre-submission-review.png` with SHA-256
+`b225d60f6493b2a050d662b515a9b33a016eaaa71c7545a771c7615071379ea7`.
+The confirmation artifact was `artifact_b6cdd58cbbd342c2` at
+`kake-submission-confirmation.png` with SHA-256
+`91b2299a4be7650ca069f08f30e4e7db7e1d8f492a7281b31a608e5cb60272cf`.
 
 ### CUBE AI live geographic eligibility blocker
 
