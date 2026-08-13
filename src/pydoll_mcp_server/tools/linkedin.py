@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import TypedDict
 
@@ -75,10 +76,14 @@ async def linkedin_easy_apply_open(
     current = await linkedin_easy_apply_snapshot(client_id, tab_id)
     if _is_easy_apply_surface(current):
         return current
+    expected_job_id = _job_id_from_snapshot(await linkedin_job_snapshot(client_id, tab_id))
     click_result = await _click_resolved_action(client_id, tab_id, 'apply', timeout_ms)
     if get_string(click_result, 'error_code') == ErrorCode.NO_EFFECT.value:
         delayed = await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=max(1000, timeout_ms // 2))
         if _is_easy_apply_surface(delayed):
+            mismatch = _job_identity_error(expected_job_id, delayed, click_result)
+            if mismatch is not None:
+                return mismatch
             delayed['open'] = click_result
             delayed['click_sent'] = True
             delayed['effect_observed'] = True
@@ -93,6 +98,9 @@ async def linkedin_easy_apply_open(
     if not get_bool(click_result, 'success'):
         return click_result
     ready = await linkedin_easy_apply_wait_ready(client_id, tab_id, timeout_ms=timeout_ms)
+    mismatch = _job_identity_error(expected_job_id, ready, click_result)
+    if mismatch is not None:
+        return mismatch
     ready['open'] = click_result
     ready['click_sent'] = True
     ready['effect_observed'] = _is_easy_apply_surface(ready)
@@ -107,6 +115,41 @@ async def linkedin_easy_apply_open(
             recovery_hint='Select a job detail card and retry after the Easy Apply dialog is visible.',
         ).to_dict()
     return ready
+
+
+def _job_id_from_snapshot(snapshot: JsonObject) -> str:
+    job_id = get_string(snapshot, 'linkedin_job_id')
+    if job_id:
+        return job_id
+    for key in ('canonical_url', 'url'):
+        value = get_string(snapshot, key)
+        match = re.search(r'(?:/jobs/view/|[?&]currentJobId=)(\d+)', value)
+        if match:
+            return match.group(1)
+    return ''
+
+
+def _job_identity_error(
+    expected_job_id: str,
+    snapshot: JsonObject,
+    click_result: JsonObject,
+) -> JsonObject | None:
+    actual_job_id = _job_id_from_snapshot(snapshot)
+    if not expected_job_id or not actual_job_id or expected_job_id == actual_job_id:
+        return None
+    return StructuredError(
+        ErrorCode.STALE_ELEMENT,
+        'LinkedIn Easy Apply opened a different job than the active detail',
+        retryable=True,
+        details={
+            'expected_job_id': expected_job_id,
+            'actual_job_id': actual_job_id,
+            'surface': get_string(snapshot, 'surface'),
+            'url': get_string(snapshot, 'url'),
+            'click_sent': get_bool(click_result, 'click_sent'),
+        },
+        recovery_hint='Navigate to the canonical job URL, re-read its detail, and retry only after the job ID matches.',
+    ).to_dict()
 
 
 def _is_easy_apply_surface(snapshot: JsonObject) -> bool:

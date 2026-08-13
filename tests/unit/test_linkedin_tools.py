@@ -160,6 +160,10 @@ class TestLinkedInActions:
                 new=AsyncMock(return_value={'success': True, 'form_present': False, 'submitted': False}),
             ),
             patch(
+                'pydoll_mcp_server.tools.linkedin.linkedin_job_snapshot',
+                new=AsyncMock(return_value={'success': True, 'linkedin_job_id': '123'}),
+            ),
+            patch(
                 'pydoll_mcp_server.tools.linkedin._click_resolved_action',
                 new=AsyncMock(return_value={'success': True, 'action': 'apply', 'click': {'clicked': True}}),
             ) as click,
@@ -175,6 +179,41 @@ class TestLinkedInActions:
         click_args = click.await_args
         assert click_args is not None
         assert click_args.args[2] == 'apply'
+
+    def test_open_rejects_a_different_job_after_apply_click(self) -> None:
+        from pydoll_mcp_server.tools.linkedin import linkedin_easy_apply_open
+
+        with (
+            patch(
+                'pydoll_mcp_server.tools.linkedin.linkedin_easy_apply_snapshot',
+                new=AsyncMock(return_value={'success': True, 'form_present': False, 'submitted': False}),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin.linkedin_job_snapshot',
+                new=AsyncMock(return_value={'success': True, 'linkedin_job_id': '123'}),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin._click_resolved_action',
+                new=AsyncMock(return_value={'success': True, 'click_sent': True}),
+            ),
+            patch(
+                'pydoll_mcp_server.tools.linkedin.linkedin_easy_apply_wait_ready',
+                new=AsyncMock(
+                    return_value={
+                        'success': True,
+                        'surface': 'dialog',
+                        'form_present': True,
+                        'url': 'https://www.linkedin.com/jobs/view/456/',
+                    }
+                ),
+            ),
+        ):
+            result = asyncio.run(linkedin_easy_apply_open('client', 'tab'))
+
+        assert result['error_code'] == 'STALE_ELEMENT'
+        details = get_object(result, 'details', {})
+        assert details['expected_job_id'] == '123'
+        assert details['actual_job_id'] == '456'
 
     def test_upload_resume_passes_paths_to_upload_files(self) -> None:
         from pydoll_mcp_server.tools.linkedin import linkedin_easy_apply_upload_resume

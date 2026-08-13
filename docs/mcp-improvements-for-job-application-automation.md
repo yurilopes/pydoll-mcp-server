@@ -1265,6 +1265,25 @@ Additional follow-up work remains:
   native input whose `files` list is empty. In this run the visible filename and selected resume
   were sufficient portal evidence, but the warning should remain available to callers.
 
+### LinkedIn result-card identity guard
+
+During the next live validation, `linkedin_easy_apply_open` was called after selecting Shakers'
+Senior Python Backend Engineer card from a Spain search result list. The resolver clicked the
+neighboring IOON card instead and opened IOON's form. The adapter reported an application surface,
+but it did not prove that the surface belonged to the active job. No field was filled and no
+submission was made because the caller compared the visible employer and role before continuing.
+
+The adapter now captures the active LinkedIn job ID before the apply action and compares it with the
+job ID in the resulting application surface URL. A mismatch returns a retryable `STALE_ELEMENT`
+error with expected and actual IDs, instead of presenting the wrong form as ready. The unit suite
+covers this mismatch, and the browser was reattached to the persistent `curriculum` profile after
+the server restart. Direct job detail and already-submitted surfaces continue to be accepted when
+their identity is consistent.
+
+The remaining improvement is to make result-card selection itself accept a caller-provided job ID
+and resolve only the matching card before clicking. The post-click guard is the safety boundary for
+callers that still use the current public contract.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
