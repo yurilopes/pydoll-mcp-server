@@ -834,6 +834,39 @@ The delayed-route regression is covered by a unit test. The remaining combobox l
 should receive a browser fixture with portal-rendered options and an option list that is created
 after the trigger is resolved.
 
+The same live run also confirmed two follow-up fixes:
+
+- Fill state now exposes a consistent presence marker, length, framework state, and
+  `ready_for_submission` value without returning the entered value. The previous empty
+  `dom_value` combined with `framework_value=present` and `ready_for_submission=false` was
+  corrected and covered by a unit test.
+- Restart attach on Windows now checks process liveness with `OpenProcess` instead of
+  `os.kill(pid, 0)`, which reports an invalid-parameter error for a live Windows process. The
+  running Chrome was reattached by profile and target ID without opening a duplicate instance.
+
+### Starbridge stale-control rerun
+
+The Starbridge AI Engineer form was rerun after the stale-control fix in the same visible
+persistent browser. The previous run had filled the form but reported the location combobox as
+stale after React recreated the control while other fields were being updated.
+
+Observed results:
+
+- `form_prepare` now refreshes the active surface before combobox actions and re-resolves a
+  replaced control by field key, selector, fingerprint, placeholder, or name. The action uses
+  the new element ID and reports the previous ID as evidence of re-resolution.
+- In the live rerun, the Name field remained verified after rerender. The location control was
+  re-resolved, `Brazil` was selected through the rendered option, the popup closed, and the
+  selection was verified with `re_resolved=true`. No blind retry was used.
+- The form remained blocked for review because deep discovery reported a partial iframe error
+  while the active surface itself was consistent. The workflow did not issue a review token or
+  click submit. This preserves a safe handoff until the discovery condition is resolved or
+  explicitly reviewed by the candidate.
+
+The rerender regression is covered by a unit test that verifies recovery from an old element ID
+using stable field identity. A browser fixture should still cover a portal combobox whose trigger
+and option list are both recreated during the same interaction.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

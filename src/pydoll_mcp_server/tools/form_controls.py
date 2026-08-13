@@ -247,6 +247,7 @@ async def fill_element_framework_safe(
     expected = value if expected_value is None else expected_value
     actual = get_string(result, 'value', '')
     verified = verified or verification_satisfied(result, expected, state_verification)
+    ready_for_submission = verified and state_verification == 'submission_ready'
     if verify and not verified:
         return StructuredError(
             ErrorCode.EXECUTION_ERROR,
@@ -271,8 +272,8 @@ async def fill_element_framework_safe(
         'events': list(_safe_events(events, mode)),
         'state_verification': state_verification,
         'verification': 'verified' if verified else 'inconclusive',
-        'ready_for_submission': verified and state_verification == 'submission_ready',
-        'state': _public_fill_state(result),
+        'ready_for_submission': ready_for_submission,
+        'state': build_public_fill_state(result, ready_for_submission=ready_for_submission),
     }
 
 
@@ -357,7 +358,7 @@ def _safe_events(events: list[str] | None, mode: str = 'auto') -> list[str]:
     return [event for event in selected if event in allowed]
 
 
-def _public_fill_state(state: JsonObject) -> JsonObject:
+def build_public_fill_state(state: JsonObject, *, ready_for_submission: bool | None = None) -> JsonObject:
     """Expose verification metadata without returning entered candidate data."""
 
     public = dict(state)
@@ -366,7 +367,10 @@ def _public_fill_state(state: JsonObject) -> JsonObject:
     public.pop('value', None)
     public['value_present'] = bool(raw_value)
     public['value_length'] = len(raw_value)
-    public['dom_value'] = '[REDACTED]' if raw_value and is_sensitive_field(descriptor) else ''
+    public['dom_value'] = ('[REDACTED]' if is_sensitive_field(descriptor) else '[PRESENT]') if raw_value else ''
+    public['framework_value'] = get_string(state, 'framework_value', 'present' if raw_value else 'absent')
+    if ready_for_submission is not None:
+        public['ready_for_submission'] = ready_for_submission
     return public
 
 

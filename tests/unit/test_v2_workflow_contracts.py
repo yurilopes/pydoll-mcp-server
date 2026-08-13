@@ -185,17 +185,17 @@ def test_combobox_matching_preserves_unicode_and_reports_ambiguity() -> None:
 
 def test_domain_restriction_is_explicitly_normalized() -> None:
     from pydoll_mcp_server.tools.form_workflow_helpers import (
-        _DOMAIN_RESTRICTIONS,
+        DOMAIN_RESTRICTIONS,
         normalize_employer_domain,
         record_domain_restriction,
     )
 
-    _DOMAIN_RESTRICTIONS.clear()
+    DOMAIN_RESTRICTIONS.clear()
     assert normalize_employer_domain('HTTPS://Jobs.Example.com/path') == 'jobs.example.com'
     stored = record_domain_restriction('jobs.example.com', 'portal_limit', ['limit reached'], ['job-1'])
     assert stored['domain'] == 'jobs.example.com'
     assert stored['job_identifiers'] == ['job-1']
-    assert 'other.example.com' not in _DOMAIN_RESTRICTIONS
+    assert 'other.example.com' not in DOMAIN_RESTRICTIONS
 
 
 def test_application_terms_are_reported_as_candidate_handoff() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock
 
 import pytest
@@ -42,6 +43,35 @@ async def test_click_observation_preserves_delayed_route_transition(monkeypatch:
     assert observed is True
     assert 'url_changed' in matched
     assert 'expect_text' not in matched
+
+
+def test_public_fill_state_is_consistent_without_exposing_values() -> None:
+    from pydoll_mcp_server.tools.form_controls import build_public_fill_state
+
+    state = build_public_fill_state(
+        {
+            'value': 'Yuri Abreu',
+            'framework_value': 'present',
+            'controlled_value_survived': True,
+            'input_type': 'text',
+            'ready_for_submission': False,
+        },
+        ready_for_submission=True,
+    )
+
+    assert state['value_present'] is True
+    assert state['value_length'] == 10
+    assert state['dom_value'] == '[PRESENT]'
+    assert state['framework_value'] == 'present'
+    assert state['ready_for_submission'] is True
+    assert state.get('value') is None
+
+
+def test_process_liveness_check_accepts_a_live_windows_process() -> None:
+    from pydoll_mcp_server.tools.diagnostics import is_process_alive
+
+    assert is_process_alive(os.getpid()) is True
+    assert is_process_alive(2_147_483_647) is False
 
 
 class TestUploadFilesEnhanced:

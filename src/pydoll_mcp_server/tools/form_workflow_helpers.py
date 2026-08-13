@@ -2,30 +2,33 @@
 
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass
-from urllib.parse import urlsplit
-
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, JsonValue, get_array, get_bool, get_int, get_string
+from pydoll_mcp_server.json_types import (
+    JsonArray,
+    JsonObject,
+    JsonValue,
+    get_array,
+    get_bool,
+    get_int,
+    get_object,
+    get_string,
+)
+from pydoll_mcp_server.tools import form_discovery as _form_discovery
+from pydoll_mcp_server.tools import form_workflow_support as _workflow_support
 from pydoll_mcp_server.tools.elements import element_click, element_fill
 from pydoll_mcp_server.tools.files import file_upload_state, upload_files
 from pydoll_mcp_server.tools.form_choice import form_select_choice
 from pydoll_mcp_server.tools.form_controls import combobox_type_and_select
-from pydoll_mcp_server.tools.form_discovery import surface_disagreement
 from pydoll_mcp_server.tools.form_fill import FormFillField, form_fill_fields
 
+DOMAIN_RESTRICTIONS = _workflow_support.DOMAIN_RESTRICTIONS
+_DOMAIN_RESTRICTIONS = DOMAIN_RESTRICTIONS
+active_domain_restriction = _workflow_support.active_domain_restriction
+domain_restriction_to_json = _workflow_support.domain_restriction_to_json
+normalize_employer_domain = _workflow_support.normalize_employer_domain
+record_domain_restriction = _workflow_support.record_domain_restriction
+snapshot_as_surface = _workflow_support.snapshot_as_surface
+surface_disagreement = _form_discovery.surface_disagreement
 
-@dataclass
-class DomainRestriction:
-    domain: str
-    reason: str
-    evidence_text: list[str]
-    timestamp: float
-    expires_at: float | None
-    job_identifiers: list[str]
-
-
-_DOMAIN_RESTRICTIONS: dict[str, DomainRestriction] = {}
 _SENSITIVE_CONFIRMATION_WORDS = (
     'attest',
     'certif',
@@ -40,55 +43,6 @@ _SENSITIVE_CONFIRMATION_WORDS = (
     'background check',
 )
 _SUBMIT_WORDS = ('submit', 'apply', 'send application', 'enviar candidatura', 'candidatar', 'enviar inscrição')
-
-
-def normalize_employer_domain(value: str) -> str:
-    candidate = value.strip()
-    if not candidate:
-        return ''
-    parsed = urlsplit(candidate if '://' in candidate else f'https://{candidate}')
-    return (parsed.hostname or '').lower().rstrip('.')
-
-
-def record_domain_restriction(
-    employer_domain: str,
-    reason: str,
-    evidence_text: list[str],
-    job_identifiers: list[str] | None = None,
-    expires_at: float | None = None,
-) -> JsonObject:
-    domain = normalize_employer_domain(employer_domain)
-    if not domain:
-        return {'recorded': False, 'reason': 'employer_domain is required'}
-    restriction = DomainRestriction(
-        domain=domain,
-        reason=reason,
-        evidence_text=list(evidence_text),
-        timestamp=time.time(),
-        expires_at=expires_at,
-        job_identifiers=list(job_identifiers or []),
-    )
-    _DOMAIN_RESTRICTIONS[domain] = restriction
-    return domain_restriction_to_json(restriction)
-
-
-def active_domain_restriction(domain: str) -> DomainRestriction | None:
-    restriction = _DOMAIN_RESTRICTIONS.get(normalize_employer_domain(domain))
-    if restriction is not None and restriction.expires_at is not None and restriction.expires_at <= time.time():
-        _DOMAIN_RESTRICTIONS.pop(restriction.domain, None)
-        return None
-    return restriction
-
-
-def domain_restriction_to_json(restriction: DomainRestriction) -> JsonObject:
-    return {
-        'domain': restriction.domain,
-        'reason': restriction.reason,
-        'evidence_text': list(restriction.evidence_text),
-        'timestamp': restriction.timestamp,
-        'expires_at': restriction.expires_at,
-        'job_identifiers': list(restriction.job_identifiers),
-    }
 
 
 async def collect_upload_states(client_id: str, tab_id: str, fields: JsonArray) -> JsonArray:
@@ -153,25 +107,41 @@ async def prepare_actions(
                 else await form_select_choice(client_id, tab_id, label, option)
             )
             actions.append({'kind': 'choice', 'result': result})
+    combo_fields = await _refresh_active_fields(client_id, tab_id, observed_fields) if combos else observed_fields
     for plan in combos:
-        field = match_field(plan, observed_fields)
-        element_id = str(plan.get('element_id', '') or (field or {}).get('element_id', ''))
+        field = match_field(plan, combo_fields)
+        re_resolved = False
+        if field is None:
+            original_field = match_field(plan, observed_fields)
+            if original_field is not None:
+                replacement_plan = stable_re_resolution_plan(plan, original_field)
+                field = match_field(replacement_plan, combo_fields)
+                re_resolved = field is not None
+        planned_element_id = get_string(plan, 'element_id', '')
+        current_element_id = get_string(field or {}, 'element_id', '')
+        if current_element_id and current_element_id != planned_element_id:
+            re_resolved = True
+        element_id = current_element_id or planned_element_id
         if not element_id:
             actions.append({'kind': 'combobox', 'status': 'stale', 'message': 'No current combobox element_id.'})
             continue
+        result = await combobox_type_and_select(
+            client_id,
+            tab_id,
+            element_id,
+            str(plan.get('query', '')),
+            str(plan.get('option_text', '')),
+            bool(plan.get('exact', True)),
+            None,
+            bool(plan.get('allow_approximate', False)),
+        )
+        if re_resolved:
+            result['re_resolved'] = True
+            result['previous_element_id'] = str(plan.get('element_id', ''))
         actions.append(
             {
                 'kind': 'combobox',
-                'result': await combobox_type_and_select(
-                    client_id,
-                    tab_id,
-                    element_id,
-                    str(plan.get('query', '')),
-                    str(plan.get('option_text', '')),
-                    bool(plan.get('exact', True)),
-                    None,
-                    bool(plan.get('allow_approximate', False)),
-                ),
+                'result': result,
             }
         )
     for plan in uploads:
@@ -202,19 +172,6 @@ async def prepare_actions(
             }
         )
     return actions
-
-
-def snapshot_as_surface(snapshot: JsonObject) -> JsonObject:
-    return {
-        'success': True,
-        'surface': 'form',
-        'fields': get_array(snapshot, 'fields', []),
-        'primary_action': {},
-        'security_controls': [],
-        'errors': [],
-        'warnings': [{'kind': 'fallback', 'message': 'Active surface discovery failed; form snapshot used.'}],
-        'partial': get_bool(snapshot, 'partial', False),
-    }
 
 
 def pending_required(fields: JsonArray, protected_values: list[str]) -> JsonArray:
@@ -276,17 +233,39 @@ def covered_by_plans(field: JsonObject, plans: list[JsonObject]) -> bool:
 
 
 def match_field(plan: JsonObject, fields: JsonArray, prefer_direct_control: bool = False) -> JsonObject | None:
-    key = str(plan.get('field_key', '')).casefold()
-    label_hint = str(plan.get('field_label', plan.get('label_contains', plan.get('question_contains', '')))).casefold()
+    element_id = get_string(plan, 'element_id', '')
+    fingerprint = get_string(plan, 'fingerprint', '')
+    selector = get_string(plan, 'selector', '')
+    key = get_string(plan, 'field_key', '').casefold()
+    label_hint = get_string(
+        plan,
+        'field_label',
+        get_string(plan, 'label_contains', get_string(plan, 'question_contains', '')),
+    ).casefold()
+    placeholder_hint = get_string(plan, 'placeholder_contains', '').casefold()
+    name_hint = get_string(plan, 'name', '').casefold()
     label_matches: list[JsonObject] = []
     for value in fields:
         if not isinstance(value, dict):
             continue
+        if element_id and element_id == get_string(value, 'element_id', ''):
+            return value
         field_key = get_string(value, 'field_key', '').casefold()
         label = field_label(value, {}).casefold()
+        placeholder = get_string(value, 'placeholder', '').casefold()
+        name = get_string(value, 'name', '').casefold()
+        field_selector = get_string(value, 'selector_hint', '')
+        if fingerprint and fingerprint == get_string(value, 'fingerprint', ''):
+            return value
+        if selector and selector == field_selector:
+            return value
         if key and key == field_key:
             return value
-        if label_hint and label_hint in label:
+        if (
+            (label_hint and label_hint in label)
+            or (placeholder_hint and placeholder_hint in placeholder)
+            or (name_hint and name_hint == name)
+        ):
             label_matches.append(value)
     if prefer_direct_control:
         for value in label_matches:
@@ -295,6 +274,36 @@ def match_field(plan: JsonObject, fields: JsonArray, prefer_direct_control: bool
     if label_matches:
         return label_matches[0]
     return None
+
+
+async def _refresh_active_fields(client_id: str, tab_id: str, fallback: JsonArray) -> JsonArray:
+    from pydoll_mcp_server.tools.active_surface import page_get_active_surface
+
+    surface = await page_get_active_surface(client_id, tab_id, scope='auto')
+    if not surface.get('success'):
+        return fallback
+    fields = get_array(surface, 'fields', [])
+    return fields if fields else fallback
+
+
+def stable_re_resolution_plan(plan: JsonObject, field: JsonObject) -> JsonObject:
+    result = dict(plan)
+    result['element_id'] = ''
+    for plan_key, field_key in (
+        ('field_key', 'field_key'),
+        ('field_label', 'label'),
+        ('placeholder_contains', 'placeholder'),
+        ('name', 'name'),
+        ('role', 'role'),
+        ('type', 'type'),
+        ('selector', 'selector_hint'),
+        ('fingerprint', 'fingerprint'),
+    ):
+        if not get_string(result, plan_key, ''):
+            value = get_string(field, field_key, '')
+            if value:
+                result[plan_key] = value
+    return result
 
 
 def _is_direct_control(field: JsonObject) -> bool:
@@ -401,6 +410,8 @@ def hard_prepare_blockers(preflight: JsonObject, plans: list[JsonObject] | None 
             blockers.append(value)
             continue
         kind = get_string(value, 'kind', '')
+        if kind == 'discovery' and get_string(get_object(value, 'details', {}), 'status', '') == 'consistent':
+            continue
         if kind == 'discovery' and _discovery_is_safe_for_plans(preflight, plans or []):
             continue
         if kind == 'primary_action' and get_string(value, 'reason', '') == 'not_found' and plans:
@@ -426,23 +437,3 @@ def hard_prepare_blockers(preflight: JsonObject, plans: list[JsonObject] | None 
 def is_final_submit_text(text: str) -> bool:
     folded = text.casefold().strip()
     return any(word in folded for word in _SUBMIT_WORDS)
-
-
-__all__ = [
-    '_DOMAIN_RESTRICTIONS',
-    'active_domain_restriction',
-    'attestation_handoffs',
-    'covered_by_plans',
-    'domain_restriction_to_json',
-    'field_label',
-    'hard_prepare_blockers',
-    'is_final_submit_text',
-    'match_field',
-    'normalize_employer_domain',
-    'pending_required',
-    'prepare_actions',
-    'protected',
-    'record_domain_restriction',
-    'snapshot_as_surface',
-    'surface_disagreement',
-]

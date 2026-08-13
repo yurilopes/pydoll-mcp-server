@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import os
 import time
 from pathlib import Path
@@ -296,7 +297,7 @@ async def browser_attach(client_id: str, browser_id: str = '', profile_id: str =
     if not _inside_any(profile_path, allowed_roots):
         return StructuredError(ErrorCode.PERMISSION_DENIED, 'Lease profile path is outside managed roots.').to_dict()
     browser_pid = _safe_int(metadata.get('browser_pid'))
-    if browser_pid is not None and not _process_is_alive(browser_pid):
+    if browser_pid is not None and not is_process_alive(browser_pid):
         get_profile_lease_manager().release_by_profile(str(profile_path))
         return _stale_lease(profile_id, 'The leased browser process is no longer alive.')
     if not isinstance(raw_port, int) or raw_port <= 0:
@@ -407,7 +408,17 @@ def _safe_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _process_is_alive(process_id: int) -> bool:
+def is_process_alive(process_id: int) -> bool:
+    if os.name == 'nt':
+        try:
+            kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            handle = kernel32.OpenProcess(0x1000, False, process_id)
+            if not handle:
+                return False
+            kernel32.CloseHandle(handle)
+            return True
+        except (AttributeError, OSError, TypeError, ValueError):
+            return False
     try:
         os.kill(process_id, 0)
     except PermissionError:
