@@ -1395,6 +1395,82 @@ Remaining follow-up:
   reCAPTCHA marker, asserting that all safe preparation actions can complete while submit remains
   blocked.
 
+### Starbridge live validation and required-field review
+
+Starbridge was used as a second live Ashby regression after the server restart. The form was for
+`AI Engineer, EMEA / LATAM` and contained required identity fields, a LinkedIn URL, an exceptional
+work textarea, a resume upload, and an expected annual rate. The advertised compensation was
+`USD 120,000 to USD 140,000`.
+
+The live workflow applied the lower-bound compensation policy and produced the following result:
+
+- `form_preflight` identified the required fields and the Ashby reCAPTCHA control before any submit
+  action.
+- `form_fill_fields` filled all six planned fields, including `120000` for the expected annual
+  rate. Every field returned `status=verified`, keyboard fallback evidence, framework event
+  evidence, controlled-value survival, blur confirmation, and `ready_for_submission=true`.
+- A fresh deep lookup of `#_systemfield_resume` followed by `upload_files` accepted the dedicated
+  PDF and exposed the filename in the rendered form.
+- `form_review` returned `status=blocked`, no pending required fields, an accepted resume state,
+  and a security blocker for the invisible Ashby reCAPTCHA. No submit click was sent.
+
+This confirms that the v2 fill and upload path can prepare a real Ashby form while refusing to
+cross a security handoff. The review result and screenshot were recorded in the application
+tracker. The test also confirms that salary handling should be part of the preparation plan: use
+the lower advertised value when a field is mandatory, and omit it when optional.
+
+### LinkedIn Easy Apply no-effect regression
+
+Several live LinkedIn Spain vacancies exposed a different failure mode. The exact Easy Apply
+button was resolved with a fresh deep lookup and had a valid label, job identity, and non-zero
+bounds. Native click returned a verified dispatch, but the page produced no dialog, no URL change,
+and no active-surface change. Center-mouse and the safe trusted fallback produced the same no-effect
+result. A direct `/apply/` route redirected to the normal job page.
+
+The correct classification is `unknown` or `no_effect`, not a successful application. The server
+must not retry such a click indefinitely because the transport may have succeeded while the page
+effect is delayed or hidden. The caller should preserve the job ID and return an external-application
+handoff when a verified external link exists. This live behavior should receive a fixture covering
+an anchor-backed Easy Apply control whose click handler is inert or portal-dependent.
+
+### Braintrust live validation and rich-text editor gap
+
+Braintrust was tested through a LinkedIn external application route for a remote Lead AI and Data
+Platform Engineer marketplace contract open to LATAM and Europe. The form advertised `USD 70 to
+USD 120 per hour` for 20 hours per week. The lower option, USD 70 per hour, was selected because
+it is consistent with the candidate's salary concern and is approximately within the desired
+annualized range at the stated weekly commitment.
+
+The improved interaction layer succeeded on the ordinary controls:
+
+- Legal first name, last name, email, and LinkedIn URL were filled and verified with framework
+  event, controlled-value survival, blur, and submission-ready evidence.
+- The USD 70 rate and two-week availability choices were selected and verified through `aria-checked`.
+- The resume reached the native accepted state through `upload_files`. The portal did not render a
+  filename, so the public result correctly returned `accepted_with_verification_warning` instead
+  of claiming complete visual verification.
+- `form_review` captured a `pre_submission_review` screenshot with artifact ID
+  `artifact_18ad4491f9594242` and SHA-256
+  `a7b99e1c51cfcf60e241cb5dd9ec3ee9d8da7eebe90f89908089fbce0feee29f`.
+
+The four required client questions used `div[contenteditable="true"]` rich-text editors. Both
+`form_fill_fields` and direct `element_fill` returned structured inconclusive or execution errors.
+The lower-level `element_type` operation reported characters typed, but fresh re-observation still
+showed empty editors and the portal displayed required-field errors. Two question selectors also
+contained curly apostrophes that were normalized incorrectly during selector matching, although a
+deep class query could enumerate the four editors in document order.
+
+This is a material reliability gap. A future rich-text adapter needs a semantic editor fingerprint,
+scroll and focus handling, exact Unicode-safe label association, input and blur event verification,
+post-render re-resolution, and a final text-presence check. It must never report success based only
+on a key-count result. The fixture matrix should include contenteditable editors backed by React,
+Slate, Lexical, and portal-rendered toolbars.
+
+The same review also exposed two correct handoffs. Braintrust presented an invisible reCAPTCHA, and
+the questions about legal authorization and visa sponsorship referred to an unspecified contracting
+country. The MCP left both choices untouched rather than inferring facts from a multi-region remote
+listing. No submit click was issued.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
