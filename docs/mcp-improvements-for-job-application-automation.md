@@ -1530,6 +1530,51 @@ control blocker instead of reporting the form as ready merely because ordinary f
 The diagnostic screenshot was recorded as artifact `artifact_53062c20442646d6` with SHA-256
 `6f19a7a9edb2f8ecc370611dbb091b0c197bf9935080fc730e270cb5166cbffd`.
 
+### BJAK live submit test and controlled-field state loss
+
+BJAK was used as a live test of the complete preparation path for an Applied AI Engineer role
+in Portugal. The LinkedIn listing exposed an Ashby application URL. The server navigated to the
+observed external URL, preserved the visible browser profile, and prepared the form without
+manual JavaScript evaluation.
+
+The safe preparation path worked for the ordinary controls:
+
+- Name, email, phone, nationality, current country and city, and LinkedIn URL were filled through
+  `form_fill_fields` with keyboard fallback, framework event evidence, controlled-value survival,
+  blur confirmation, and `ready_for_submission=true`.
+- Factual screening choices were selected and verified for visa requirement, software engineering
+  experience, production AI delivery, LLM experience, Node.js, Python, AI evaluation, OpenAI, and
+  DeepSeek.
+- The resume upload returned `accepted` with native input state, rendered filename evidence, an
+  upload ID, and a stable semantic upload state.
+- A full-page `pre_submission_review` screenshot was captured as artifact
+  `artifact_7c7f17044598414a` with SHA-256
+  `3b8ee7954c9e3154cff24117ebb24ad9262c3db41b72fba90d4ebe3e4536d9ac`.
+
+The form exposed an invisible reCAPTCHA. It also contained an optional recruitment-marketing
+checkbox. The checkbox was left unchecked and was included in `do_not_touch`, but both
+`form_preflight` and `form_review` classified it as an attestation handoff. This is too broad:
+optional marketing consent should remain untouched without blocking a technically valid
+submission when the portal permits the checkbox to stay clear. Security controls and legal or
+candidate attestations still require a handoff.
+
+With explicit session autonomy, one fresh lookup resolved the actual `Submit Application` button
+and one real click was sent. No CAPTCHA was solved, hidden, bypassed, or retried. The portal
+returned `Your form needs corrections` and reported nationality and current country and city as
+missing, even though the immediately preceding fill and review states reported those controls as
+verified and ready. The resume remained accepted and rendered. The submission classifier returned
+`requires_candidate_confirmation` because it combined the validation evidence with the optional
+consent handoff. The diagnostic screenshot was recorded as artifact
+`artifact_9f192de539854502` with SHA-256
+`be18e83da710d796c24a44c9b6d1568259a987a6cb3d1a96afe418772e12fa36`.
+
+This exposes a second P0 issue in controlled forms: a field can satisfy a local verification
+window and still be absent from the portal's submit state after another control or file upload
+causes a render or validation cycle. `form_fill_fields` must perform a final fresh read after all
+planned actions, and the workflow must verify that the portal's own validation model recognizes
+the value before allowing a submit. A submit-time validation failure must be classified as
+`validation_failed`, must invalidate the review token, and must never trigger an automatic retry.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
