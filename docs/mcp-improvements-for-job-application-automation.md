@@ -1471,6 +1471,65 @@ the questions about legal authorization and visa sponsorship referred to an unsp
 country. The MCP left both choices untouched rather than inferring facts from a multi-region remote
 listing. No submit click was issued.
 
+### Anyone AI live submit classification and anti-spam rejection
+
+Anyone AI was used for a real live test of the new prepare, review, and submit boundary on a Brazil
+remote Python Developer form. The form advertised `USD 45 to USD 80 per hour`. The ordinary fields
+and the Python language choice were prepared with the dedicated resume:
+
+- Name, email, phone, and LinkedIn returned framework event evidence, controlled-value survival,
+  blur confirmation, and `ready_for_submission=true`.
+- The resume reached the native accepted state and the rendered form exposed the filename.
+- `form_review` correctly identified the invisible reCAPTCHA and returned a blocked review with a
+  pre-submission screenshot. No security control was solved or hidden.
+- Because the session had explicit autonomy, one real click was sent to the actual submit button.
+  The page then displayed `We couldn't submit your application` and explained that the submission
+  was flagged as possible spam. It was not classified as confirmation, and no automatic retry was
+  sent.
+
+This run validates an important distinction that should remain explicit in the public contract:
+transport dispatch, portal acceptance, security rejection, and confirmed submission are different
+states. A portal anti-spam response after a single click must invalidate the review token, preserve
+the diagnostic artifact, classify the outcome as a portal rejection or security handoff, and return
+a recovery recommendation without changing network settings or attempting to evade the control.
+
+The diagnostic screenshot was recorded as artifact `artifact_73d4fb8a7d194622` with SHA-256
+`8f713fdc2b1b5b376fa023d466956565feadcd9d94d7cda45c8865d4ee4cc191`.
+
+The live run also exposed an artifact naming contract defect. `page_screenshot` rejected a name
+without an explicit `.png` extension even when the format was already `png`; the same capture
+succeeded after the extension was supplied. The tool should normalize or validate names before
+dispatch and return the final relative path in the structured artifact record.
+
+### Remote Crew live validation and custom location combobox gap
+
+Remote Crew was tested through LinkedIn's verified external RecruitCRM link for a remote AI Engineer
+role in Portugal. The published compensation was `EUR 50K to EUR 62K`, below the preferred salary
+floor but considered because the role was fully remote and the upper bound approached the target.
+
+The form was a React surface with open shadow-root controls. The new interaction path verified the
+ordinary identity fields:
+
+- First name, last name, LinkedIn URL, and email all succeeded with keyboard fallback, framework
+  events, controlled-value survival, blur confirmation, and `ready_for_submission=true`.
+- The visible Location field was marked required and exposed a custom button combobox showing
+  `Not Selected`.
+- Native click, centered mouse click, keyboard navigation, `combobox_get_options`,
+  `combobox_type_and_select`, `combobox_select_option`, `form_select_choice`, and
+  `page_click_primary_action` did not expose any options or change the selected state.
+- The server correctly stopped before submission because the required location could not be
+  selected from observed page state. A pre-submission diagnostic screenshot was recorded.
+
+This is a remaining adapter gap, not a reason to accept an unverified location. Custom button
+comboboxes should expose their trigger, popup association, option discovery, and selected state in
+one semantic operation. The implementation should inspect `aria-controls`, `aria-expanded`, portal
+containers, open shadow roots, and keyboard state, then re-resolve the trigger after the popup is
+rendered. If no option surface is observable, the result should be `inconclusive` with a precise
+control blocker instead of reporting the form as ready merely because ordinary fields are valid.
+
+The diagnostic screenshot was recorded as artifact `artifact_53062c20442646d6` with SHA-256
+`6f19a7a9edb2f8ecc370611dbb091b0c197bf9935080fc730e270cb5166cbffd`.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
