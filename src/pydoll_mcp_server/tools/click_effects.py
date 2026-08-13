@@ -261,6 +261,33 @@ async def element_click_enhanced(
         effect_kind = 'hidden_effect'
     page_effect.update({'effect_status': effect_kind})
     if has_effect_request and missing:
+        if effect_observed:
+            return {
+                'contract_version': 2,
+                'operation_id': f'click_{int(time.time() * 1000)}',
+                'success': True,
+                'status': 'unknown',
+                'element_id': element_id,
+                'clicked': clicked,
+                'verified': False,
+                'effect_observed': True,
+                'strategy_used': strategy_used,
+                'fallbacks_attempted': list(fallbacks_attempted),
+                'matched_effects': matched_effects,
+                'warnings': [
+                    {
+                        'kind': 'expected_effect_pending',
+                        'missing': missing,
+                        'recovery': 'Re-observe the active surface before taking another action.',
+                    }
+                ],
+                'evidence': evidence,
+                'mcp_action': mcp_action,
+                'page_effect': page_effect,
+                'effect_status': effect_kind,
+                'site_diagnostics': diagnostics,
+                'failure_origin': 'page',
+            }
         response = StructuredError(
             ErrorCode.NO_EFFECT,
             'The click event was sent, but the requested page effect was not observed.',

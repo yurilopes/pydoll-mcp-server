@@ -2,9 +2,46 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
+from pydoll.browser.tab import Tab
 
 pytestmark = [pytest.mark.unit]
+
+
+@pytest.mark.asyncio
+async def test_click_observation_preserves_delayed_route_transition(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydoll_mcp_server.tools import click_observation
+
+    urls = iter(('https://example.test/start', 'https://example.test/application'))
+    tab = object.__new__(Tab)
+    monkeypatch.setattr(
+        tab,
+        'execute_script',
+        AsyncMock(return_value={'result': {'result': {'type': 'boolean', 'value': False}}}),
+    )
+
+    async def fake_get_tab_url(_tab: object) -> str:
+        return next(urls, 'https://example.test/application')
+
+    monkeypatch.setattr(click_observation, 'get_tab_url', fake_get_tab_url)
+
+    observed, matched = await click_observation.observe_effects(
+        'tab-id',
+        tab,
+        'https://example.test/start',
+        False,
+        False,
+        'Full name',
+        '',
+        False,
+        0.2,
+    )
+
+    assert observed is True
+    assert 'url_changed' in matched
+    assert 'expect_text' not in matched
 
 
 class TestUploadFilesEnhanced:

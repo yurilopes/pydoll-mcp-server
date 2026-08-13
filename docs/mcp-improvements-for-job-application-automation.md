@@ -810,6 +810,30 @@ exposed a small API issue: a relative name without an explicit `.png` extension 
 as an extension. Future screenshot naming should validate or append the requested format before
 passing the path to the browser artifact layer.
 
+### Delayed route and portal combobox validation
+
+Additional live validation on 2026-08-13 exposed two timing and lifecycle cases in Ashby and
+TeamStation-style application pages:
+
+- A native click could already change the URL while the requested text or modal was still being
+  rendered. The old observer returned `NO_EFFECT`, which encouraged an unsafe caller to consider
+  retrying the click. The observer now records `url_changed`, waits only within a bounded grace
+  window, and returns an `unknown` v2 result with a re-observation instruction when the requested
+  effect is still pending. It does not retry the click. Text observation also includes visible
+  content in open shadow roots.
+- A delayed TeamStation modal appeared after the first observation window. Re-observation found
+  the modal and the v2 workflow filled and verified its identity, contact, salary, notice-period,
+  and resume fields. The review correctly stopped at the required application-terms attestation.
+- On an Ashby form, the work-country combobox selected `Brazil` even though its option inventory
+  was empty, while a separate nationality combobox accepted typed text but did not expose a
+  matching option. The workflow correctly left nationality unresolved. Combobox discovery should
+  distinguish an empty snapshot from a rendered portal option list and preserve the final trigger
+  state after rerender before claiming selection.
+
+The delayed-route regression is covered by a unit test. The remaining combobox lifecycle case
+should receive a browser fixture with portal-rendered options and an option list that is created
+after the trigger is resolved.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.

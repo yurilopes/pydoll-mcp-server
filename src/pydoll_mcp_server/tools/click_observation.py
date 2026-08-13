@@ -118,6 +118,7 @@ async def observe_effects(
     del tab_id
     deadline = time.monotonic() + timeout_val
     matched: list[str] = []
+    url_change_observed_at: float | None = None
 
     while time.monotonic() < deadline:
         if expect_dialog and 'expect_dialog' not in matched:
@@ -134,17 +135,23 @@ async def observe_effects(
             except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
                 pass
 
-        if expect_url_change and 'expect_url_change' not in matched:
-            try:
-                current_url = await get_tab_url(pydoll_tab) or ''
-                if current_url and current_url != pre_click_url:
+        try:
+            current_url = await get_tab_url(pydoll_tab) or ''
+            if current_url and current_url != pre_click_url:
+                if url_change_observed_at is None:
+                    url_change_observed_at = time.monotonic()
+                if expect_url_change and 'expect_url_change' not in matched:
                     matched.append('expect_url_change')
-            except (PydollException, TypeError, ValueError):
-                pass
+                elif 'url_changed' not in matched:
+                    # A route transition is evidence even when another effect
+                    # was requested. It is not submission confirmation alone.
+                    matched.append('url_changed')
+        except (PydollException, TypeError, ValueError):
+            pass
 
         if expect_text and 'expect_text' not in matched:
             try:
-                script = f'return document.body.innerText.indexOf({expect_text!r}) >= 0;'
+                script = _text_effect_script(expect_text)
                 result = await pydoll_tab.execute_script(script, return_by_value=True)
                 if extract_normalized_bool(result, 'click_text_effect'):
                     matched.append('expect_text')
@@ -221,6 +228,11 @@ async def observe_effects(
         ):
             return True, matched
 
+        if url_change_observed_at is not None and time.monotonic() - url_change_observed_at >= min(1.0, timeout_val):
+            # Re-observe after a route transition instead of retrying a click
+            # because a stale text or selector expectation was not ready yet.
+            return True, matched
+
         await asyncio.sleep(0.15)
 
     return len(matched) > 0, matched
@@ -229,14 +241,27 @@ async def observe_effects(
 async def _selector_effect_state(tab: Tab, selector: str) -> str:
     script = f"""
     const selector = {json.dumps(selector)};
-    const nodes = [...document.querySelectorAll(selector)];
+    function collect(root) {{
+        const nodes = [...root.querySelectorAll(selector)];
+        for (const host of root.querySelectorAll('*')) {{
+            if (host.shadowRoot) nodes.push(...collect(host.shadowRoot));
+        }}
+        return nodes;
+    }}
+    const nodes = collect(document);
     function visible(node) {{
-        for (let current = node; current; current = current.parentElement) {{
+        for (let current = node; current;) {{
             const style = getComputedStyle(current);
             const rect = current.getBoundingClientRect();
             if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0)
                 return false;
             if (rect.width <= 0 || rect.height <= 0) return false;
+            if (current.parentElement) {{
+                current = current.parentElement;
+            }} else {{
+                const root = current.getRootNode();
+                current = root && root.host ? root.host : null;
+            }}
         }}
         return true;
     }}
@@ -249,6 +274,31 @@ async def _selector_effect_state(tab: Tab, selector: str) -> str:
     if bool(state.get('present', False)):
         return 'hidden'
     return 'absent'
+
+
+def _text_effect_script(expected_text: str) -> str:
+    literal = json.dumps(expected_text)
+    return f"""
+    const needle = {literal}.toLowerCase();
+    function visible(node) {{
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    }}
+    function shadowText(host) {{
+        if (!host.shadowRoot || !visible(host)) return '';
+        let text = host.shadowRoot.textContent || '';
+        for (const nested of host.shadowRoot.querySelectorAll('*')) {{
+            if (nested.shadowRoot) text += ' ' + shadowText(nested);
+        }}
+        return text;
+    }}
+    let text = document.body ? (document.body.innerText || '') : '';
+    for (const host of document.querySelectorAll('*')) {{
+        if (host.shadowRoot) text += ' ' + shadowText(host);
+    }}
+    return text.toLowerCase().includes(needle);
+    """
 
 
 def all_effects_satisfied(
