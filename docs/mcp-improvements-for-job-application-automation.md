@@ -1802,6 +1802,51 @@ The diagnostic artifact was `artifact_bd78da22a17c4ffe` at
 `digital-waffle-linkedin-easy-apply-no-surface.png` with SHA-256
 `f2c83cb230f44a20accb4b753d43d21d98efaa30b40e0960d5a27c73d16b1bf3`.
 
+### Kake LinkedIn Easy Apply delayed surface and canonical email mismatch
+
+The Kake Senior AI/LLM Engineer listing was a strong fit for the candidate's
+production Python, LLM, RAG, API, evaluation, and agent experience. The role
+was remote from Poland and the description exposed a meaningful technical
+match.
+
+The first high-level Easy Apply call returned no effect and no active surface
+after its wait window. A later inspection found that the form had appeared
+asynchronously. The previously resolved visible button was stale by then,
+which shows that the adapter must re-snapshot after a delayed surface event
+and must invalidate cached element references when the dialog is replaced.
+
+The opened contact form exposed only an email different from the candidate's
+canonical repository email. The workflow correctly refused to replace the
+personal data with an unverified value and did not advance or submit the
+application. This should be represented as a structured
+`candidate_data_mismatch` blocker, rather than as a generic click or timeout
+failure.
+
+The Easy Apply state machine should use a short bounded stabilization period
+after the initial timeout, then return the observed surface state, refreshed
+field fingerprints, and any canonical-data mismatch. A delayed dialog must
+not cause a blind second click, and a stale element must trigger re-resolution
+only when the new observation proves that the action remains safe.
+
+The diagnostic artifact was `artifact_a67c97d8e8c44778` at
+`kake-linkedin-contact-email-mismatch.png` with SHA-256
+`183f04b5f93ef99f9e8d463d1a0f7bbfbefa99144e7fa0a504c6732fcda31881`.
+
+### CUBE AI live geographic eligibility blocker
+
+The CUBE AI Senior AI Engineer, Models listing had a strong technical match,
+but its visible description explicitly stated that the employer could not
+hire outside Lithuania and did not provide visa sponsorship. Since the
+candidate is based in Brazil and requires sponsorship for international
+employment, no application interaction was attempted after the restriction
+was verified.
+
+The preflight layer should extract and classify explicit geographic hiring and
+sponsorship restrictions before opening an Easy Apply form. The result should
+identify the employer domain, the evidence text, the candidate eligibility
+conflict, and a terminal `not_eligible` recommendation. This avoids spending
+interaction time on a form that cannot lead to a valid application.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
