@@ -1575,6 +1575,57 @@ planned actions, and the workflow must verify that the portal's own validation m
 the value before allowing a submit. A submit-time validation failure must be classified as
 `validation_failed`, must invalidate the review token, and must never trigger an automatic retry.
 
+### Starbridge live retry and semantic combobox false positive
+
+Starbridge was retried after the earlier form preparation issue was resolved. The v2 path loaded the
+form, filled the required text fields, selected the factual choices, selected `Brazil` in the custom
+location combobox, accepted the dedicated resume, and captured a full-page pre-submission review.
+The local evidence reported framework events, controlled-value survival, blur, and
+`ready_for_submission=true` for the planned fields. The diversity survey remained untouched.
+
+The form exposed an invisible reCAPTCHA. With explicit session autonomy, one normal click was sent to
+the fresh `Submit Application` control. The click transport was classified as dispatched with no
+immediate effect. The portal then returned `Your form needs corrections` and the specific error
+`Missing entry for required field: Location`. A fresh preflight also saw the same portal validation
+error even though the combobox still displayed `Brazil` and had been locally classified as verified.
+The submission classifier correctly returned `validation_failed`, recorded a diagnostic artifact,
+and the workflow did not retry.
+
+This run narrows the remaining combobox requirement. A semantic selection result must include not
+only the visible label and selected option value, but also evidence that the portal's own form state
+will serialize that value for submission. For custom comboboxes, the adapter should verify the
+associated hidden input or submitted form model after selection, re-read it after unrelated renders
+and uploads, and mark the state `inconclusive` when only the visible trigger changed. Submit-time
+validation errors should be associated with the logical field and invalidate any review token.
+
+The pre-submission artifact was `artifact_540840c64ff64b20` with SHA-256
+`bed68538b462485d07d836e1fc9aa7777192ef1ebc595267441461cb628b54e1`.
+The validation-failure artifact was `artifact_1807a034d2a34268` with SHA-256
+`769d9c0b636c18fdf3e90c16d50f825132bfbc88fda87bcef88bda07f295a4ec`.
+
+### Additional live interaction findings
+
+Three LinkedIn Easy Apply attempts were made through the actual job search context. MBN Solutions,
+Wave Group, and Primis all exposed the expected Easy Apply control, but the click completed without
+rendering a dialog or application surface. The observed state remained `unknown` with no submit
+control, so none was retried or counted as an application. This confirms that a successful click
+transport must not be treated as Easy Apply availability or submission readiness.
+
+The Overt Minds `I'm interested` control and the InvestEngine Teamtailor `Apply for this job` control
+also produced no application surface after native and safe mouse attempts. InvestEngine's cookie
+decline control required the pointer-sequence fallback after native and centered mouse strategies
+had no effect. These controls need an explicit no-effect result and a bounded fallback policy.
+
+The Micro1 application exposed candidate terms and privacy agreement language in the `Next` action.
+`form_preflight` did not identify that implied attestation and reported the page as ready. Action
+metadata and nearby explanatory text must be included in attestation detection, not only checkbox
+labels or separate legal controls.
+
+The ReflexAI retry accepted the fields and resume, then returned a visible updating/upload warning
+after one real submit click. The classifier produced a terminal `unknown` result and the workflow
+did not retry. The submit wait should distinguish an ongoing portal update from a transport failure,
+while preserving the same no-blind-retry rule.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
