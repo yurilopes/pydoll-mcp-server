@@ -2296,6 +2296,55 @@ navigation controls elsewhere in the page:
 - Ensure the tracker and artifact records can preserve the raw classifier
   warning without downgrading a visually confirmed submission.
 
+## Live retest: Blue Wolf workflow after the passive-security correction
+
+The Blue Wolf Digital Senior Forward Deployed Engineer Easy Apply flow was
+executed as a second Europe-only live retest after the Jobgether submission.
+The caller used the visible browser profile and the public Pydoll tools for
+the full flow:
+
+- contact information advanced successfully through the LinkedIn dialog;
+- the dedicated two-page resume was uploaded and visibly selected;
+- the required sponsorship answer was set to `Yes`, matching the candidate's
+  Brazil-based status and need for German employment sponsorship;
+- English `Professional` and German `None` were preserved;
+- the optional `Siga a empresa Blue Wolf Digital` marketing checkbox was
+  detected as preselected and explicitly unchecked;
+- the active surface exposed no visible CAPTCHA, attestation, or candidate
+  verification prompt;
+- one native final click produced `surface=confirmation`,
+  `submitted=true`, and visible `Candidatura enviada`.
+
+The application was recorded as confirmed with pre-submission and
+submission-confirmation artifacts. This confirms that the v2 element state,
+choice verification, upload verification, active-surface re-resolution, and
+single-click safety path are usable in a real LinkedIn form without caller
+knowledge of shadow DOM.
+
+The retest also exposed three remaining adapter issues:
+
+- `linkedin_easy_apply_click_next` advanced through the first steps but did
+  not identify the visible `Revisar` action on the Additional Questions step.
+  `page_get_active_surface` did identify the exact enabled button with a fresh
+  fingerprint, and `element_click` verified the progress and surface change.
+  The specialized workflow should use the same semantic primary-action
+  resolver and recognize `Revisar` as an intermediate action.
+- The generic review still returned a hard blocker for the invisible
+  reCAPTCHA marker. It must instead return a passive diagnostic signal when
+  there is no visible challenge on the active surface, while preserving a hard
+  handoff for a challenge rendered after the click.
+- The click diagnostic reported several high-confidence `two_factor` signals
+  sourced from LinkedIn's global navigation and notification labels after the
+  successful click. Page-chrome text must not create a security handoff when
+  the active application surface has already produced a positive confirmation.
+
+The screenshot operation also rejected a relative artifact name without an
+extension and built an invalid path ending in `extension is not supported`.
+The public contract should either normalize a missing extension from `fmt` or
+return a structured validation error before touching the browser. Regression
+coverage should include a full-page review screenshot with and without an
+explicit extension.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
