@@ -2700,6 +2700,118 @@ Required changes:
   transport, then asserts that the second tab, browser lease, and profile
   ownership remain recoverable.
 
+### Live observations: LinkedIn external application and Oracle form retest
+
+The UL Solutions retest added several concrete findings to the interaction
+contract. The LinkedIn external application button opened an Oracle tab while
+the LinkedIn URL remained unchanged. The native click result was therefore
+reported as `no_effect`, even though tab reconciliation found a new target with
+the expected Oracle URL. A new target opened by an external application action
+is a visible effect and must not be confused with an inert click.
+
+The Oracle form is built from custom elements and hidden native controls. Deep
+discovery found the application controls reliably, while the normal surface
+and deep surface remained consistent. The legal terms checkbox had zero-size
+bounds, but its visible associated label was actionable. `element_check` used
+the associated label and returned a verified selected state. This is the right
+seamless behavior: the caller supplied a logical action and did not need to
+know that the control was hidden or rendered inside a custom-element tree.
+
+The first form preflight correctly identified an empty required email field.
+After the email was filled, `element_fill` reported input, change, and blur
+events, value survival after stabilization, native validity, and
+`ready_for_submission=true`. After advancing, the portal displayed a six-digit
+email verification screen. `form_preflight` classified it as a two-factor
+security control with `requires_user_action=true` and did not permit the MCP to
+enter a code. This distinction must remain separate from CAPTCHA detection,
+invalid-code attempts, and a normal missing field.
+
+The same application flow also exposed a transport lifecycle issue. Closing
+the LinkedIn origin tab returned an HTTP 500 with unknown transport state, but
+the target was actually gone when checked through the browser inventory. The
+next MCP operation then used an invalid internal WebSocket object even though
+Chrome and the CDP endpoint were still alive. A forced MCP process restart,
+without stopping Chrome, allowed `browser_attach` to reconcile the persistent
+profile and restore the Oracle tab. The recovery worked, but it was too
+invasive for a single tab close and must become automatic and target-scoped.
+
+Required changes:
+
+- Treat a newly observed target opened by a click as an explicit effect. Return
+  `new_target_effect` with the new tab identity, opener tab identity, observed
+  URL, and provenance. The result must be verified by tab reconciliation before
+  the caller proceeds.
+- Make `tab_close` distinguish `closed_but_transport_unknown` from
+  `not_closed`. Reconcile by target ID before returning an error, and keep the
+  browser connection reusable when the target was removed successfully.
+- Add an in-process browser reconnect path when the managed process, profile,
+  CDP endpoint, and lease metadata still match. A stale Pydoll connection must
+  be replaced without stopping the visible Chrome or losing a prepared form.
+- Keep shadow DOM and custom-element traversal behind semantic operations.
+  Form and choice callers should receive field labels, state, and recovery
+  information without frame or shadow paths unless diagnostics are requested.
+- Detect email verification as an authentication handoff with a bounded
+  resumable state. Never read email, infer the code, or retry the verification
+  automatically.
+
+### Live observations: LinkedIn Easy Apply, duplicate identity, and upload state
+
+The UPBI Data & AI Easy Apply flow showed that the generic upload helper can
+resolve the visible upload trigger but still reject it as not being a file
+input. The trigger-based upload path accepted the PDF and displayed its
+filename, while the native input file count remained zero. The result needs a
+semantic upload state with separate native, rendered, and portal-accepted
+signals instead of a generic success or failure.
+
+The same flow showed two helper contract mismatches. The LinkedIn next-step
+helper accepted a numeric step index while the workflow naturally had a
+semantic step title, and the review action required a separately resolved deep
+button. The public workflow should accept stable semantic step keys and resolve
+the current action itself. The marketing checkbox was initially selected and
+was safely cleared through its visible associated label. Optional marketing
+state must continue to be explicit and never be silently inherited from a
+portal default.
+
+After the UPBI submit click, the portal visibly displayed `Candidatura enviada`
+and `Sua candidatura na UPBI Data & AI foi enviada.` The submit helper reported
+`NO_EFFECT`, correctly avoided a retry, but the auxiliary confirmation waiter
+classified the page as a security challenge because unrelated browser-chrome
+text contained a security marker. Confirmation classification must prioritize
+high-confidence visible application text in the active page surface over
+passive browser chrome or hidden frames.
+
+The Sierra Studio record exposed a cross-platform duplicate problem. URL-based
+duplicate detection did not match the prior confirmed Ashby application, even
+though company and role identity showed an existing confirmed record. A
+LinkedIn URL is not a sufficient application identity when a role can be
+submitted through an external ATS.
+
+The Keyrus job advertised `Candidatura simplificada` in LinkedIn metadata and
+the search card, but the active detail surface exposed no actionable Easy Apply
+control. The specialized open operation returned `RESOURCE_NOT_FOUND` after
+finding only company, follow, interest, and photo controls. The workflow made
+no mutation, which was safe, but the result should explicitly distinguish an
+advertised action that is unavailable from a stale element reference.
+
+Required changes:
+
+- Return `processing`, `accepted`, `rendered`, and
+  `accepted_with_verification_warning` as separate upload states, including
+  native file count, rendered filename evidence, and portal state.
+- Let semantic workflow steps use a stable key or title and resolve their
+  current action after every rerender. Do not require callers to know a portal's
+  internal numeric step index.
+- Filter submission confirmation evidence to the active visible application
+  surface. Hidden frames, browser chrome, passive reCAPTCHA markers, and
+  unrelated page text must not override visible confirmation text.
+- Resolve duplicate applications by normalized employer, role identity,
+  canonical job identifiers, and known external ATS records before changing a
+  confirmed record or opening a new submission flow. Preserve the source URLs
+  as evidence.
+- Return an explicit `action_unavailable` or `advertised_action_not_observed`
+  status when portal metadata promises Easy Apply but the live surface has no
+  safe actionable control.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
