@@ -2489,6 +2489,65 @@ Required changes:
 - Add a fixture for an external Apply link that opens a registration iframe
   with required mobile and optional or sensitive demographic questions.
 
+## Live retest: Provectus LinkedIn Easy Apply after the workflow changes
+
+The Provectus Senior Solutions Architect | Python and GenAI vacancy provided
+the first complete end-to-end retest after the previous blocked state. The
+Easy Apply dialog initially opened with a loading spinner and no fields. After
+the bounded wait, the dialog exposed a structured Contact info step and the
+workflow continued without manual browser interaction.
+
+The retest showed that the current interaction layer can handle a long,
+dynamic LinkedIn form when the agent re-reads the active surface after each
+transition:
+
+- The canonical phone was filled and verified. The LinkedIn account email
+  remained `yuh.lopes@gmail.com`, which is the candidate's login email and is
+  intentionally different from the professional contact email.
+- The dedicated one-page PDF was generated and submitted instead of the
+  previously selected unrelated resume. The upload helper returned a client
+  `TIMEOUT`, but its detailed result and the following review showed the new
+  filename selected and visibly loaded. No duplicate upload was attempted.
+- Repeated Yes or No groups, textareas, selects, a LinkedIn URL, salary, role,
+  English level, country, city, location, and a future-contact consent were
+  handled through label-based question matching. The required future-contact
+  consent was answered `No`, preserving the current-application scope.
+- The first forward helper did not recognize the localized `Revisar` label at
+  the final step and reported that no forward action was resolved. Active
+  surface discovery exposed the exact button, and one fingerprint-validated
+  native click transitioned to review. This was safe because the target was
+  the review action, not the final submit action.
+- Review exposed the dedicated resume, all required answers, and a visible
+  final submit action. No CAPTCHA or other security challenge was visible.
+- One native submit click produced the visible LinkedIn state `Candidatura
+  enviada` and the page status `Candidatura enviada agora`. The confirmation
+  artifact is `artifact_1b977ddaa259479e`, with relative path
+  `provectus-submission-confirmation.png`.
+
+Required changes:
+
+- Return a durable upload state and polling handle when the browser has
+  accepted a file but the MCP request times out. The public result should
+  distinguish `accepted`, `rendered`, and `pending_client_observation` so a
+  caller does not retry an upload that is already selected.
+- Treat localized labels such as `Revisar`, `Review`, and equivalent forward
+  actions as semantic transitions when the active surface is a review step.
+  The action resolver should use role, bounds, fingerprint, and section state,
+  not only a fixed list of English or Portuguese labels.
+- Re-scan required fields after every validation response. LinkedIn revealed
+  additional required questions in successive passes even though the step
+  title and step index did not change. The workflow must not assume that one
+  snapshot contains the complete step.
+- Keep repeated radio groups keyed by their full question label and local
+  group, returning the selected label and verification state for each group.
+- Add a fixture for a delayed Easy Apply spinner, a localized review button,
+  an upload that completes after the client timeout, and dynamically revealed
+  required questions. The fixture should assert that final submit is not
+  clicked until review is actually visible.
+- Add an end-to-end assertion that a visible confirmation outranks passive
+  security markers and is persisted together with the pre-submit and
+  confirmation artifacts.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
