@@ -1,6 +1,9 @@
-# Security
+# Security for Job Search and Applications
 
-Pydoll MCP Server is designed to be secure by default for local browser automation.
+Pydoll MCP Server is designed to be secure by default for local job search and
+application workflows. Browser automation remains an implementation detail;
+the public `jobs` profile exposes only the controls needed for an explicit,
+observable application flow.
 
 ## Threat Model
 
@@ -11,6 +14,22 @@ The server runs **locally** on `127.0.0.1` by default. It is not intended for ne
 3. Malicious JavaScript execution through `js_evaluate`
 4. Filesystem access through upload/download/screenshot paths
 5. Browser profile corruption through concurrent access
+6. Accidental submission caused by stale form state or an ambiguous portal control
+
+## Application boundaries
+
+- The `jobs` profile does not expose JavaScript, raw HTTP, network replay,
+  cookies, storage, deep traversal, or low-level mouse controls.
+- `full` keeps those capabilities only for explicit compatibility and
+  diagnostics workflows.
+- CAPTCHA, 2FA, OTP, login, payment, biometric checks, identity verification,
+  legal attestations, sensitive consent, and missing candidate facts always
+  produce a candidate handoff.
+- Final submission requires a valid single-use review token, explicit
+  authorization, a matching client and tab, a current form fingerprint, and a
+  visible primary action.
+- A URL change, modal disappearance, or browser chrome text alone never proves
+  that an application was submitted.
 
 ## Bearer Token
 

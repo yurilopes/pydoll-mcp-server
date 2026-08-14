@@ -314,8 +314,17 @@ function findPendingRequired(fields) {{
         }}
     }}
     for (const el of surface.querySelectorAll('input[required], textarea[required], select[required], [aria-required="true"]')) {{
-        if (el.type === 'hidden' || el.type === 'file') continue;
+        if (el.type === 'hidden') continue;
         if (!visible(el)) continue;
+        if (el.type === 'file') {{
+            if (!(el.files && el.files.length)) pending.push({{
+                label: norm(el.closest('label')?.innerText || el.getAttribute('aria-label') || ''),
+                selector_hint: selectorHint(el),
+                xpath_hint: xpathHint(el),
+                type: 'file'
+            }});
+            continue;
+        }}
         if (el.type === 'radio' || el.type === 'checkbox' || el.getAttribute('role') === 'radio' || el.getAttribute('role') === 'checkbox') continue;
         const val = (el.value || '').trim();
         if (!val) {{

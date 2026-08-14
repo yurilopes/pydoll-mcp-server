@@ -32,7 +32,9 @@ def security_control_error(control: JsonObject, subject: str = 'target') -> Json
     return response
 
 
-def site_diagnostics_script() -> str:
+def site_diagnostics_script(compact: bool = False) -> str:
+    if compact:
+        return compact_site_diagnostics_script()
     return r"""
 (() => {
     function normalize(value) {
@@ -151,7 +153,89 @@ def site_diagnostics_script() -> str:
 """
 
 
-async def inspect_site_diagnostics(tab: ScriptExecutor | None, active_surface: str = '') -> JsonObject:
+def compact_site_diagnostics_script() -> str:
+    """Return a focused signal probe for high-frequency workflow operations."""
+
+    return r"""
+(() => {
+    function normalize(value) {
+        return String(value || '').normalize('NFC').trim().replace(/\s+/g, ' ');
+    }
+    function visible(element) {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none'
+            && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0;
+    }
+    function selectorFor(element) {
+        if (element.id) return '#' + (CSS.escape ? CSS.escape(element.id) : element.id);
+        return element.tagName.toLowerCase();
+    }
+    const patterns = [
+        {kind: 'captcha', confidence: 0.98,
+            pattern: /captcha|recaptcha|hcaptcha|turnstile|human verification|i am not a robot|are you human/i},
+        {kind: 'two_factor', confidence: 0.95, pattern: /two[- ]factor|2fa|otp|verification code|authentication code/i},
+        {kind: 'payment', confidence: 0.94, pattern: /payment|credit card|card number|billing|cvv|cvc|paypal/i},
+        {kind: 'biometric', confidence: 0.96, pattern: /biometric|face id|facial recognition|fingerprint|selfie/i},
+        {kind: 'identity_verification', confidence: 0.92,
+            pattern: /identity verification|verify identity|government id|passport|license/i},
+    ];
+    const controls = [];
+    const seen = new Set();
+    function addSignal(kind, confidence, source, element) {
+        const key = kind + '|' + source;
+        if (seen.has(key)) return;
+        seen.add(key);
+        controls.push({kind, confidence, automation_allowed: false, requires_user_action: true,
+            source: normalize(source).slice(0, 240), selector_hint: element ? selectorFor(element) : ''});
+    }
+    const nodes = document.querySelectorAll(
+        'input,textarea,select,button,[role],iframe,frame,form,fieldset,'
+        + '[aria-label],[title],[placeholder],[class*="captcha" i],[id*="captcha" i]'
+    );
+    for (const element of nodes) {
+        if (!visible(element)) continue;
+        const source = normalize([
+            element.innerText || '', element.getAttribute('aria-label'), element.getAttribute('title'),
+            element.getAttribute('name'), element.getAttribute('placeholder'), element.getAttribute('role'),
+            element.getAttribute('id'), element.getAttribute('class'), element.getAttribute('src')
+        ].filter(Boolean).join(' '));
+        for (const item of patterns) {
+            if (item.pattern.test(source)) addSignal(item.kind, item.confidence, source, element);
+        }
+    }
+    const frameworkHints = [];
+    if (document.querySelector('[data-reactroot], [data-reactid]')) frameworkHints.push('react');
+    if (document.querySelector('[ng-version], [ng-app], [ng-model], [formcontrolname]')) {
+        frameworkHints.push('angular_like');
+    }
+    if (document.querySelector('[data-v-], [v-cloak]')) frameworkHints.push('vue_like');
+    const allNodes = document.querySelectorAll('*');
+    if ([...allNodes].some((element) => element.tagName.includes('-'))) frameworkHints.push('custom_elements');
+    if ([...allNodes].some((element) => Boolean(element.shadowRoot))) frameworkHints.push('open_shadow_root');
+    const invalid = document.querySelectorAll('[aria-invalid="true"], [role="alert"], [class*="error" i]');
+    const required = document.querySelectorAll(
+        'input[required], textarea[required], select[required], [aria-required="true"]'
+    );
+    const pending = [...required].filter((element) => visible(element) && !element.value
+        && element.type !== 'hidden' && element.type !== 'file').length;
+    const primary = [...document.querySelectorAll('button,input[type="submit"],[role="button"]')]
+        .find((element) => visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true');
+    return {
+        framework_hints: [...new Set(frameworkHints)], security_controls: controls,
+        validation_state: {invalid_count: [...invalid].filter(visible).length,
+            pending_required_count: pending, valid: invalid.length === 0 && pending === 0},
+        primary_action_enabled: Boolean(primary)
+    };
+})()
+"""
+
+
+async def inspect_site_diagnostics(
+    tab: ScriptExecutor | None,
+    active_surface: str = '',
+    compact: bool = False,
+) -> JsonObject:
     if tab is None:
         return {
             'framework_hints': [],
@@ -161,7 +245,7 @@ async def inspect_site_diagnostics(tab: ScriptExecutor | None, active_surface: s
             'diagnostics_unavailable': True,
         }
     try:
-        response = await tab.execute_script(site_diagnostics_script(), return_by_value=True)
+        response = await tab.execute_script(site_diagnostics_script(compact), return_by_value=True)
         result = extract_script_object(response)
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
         return {

@@ -40,14 +40,17 @@ from pydoll_mcp_server.version import get_version
 
 
 def _configured_tool_profile() -> ToolProfile:
-    raw_profile = os.environ.get('PYDOLL_MCP_TOOL_PROFILE', ToolProfile.FULL.value)
+    raw_profile = os.environ.get('PYDOLL_MCP_TOOL_PROFILE', ToolProfile.JOBS.value)
     return parse_tool_profile(raw_profile)
 
 
 TOOL_PROFILE = _configured_tool_profile()
 mcp = FastMCP(
     'pydoll-mcp-server',
-    instructions='Browser automation MCP server using Pydoll.',
+    instructions=(
+        'MCP server for job search and job application workflows using Pydoll. '
+        'Use the jobs profile by default; use full only for explicit compatibility workflows.'
+    ),
     streamable_http_path='/',
     sse_path='/',
 )

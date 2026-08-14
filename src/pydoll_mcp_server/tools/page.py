@@ -14,6 +14,7 @@ from pydoll_mcp_server.config import get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
 from pydoll_mcp_server.json_types import JsonObject
 from pydoll_mcp_server.logging import OperationLog, get_logger
+from pydoll_mcp_server.tools.form_runtime import mark_document_changed
 
 URL_PATTERN = re.compile(r'^https?://')
 
@@ -64,7 +65,7 @@ async def page_goto(
                 pydoll_tab.go_to(normalized_url, timeout=max(0, int(timeout))),
                 timeout=timeout + 5,
             )
-            tab_info.mark_navigated()
+            mark_document_changed(client_id, tab_id, tab_info)
             final_url = await get_tab_url(pydoll_tab) or normalized_url
             tab_info.url = final_url
             tab_info.title = await get_tab_title(pydoll_tab)
@@ -134,7 +135,7 @@ async def page_reload(
                 pydoll_tab.refresh(ignore_cache=ignore_cache),
                 timeout=timeout + 5,
             )
-            tab_info.mark_navigated()
+            mark_document_changed(client_id, tab_id, tab_info)
             tab_info.url = await get_tab_url(pydoll_tab)
             tab_info.title = await get_tab_title(pydoll_tab)
         duration_ms = (time.time() - start) * 1000
@@ -182,7 +183,7 @@ async def page_back(
                 timeout=timeout,
             )
             url = extract_script_string(result)
-            tab_info.mark_navigated()
+            mark_document_changed(client_id, tab_id, tab_info)
         return {
             'success': True,
             'url': url,
@@ -224,7 +225,7 @@ async def page_forward(
                 timeout=timeout,
             )
             url = extract_script_string(result)
-            tab_info.mark_navigated()
+            mark_document_changed(client_id, tab_id, tab_info)
         return {
             'success': True,
             'url': url,

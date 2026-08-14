@@ -149,14 +149,20 @@ def read_filled_state_reference_script(reference: str) -> str:
 def combobox_options_script(max_options: int) -> str:
     return f"""
     const roots = [];
+    const seenRoots = new Set();
+    function addRoot(root) {{
+        if (root && !seenRoots.has(root)) {{ seenRoots.add(root); roots.push(root); }}
+    }}
+    const ownerRoot = this.getRootNode ? this.getRootNode() : document;
     for (const attr of ['aria-controls', 'aria-owns']) {{
         const ids = (this.getAttribute(attr) || '').split(/\\s+/).filter(Boolean);
         for (const id of ids) {{
-            const root = document.getElementById(id);
-            if (root) roots.push(root);
+            const root = ownerRoot.getElementById?.(id) || document.getElementById(id);
+            addRoot(root);
         }}
     }}
-    roots.push(document);
+    addRoot(ownerRoot);
+    addRoot(document);
     const seen = new Set();
     const out = [];
     function visible(el) {{
@@ -164,8 +170,15 @@ def combobox_options_script(max_options: int) -> str:
         const style = getComputedStyle(el);
         return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     }}
+    function collectOptions(root) {{
+        const options = [...root.querySelectorAll('[role="option"]')];
+        for (const host of root.querySelectorAll('*')) {{
+            if (host.shadowRoot) options.push(...collectOptions(host.shadowRoot));
+        }}
+        return options;
+    }}
     for (const root of roots) {{
-        for (const option of root.querySelectorAll('[role="option"]')) {{
+        for (const option of collectOptions(root)) {{
             if (seen.has(option) || !visible(option)) continue;
             seen.add(option);
             const rect = option.getBoundingClientRect();

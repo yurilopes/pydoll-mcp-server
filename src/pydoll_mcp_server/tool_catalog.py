@@ -338,7 +338,7 @@ TOOLS: tuple[Tool, ...] = (
 )
 
 
-def get_tool_specs(profile: ToolProfile | str = ToolProfile.FULL) -> tuple[ToolSpec, ...]:
+def get_tool_specs(profile: ToolProfile | str = ToolProfile.JOBS) -> tuple[ToolSpec, ...]:
     """Resolve the ordered public tools for an exposure profile."""
 
     selected_profile = profile if isinstance(profile, ToolProfile) else parse_tool_profile(profile)
@@ -376,13 +376,13 @@ def get_tool_specs(profile: ToolProfile | str = ToolProfile.FULL) -> tuple[ToolS
     return tuple(specs)
 
 
-def get_exposed_tool_names(profile: ToolProfile | str = ToolProfile.FULL) -> tuple[str, ...]:
+def get_exposed_tool_names(profile: ToolProfile | str = ToolProfile.JOBS) -> tuple[str, ...]:
     """Return ordered public names for an exposure profile."""
 
     return tuple(spec.public_name for spec in get_tool_specs(profile))
 
 
-def register_tools(mcp: FastMCP, profile: ToolProfile | str = ToolProfile.FULL) -> tuple[ToolSpec, ...]:
+def register_tools(mcp: FastMCP, profile: ToolProfile | str = ToolProfile.JOBS) -> tuple[ToolSpec, ...]:
     """Register all tools selected by an exposure profile."""
 
     selected_profile = profile if isinstance(profile, ToolProfile) else parse_tool_profile(profile)

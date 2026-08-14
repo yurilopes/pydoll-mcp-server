@@ -59,7 +59,7 @@ async def read_filled_state(element: WebElement) -> JsonObject:
             visible: Boolean(this.getClientRects().length),
             value_present: String(value).trim().length > 0,
             framework_value: String(value).trim().length > 0 ? 'present' : 'absent',
-            blurred: false,
+            blurred: document.activeElement !== this,
             ready_for_submission: false
         };
         """,

@@ -23,6 +23,7 @@ from pydoll_mcp_server.tools.choice_interactions import set_choice_state
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.elements import element_find
 from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 
 
 async def element_get_state(client_id: str, tab_id: str, element_id: str) -> JsonObject:
@@ -51,7 +52,12 @@ async def element_select_option(
     labels: list[str] | None = None,
     indexes: list[int] | None = None,
 ) -> JsonObject:
+    try:
+        tab_info = get_registry().get_tab(client_id, tab_id)
+    except StructuredError as exc:
+        return exc.to_dict()
     invalidate_review_tokens(client_id, tab_id)
+    advance_mutation_epoch(client_id, tab_id, 'select_option', tab_info)
     payload = json.dumps({'values': values or [], 'labels': labels or [], 'indexes': indexes or []})
     script = f"""const q={payload};if(this.tagName!=='SELECT')return {{error:'not_select'}};
     const opts=[...this.options];let n=0;for(const o of opts){{const yes=q.values.includes(o.value)||
@@ -166,6 +172,10 @@ async def keyboard_press(
 
 async def _set_checked(client_id: str, tab_id: str, element_id: str, checked: bool) -> JsonObject:
     try:
+        try:
+            tab_info = get_registry().get_tab(client_id, tab_id)
+        except StructuredError:
+            tab_info = None
         async with tab_operation_lock(tab_id):
             element = await _get(client_id, tab_id, element_id)
             if isinstance(element, dict):
@@ -181,6 +191,8 @@ async def _set_checked(client_id: str, tab_id: str, element_id: str, checked: bo
                 response['failure_origin'] = 'security'
                 return response
             invalidate_review_tokens(client_id, tab_id)
+            if tab_info is not None:
+                advance_mutation_epoch(client_id, tab_id, 'choice', tab_info)
             result = await set_choice_state(element, checked)
         error = get_string(result, 'error', '')
         if error:
@@ -214,6 +226,8 @@ async def _set_checked(client_id: str, tab_id: str, element_id: str, checked: bo
             'verification': 'verified' if get_bool(result, 'verified') else 'inconclusive',
             'strategy_used': get_string(result, 'strategy_used'),
         }
+    except StructuredError as exc:
+        return exc.to_dict()
     except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
         return StructuredError(ErrorCode.EXECUTION_ERROR, f'checked failed: {exc}', retryable=True).to_dict()
 

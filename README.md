@@ -1,8 +1,17 @@
-# Pydoll MCP Server
+# Pydoll MCP Server for Job Search and Applications
 
-MCP server for browser automation built on the [Pydoll](https://github.com/autoscrape-labs/pydoll) library.
+MCP server for job search and job application workflows built on the
+[Pydoll](https://github.com/autoscrape-labs/pydoll) library.
 
-This project offers a local alternative to the Playwright MCP Server, with its own agent-oriented API built on Pydoll. It does not copy the Playwright API. It provides a predictable layer for agents: observe pages, choose elements, act by `element_id`, navigate, capture screenshots, execute JavaScript with limits, handle iframes and shadow DOM, inspect complete HTTP requests, and call authenticated HTTP endpoints directly from the browser session.
+The primary workflow is: discover a job, inspect its opportunity page, prepare
+the application, review the result, submit only with explicit authorization,
+and preserve evidence. LinkedIn has specialized search and Easy Apply tools.
+External ATS portals use the same semantic navigation and form workflow without
+requiring the agent to know DOM, frame, or open shadow-DOM paths.
+
+The project still contains a complete browser automation catalog for explicit
+compatibility use through the `full` profile. Generic browsing is not the
+default product objective.
 
 ## Status
 
@@ -76,30 +85,38 @@ python -m pydoll_mcp_server.cli --transport stdio
 
 ### Curated tool profiles
 
-The server keeps the complete catalog available by default for compatibility:
+The default profile is focused on job search and applications:
 
-- `full` exposes all 151 public tools, including advanced network, JavaScript,
-  deep traversal, diagnostics, and low-level fallback operations.
-- `agent` exposes 73 canonical tools for general browser automation.
-- `linkedin` exposes the 73 `agent` tools plus 16 LinkedIn search and Easy Apply
-  helpers, for 89 tools total.
+- `jobs` exposes 90 focused tools for lifecycle, search, semantic navigation,
+  forms, uploads, waits, evidence, security handoffs, and LinkedIn workflows.
+- `full` exposes all 151 public tools for explicit compatibility with advanced
+  network, JavaScript, deep traversal, diagnostics, and low-level fallbacks.
+- `agent` remains a legacy 73-tool general browser profile.
+- `linkedin` remains a legacy 89-tool profile combining `agent` and LinkedIn
+  search and Easy Apply helpers.
 
 Select a profile explicitly with the CLI:
 
 ```powershell
-python -m pydoll_mcp_server.cli --transport stdio --tool-profile agent
+python -m pydoll_mcp_server.cli --transport stdio --tool-profile jobs
+python -m pydoll_mcp_server.cli --transport stdio --tool-profile full
 python -m pydoll_mcp_server.cli --transport stdio --tool-profile linkedin
 ```
 
 The same setting can be provided through `PYDOLL_MCP_TOOL_PROFILE`; an explicit
-`--tool-profile` argument takes precedence. Use `agent` for general-purpose
-automation, `linkedin` for LinkedIn job search and Easy Apply, and `full` only
-when compatibility with advanced tools or low-level diagnostics is required.
-`server_status` reports the active `tool_profile` and `exposed_tool_count`.
+`--tool-profile` argument takes precedence. New clients should use `jobs` for
+LinkedIn search, Easy Apply, and external ATS forms. Use `full` only when
+advanced compatibility tools are explicitly required. `agent` and `linkedin`
+remain available for existing clients but are legacy profiles.
+`server_status` reports the active profile, its lifecycle, the recommended
+profile, and the exposed tool count.
 Pass `include_tool_names=true` when an agent needs the exact names exposed by
-the running server. The result also filters `capabilities` dynamically, so an
-agent profile does not advertise JavaScript, mouse, network, or deep traversal
-operations that are intentionally outside that profile.
+the running server. Capabilities are filtered dynamically to the selected
+profile. The `jobs` profile does not advertise JavaScript, raw network,
+storage, cookies, deep traversal, or low-level mouse operations.
+
+The product boundary and supported handoffs are defined in
+[`docs/job-automation-scope.md`](docs/job-automation-scope.md).
 
 The curated profiles establish preferred contracts without removing anything
 from `full`: `page_snapshot` is the initial observation, `page_get_active_surface`
@@ -110,7 +127,7 @@ should use the `linkedin_easy_apply_*` tools instead of rebuilding the flow
 from generic form actions. Final LinkedIn submission still requires
 `confirm_submit=true`.
 
-Generic application hardening applies to the existing browser tools. Page
+Application hardening applies to the job workflow tools. Page
 observations cache client- and tab-scoped references with structural selectors,
 positional hints, fingerprints, bounds, labels, and frame or shadow paths.
 Mutating tools re-resolve those references while holding the tab lock, so a
@@ -148,7 +165,27 @@ Authorization: Bearer <PYDOLL_MCP_AUTH_TOKEN>
 
 `PYDOLL_MCP_ALLOW_NO_AUTH=true` should only be used in isolated development.
 
-## MCP Tools
+## Job workflow tools
+
+The default `jobs` profile is designed for the complete application lifecycle:
+
+1. Search LinkedIn with `linkedin_jobs_search` or navigate to an explicit ATS job page with `page_goto`.
+2. Inspect the opportunity and active form with `linkedin_job_snapshot`, `page_snapshot`, and `page_get_active_surface`.
+3. Use `form_preflight` and `form_prepare` with only confirmed candidate facts.
+4. Use `form_review` to inspect blockers, security handoffs, selected choices, uploads, and evidence.
+5. Use `form_submit_after_review` only with a valid review token and explicit authorization.
+6. Classify the result with `submission_wait_for_confirmation` and preserve the returned evidence.
+
+Open shadow DOM resolution is automatic in this profile. External ATS pages use
+the `external_ats_multistep` preset. CAPTCHA, 2FA, login, payment, identity,
+attestation, sensitive consent, and missing candidate data always produce a
+handoff instead of an automated bypass.
+
+## Full compatibility catalog
+
+The following inventory describes the complete `full` profile. These tools remain
+available for explicit compatibility and diagnostics, but are not part of the
+default job-focused surface.
 
 Health and diagnostics:
 
@@ -477,7 +514,11 @@ modal disappearance, or portal limit by itself is never confirmation.
 
 For React-like forms and custom controls, prefer `element_fill`, `element_fill_and_verify`, `combobox_type_and_select`, `element_click_by_text`, and condition waits before using custom JavaScript. `js_evaluate` and `js_evaluate_readonly` return structured JSON values directly in `value`; clients should not parse `value` as a JSON string.
 
-`page_get_tree_deep` is the recommended option when the page uses iframes or shadow DOM. It is more expensive, has its own timeout, and returns:
+The semantic form workflow automatically resolves controls in open shadow DOM
+and uses deep traversal only when the compact surface cannot prove coverage.
+Agents normally do not need to call `page_get_tree_deep` or pass shadow paths.
+Use `page_get_tree_deep` explicitly for diagnostics or cross-frame inspection.
+It is more expensive, has its own timeout, and returns:
 
 - `frame_path`
 - `shadow_path`

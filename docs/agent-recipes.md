@@ -1,8 +1,13 @@
-# Agent Recipes
+# Job Search and Application Recipes
 
-These recipes show preferred tool sequences for modern frontend pages. They are
-designed to reduce custom JavaScript and keep actions inside the MCP safety
+These recipes show preferred tool sequences for job discovery and modern
+application forms. They are designed to keep the agent on the semantic `jobs`
+profile, reduce unnecessary round trips, and keep actions inside the MCP safety
 model.
+
+For LinkedIn, use the specialized search and Easy Apply tools. For Greenhouse,
+Workable, Lever, and similar ATS pages, use `page_goto`, the active semantic
+surface, and the `external_ats_multistep` form preset.
 
 ## Open and inspect a page
 
@@ -37,9 +42,10 @@ server reconciles tabs opened by pages or manually in Chrome, so the count is no
 tabs created through `tab_new`. A tab close is confirmed only when Chrome removes the target;
 `DIALOG_PRESENT` means that `dialog_handle` is required before retrying.
 
-Use `page_get_tree` when you need DOM shape. It hides head metadata and
-invisible nodes by default. Use `include_head=true` or `include_invisible=true`
-only for diagnostics.
+Use `page_snapshot` or `page_get_active_surface` for the job-focused workflow.
+They return actionable controls and form state without exposing DOM internals.
+Use `page_get_tree` only after explicitly selecting the `full` compatibility
+profile and only when a low-level DOM diagnostic is necessary.
 
 ## Click a visible option by text
 
@@ -162,12 +168,20 @@ stable artifact copy is explicitly useful for later operations.
 Use the v2 workflow for a job application. It separates inspection, planned
 mutations, review, and the authorized final click:
 
-1. Call `form_preflight` with the candidate facts and planned uploads. It
+1. Call `form_preflight` with the candidate facts and planned uploads. Select
+   `preset="linkedin_easy_apply"` for LinkedIn Easy Apply or
+   `preset="external_ats_multistep"` for an external multi-step ATS. The MCP
+   owns shadow-root resolution, so the agent does not need to expose
+   `shadow_path` or perform deep traversal manually. The response includes
+   `snapshot_id`, `mutation_epoch`, and a redacted `performance` summary.
+   It
    reports required fields, missing candidate data, upload states, visible
    errors, security controls, attestations, and partial discovery errors.
 2. Call `form_prepare` with only the approved fields, choices, comboboxes,
-   uploads, and explicitly named intermediate steps. It never clicks the final
-   submit action.
+   uploads, and explicitly named intermediate steps. The default `safe_batch`
+   path resolves ordinary fields and choices together, rechecks only affected
+   controls, and returns `performance.round_trips_saved`. It never clicks the
+   final submit action.
 3. Call `form_review` and inspect `blockers`, `handoff`, `ready_for_submission`,
    selected labels, upload states, and the pre-submission evidence artifact.
 4. If the review is ready and the session has explicit authorization, call
@@ -325,16 +339,17 @@ Interaction responses have three independent sections:
 `NO_EFFECT` means the browser event was sent but the requested page transition
 was not observed. It is not evidence that the click did not occur.
 
-## Confirm the active profile
+## Confirm the active job profile
 
 The catalog profile is selected at process startup. Use `server_status` with
-`include_tool_names=true` and compare `tool_profile`, `exposed_tool_count`, and
-`tool_names` with the client's expected surface. `full` intentionally contains
-advanced compatibility tools, while `agent` and `linkedin` intentionally omit
-them. `keyboard_press` is the canonical keyboard tool; `page_press_key` is not
-part of the public catalog.
+`include_tool_names=true` and compare `product`, `recommended_tool_profile`,
+`profile_lifecycle`, `tool_profile`, `exposed_tool_count`, and `tool_names` with
+the client's expected surface. New clients should see `jobs` and the
+`job_search`, `application_workflow`, `uploads`, `evidence`, and
+`security_handoffs` capability groups. `full` intentionally contains advanced
+compatibility tools, while `agent` and `linkedin` are legacy profiles.
 
-## Evaluate JavaScript only when needed
+## Evaluate JavaScript only when needed (full compatibility)
 
 `js_evaluate_readonly` returns real JSON values:
 
@@ -349,7 +364,7 @@ part of the public catalog.
 Do not parse `value` as a JSON string. Use manual JavaScript only for diagnostics
 that the first-class tools cannot provide.
 
-## Inspect a submitted HTTP request
+## Inspect a submitted HTTP request (full compatibility)
 
 1. Call `network_enable`, then `network_clear`.
 2. Start `network_wait_for_request` with the expected URL and method before triggering
@@ -364,7 +379,7 @@ contain credentials or personal data, so its response must not be logged automat
 For multipart requests, Chromium may omit file bytes from `Network.getRequestPostData`;
 the tool preserves available data and reports this limitation instead of reconstructing it.
 
-## Call an authenticated HTTP endpoint directly
+## Call an authenticated HTTP endpoint directly (full compatibility)
 
 Use `http_request` when the endpoint should share the browser's cookies but does not need
 to run through page JavaScript or CORS. Relative URLs and same-host absolute URLs are

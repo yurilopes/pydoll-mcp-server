@@ -60,7 +60,7 @@ async def test_real_stdio_agent_browser_workflow(tmp_path: Path) -> None:
     )
     parameters = StdioServerParameters(
         command=sys.executable,
-        args=['-m', 'pydoll_mcp_server.cli', '--transport', 'stdio'],
+        args=['-m', 'pydoll_mcp_server.cli', '--transport', 'stdio', '--tool-profile', 'full'],
         env=environment,
         cwd=root,
         encoding='utf-8',

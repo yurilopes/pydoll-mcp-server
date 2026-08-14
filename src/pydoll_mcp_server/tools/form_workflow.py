@@ -14,17 +14,18 @@ from pydoll_mcp_server.json_types import (
     get_array,
     get_bool,
     get_int,
+    get_object,
     get_string,
     normalize_json_value,
 )
 from pydoll_mcp_server.tools.form_contracts import issue_review_token, token_summary, v2_envelope
 from pydoll_mcp_server.tools.form_preflight_workflow import form_preflight
+from pydoll_mcp_server.tools.form_prepare_support import hard_prepare_blockers, is_final_submit_text
+from pydoll_mcp_server.tools.form_runtime import FormExecutionContext
 from pydoll_mcp_server.tools.form_submit_workflow import form_submit_after_review
 from pydoll_mcp_server.tools.form_workflow_helpers import (
     active_domain_restriction,
     domain_restriction_to_json,
-    hard_prepare_blockers,
-    is_final_submit_text,
     normalize_employer_domain,
     prepare_actions,
     record_domain_restriction,
@@ -56,6 +57,8 @@ async def form_review(
     do_not_touch: list[str] | None = None,
     employer_domain: str = '',
     capture_evidence: bool = True,
+    preset: str = 'generic_form',
+    force_refresh: bool = False,
 ) -> JsonObject:
     preflight = await form_preflight(
         client_id=client_id,
@@ -64,9 +67,27 @@ async def form_review(
         do_not_touch=do_not_touch,
         employer_domain=employer_domain,
         include_values=False,
+        preset=preset,
+        force_refresh=force_refresh,
     )
     if not preflight.get('success'):
         return preflight
+    return await _review_from_preflight(
+        client_id,
+        tab_id,
+        preflight,
+        employer_domain=employer_domain,
+        capture_evidence=capture_evidence,
+    )
+
+
+async def _review_from_preflight(
+    client_id: str,
+    tab_id: str,
+    preflight: JsonObject,
+    employer_domain: str,
+    capture_evidence: bool,
+) -> JsonObject:
     screenshot: JsonObject = {}
     warnings = get_array(preflight, 'warnings', [])
     if capture_evidence:
@@ -97,8 +118,12 @@ async def form_review(
             'partial': get_bool(preflight, 'partial', False),
             'form_fingerprint': get_string(preflight, 'form_fingerprint', ''),
             'document_generation': get_int(preflight, 'document_generation', 0),
+            'mutation_epoch': get_int(preflight, 'mutation_epoch', 0),
+            'snapshot_id': get_string(preflight, 'snapshot_id', ''),
+            'preset': get_string(preflight, 'preset', 'generic_form'),
             'employer_domain': get_string(preflight, 'employer_domain', ''),
             'ready_for_submission': get_bool(preflight, 'ready_for_submission', False),
+            'performance': preflight.get('performance', {}),
             'screenshot': screenshot,
         }
     )
@@ -109,6 +134,8 @@ async def form_review(
             get_int(review, 'document_generation', 0),
             get_string(review, 'form_fingerprint', ''),
             review,
+            mutation_epoch=get_int(review, 'mutation_epoch', 0),
+            snapshot_id=get_string(review, 'snapshot_id', ''),
         )
         review.update(token_summary(record))
     return review
@@ -128,6 +155,7 @@ async def form_prepare(
     employer_domain: str = '',
     capture_evidence: bool = True,
     timeout: float | None = None,
+    preset: str = 'generic_form',
 ) -> JsonObject:
     del timeout
     field_plans = _json_object_list(fields or [])
@@ -145,11 +173,19 @@ async def form_prepare(
         planned_uploads=uploads,
         do_not_touch=do_not_touch,
         employer_domain=employer_domain,
+        preset=preset,
     )
     if not initial.get('success'):
         return initial
+    execution = FormExecutionContext(client_id=client_id, tab_id=tab_id, scope=scope, preset=preset)
+    execution.document_generation = get_int(initial, 'document_generation', 0)
+    execution.mutation_epoch = get_int(initial, 'mutation_epoch', 0)
+    execution.set_snapshot(initial, get_string(initial, 'form_fingerprint', ''))
+    _absorb_performance(execution, get_object(initial, 'performance', {}))
+    execution.trace_event('discovery', 'form_preflight', get_string(initial, 'status', 'inconclusive'))
     hard_blockers = hard_prepare_blockers(initial, [*field_plans, *combo_plans, *upload_plans])
     if hard_blockers:
+        execution.trace_event('policy', 'form_prepare', 'blocked')
         result = _merge_envelope(initial, 'form_prepare', 'blocked', True)
         result.update({'blockers': hard_blockers, 'handoff': True})
         return result
@@ -168,8 +204,11 @@ async def form_prepare(
                 upload_plans,
                 observed_fields,
                 do_not_touch or [],
+                preset,
             )
         )
+        _count_action_round_trips(execution, actions)
+        execution.trace_event('mutation', 'form_actions', 'completed')
     for step in step_plans:
         step_fields = _json_object_list(step.get('fields', []))
         step_choices = _json_object_list(step.get('choices', []))
@@ -185,9 +224,11 @@ async def form_prepare(
             step_uploads,
             observed_fields,
             do_not_touch or [],
+            preset,
         )
         step_result['actions'] = step_actions
         actions.extend(step_actions)
+        _count_action_round_trips(execution, step_actions)
         if advance_steps:
             action_text = _json_string_list(step.get('advance_action_text_any', []))
             if action_text and any(is_final_submit_text(item) for item in action_text):
@@ -207,20 +248,51 @@ async def form_prepare(
                 )
                 step_result['transition'] = transition
                 actions.append({'kind': 'step_transition', 'step_key': step_result['step_key'], 'result': transition})
+                execution.performance.browser_call()
         step_results.append(step_result)
-        refreshed = await form_preflight(client_id, tab_id, scope=scope)
-        observed_fields = get_array(refreshed, 'fields', observed_fields)
+        transition = get_object(step_result, 'transition', {})
+        if get_bool(transition, 'success', False):
+            refreshed = await form_preflight(client_id, tab_id, scope=scope, preset=preset)
+            _absorb_performance(execution, get_object(refreshed, 'performance', {}))
+            observed_fields = get_array(refreshed, 'fields', observed_fields)
+            execution.trace_event('discovery', 'step_transition', get_string(refreshed, 'status', 'inconclusive'))
 
-    review = await form_review(
+    final_preflight = await form_preflight(
         client_id,
         tab_id,
         scope=scope,
         do_not_touch=do_not_touch,
         employer_domain=employer_domain,
+        preset=preset,
+    )
+    if not final_preflight.get('success'):
+        return final_preflight
+    _absorb_performance(execution, get_object(final_preflight, 'performance', {}))
+    execution.trace_event('verification', 'form_preflight', get_string(final_preflight, 'status', 'inconclusive'))
+    execution.document_generation = get_int(final_preflight, 'document_generation', execution.document_generation)
+    execution.mutation_epoch = get_int(final_preflight, 'mutation_epoch', execution.mutation_epoch)
+    execution.set_snapshot(final_preflight, get_string(final_preflight, 'form_fingerprint', ''))
+    review = await _review_from_preflight(
+        client_id,
+        tab_id,
+        final_preflight,
+        employer_domain=employer_domain,
         capture_evidence=capture_evidence,
     )
     result = _merge_envelope(review, 'form_prepare', get_string(review, 'status', 'inconclusive'), True)
-    result.update({'actions': actions, 'steps': step_results, 'review': review})
+    result.update(
+        {
+            'actions': actions,
+            'steps': step_results,
+            'review': review,
+            'trace': list(execution.trace),
+            'performance': execution.performance_json(),
+            'snapshot_id': execution.snapshot_id,
+            'document_generation': execution.document_generation,
+            'mutation_epoch': execution.mutation_epoch,
+            'preset': preset,
+        }
+    )
     if get_string(review, 'review_token', ''):
         result['review_token'] = get_string(review, 'review_token', '')
     return result
@@ -248,6 +320,29 @@ def _json_string_list(value: object) -> list[str]:
     if not isinstance(normalized_value, list):
         return []
     return [item for item in normalized_value if isinstance(item, str)]
+
+
+def _absorb_performance(execution: FormExecutionContext, value: JsonObject) -> None:
+    execution.performance.absorb(value)
+
+
+def _count_action_round_trips(execution: FormExecutionContext, actions: JsonArray) -> None:
+    saved = 0
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        kind = get_string(action, 'kind', '')
+        result = get_object(action, 'result', {})
+        action_performance = get_object(result, 'performance', {})
+        if action_performance:
+            execution.performance.absorb(action_performance)
+        else:
+            execution.performance.browser_call()
+        if kind == 'fields_batch':
+            saved += max(0, len(get_array(result, 'filled', [])) - 1)
+        elif kind == 'choices_batch':
+            saved += max(0, len(get_array(result, 'choices', [])) - 1)
+    execution.performance.round_trips_saved += saved
 
 
 __all__ = [

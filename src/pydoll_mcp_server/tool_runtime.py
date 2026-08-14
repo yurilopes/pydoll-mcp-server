@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydoll_mcp_server.tool_metadata import ToolProfile
 
-_active_tool_profile = ToolProfile.FULL
+_active_tool_profile = ToolProfile.JOBS
 _active_tool_count = 0
 
 

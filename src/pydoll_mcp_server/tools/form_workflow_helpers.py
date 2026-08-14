@@ -9,16 +9,21 @@ from pydoll_mcp_server.json_types import (
     get_array,
     get_bool,
     get_int,
-    get_object,
     get_string,
 )
 from pydoll_mcp_server.tools import form_discovery as _form_discovery
 from pydoll_mcp_server.tools import form_workflow_support as _workflow_support
 from pydoll_mcp_server.tools.elements import element_click, element_fill
 from pydoll_mcp_server.tools.files import file_upload_state, upload_files
-from pydoll_mcp_server.tools.form_choice import form_select_choice
+from pydoll_mcp_server.tools.form_choice_batch import select_choices_batch
 from pydoll_mcp_server.tools.form_controls import combobox_type_and_select
 from pydoll_mcp_server.tools.form_fill import FormFillField, form_fill_fields
+from pydoll_mcp_server.tools.form_prepare_support import (
+    hard_prepare_blockers as _hard_prepare_blockers,
+)
+from pydoll_mcp_server.tools.form_prepare_support import (
+    is_final_submit_text as _is_final_submit_text,
+)
 
 DOMAIN_RESTRICTIONS = _workflow_support.DOMAIN_RESTRICTIONS
 _DOMAIN_RESTRICTIONS = DOMAIN_RESTRICTIONS
@@ -42,7 +47,6 @@ _SENSITIVE_CONFIRMATION_WORDS = (
     'authorize',
     'background check',
 )
-_SUBMIT_WORDS = ('submit', 'apply', 'send application', 'enviar candidatura', 'candidatar', 'enviar inscrição')
 
 
 async def collect_upload_states(client_id: str, tab_id: str, fields: JsonArray) -> JsonArray:
@@ -66,6 +70,7 @@ async def prepare_actions(
     uploads: list[JsonObject],
     observed_fields: JsonArray,
     do_not_touch: list[str],
+    preset: str = 'generic_form',
 ) -> JsonArray:
     actions: JsonArray = []
     fallback_fields: list[FormFillField] = []
@@ -79,7 +84,8 @@ async def prepare_actions(
             continue
         value = scalar_text(plan.get('value'))
         element_id = str(plan.get('element_id', '') or (field or {}).get('element_id', ''))
-        if element_id:
+        scoped = bool(field and (get_array(field, 'shadow_path', []) or get_array(field, 'frame_path', [])))
+        if element_id and scoped:
             action = await element_fill(
                 client_id,
                 tab_id,
@@ -89,10 +95,13 @@ async def prepare_actions(
                 state_verification=str(plan.get('state_verification', 'submission_ready')),
             )
             actions.append({'kind': 'field', 'label': label, 'result': action})
+        elif field is not None:
+            fallback_fields.append(as_fill_field(plan, label, value, field))
         else:
             fallback_fields.append(as_fill_field(plan, label, value))
     if fallback_fields:
         actions.append({'kind': 'fields_batch', 'result': await form_fill_fields(client_id, tab_id, fallback_fields)})
+    pending_choices: list[JsonObject] = []
     for plan in choices:
         label = str(plan.get('field_label', '') or field_label(match_field(plan, observed_fields), plan))
         option = str(plan.get('option_label', '') or plan.get('option_text', ''))
@@ -100,14 +109,28 @@ async def prepare_actions(
             actions.append({'kind': 'choice', 'field_label': label, 'status': 'requires_candidate_confirmation'})
             continue
         element_id = str(plan.get('element_id', ''))
-        if element_id or (label and option):
-            result = (
-                await element_click(client_id, tab_id, element_id, click_strategy='auto')
-                if element_id
-                else await form_select_choice(client_id, tab_id, label, option)
+        if element_id:
+            actions.append(
+                {
+                    'kind': 'choice',
+                    'result': await element_click(client_id, tab_id, element_id, click_strategy='auto'),
+                }
             )
-            actions.append({'kind': 'choice', 'result': result})
-    combo_fields = await _refresh_active_fields(client_id, tab_id, observed_fields) if combos else observed_fields
+            continue
+        if label and option:
+            pending_choices.append({**plan, 'field_label': label, 'option_label': option})
+            continue
+        actions.append({'kind': 'choice', 'status': 'stale', 'message': 'Choice requires field_label and option.'})
+    if pending_choices:
+        actions.append(
+            {
+                'kind': 'choices_batch',
+                'result': await select_choices_batch(client_id, tab_id, pending_choices),
+            }
+        )
+    combo_fields = (
+        await _refresh_active_fields(client_id, tab_id, observed_fields, preset) if combos else observed_fields
+    )
     for plan in combos:
         field = match_field(plan, combo_fields)
         re_resolved = False
@@ -276,10 +299,22 @@ def match_field(plan: JsonObject, fields: JsonArray, prefer_direct_control: bool
     return None
 
 
-async def _refresh_active_fields(client_id: str, tab_id: str, fallback: JsonArray) -> JsonArray:
+async def _refresh_active_fields(
+    client_id: str,
+    tab_id: str,
+    fallback: JsonArray,
+    preset: str = 'generic_form',
+) -> JsonArray:
     from pydoll_mcp_server.tools.active_surface import page_get_active_surface
 
-    surface = await page_get_active_surface(client_id, tab_id, scope='auto')
+    surface = await page_get_active_surface(
+        client_id,
+        tab_id,
+        scope='auto',
+        include_diagnostics=True,
+        preset=preset,
+        include_shadow=True,
+    )
     if not surface.get('success'):
         return fallback
     fields = get_array(surface, 'fields', [])
@@ -334,12 +369,53 @@ def scalar_text(value: JsonValue) -> str:
     raise ValueError('Form values must be scalar and confirmed by the caller.')
 
 
-def as_fill_field(plan: JsonObject, label: str, value: str) -> FormFillField:
+def as_fill_field(
+    plan: JsonObject,
+    label: str,
+    value: str,
+    observed_field: JsonObject | None = None,
+) -> FormFillField:
     result: FormFillField = {'value': value}
-    for key in ('question_contains', 'placeholder_contains', 'selector', 'role', 'name', 'type', 'state_verification'):
+    for key in (
+        'field_key',
+        'question_contains',
+        'placeholder_contains',
+        'selector',
+        'role',
+        'name',
+        'type',
+        'state_verification',
+    ):
         item = plan.get(key)
         if isinstance(item, str) and item:
-            result[key] = item
+            if key == 'field_key':
+                result['field_key'] = item
+            elif key == 'question_contains':
+                result['question_contains'] = item
+            elif key == 'placeholder_contains':
+                result['placeholder_contains'] = item
+            elif key == 'selector':
+                result['selector'] = item
+            elif key == 'role':
+                result['role'] = item
+            elif key == 'name':
+                result['name'] = item
+            elif key == 'type':
+                result['type'] = item
+            elif key == 'state_verification':
+                result['state_verification'] = item
+    if observed_field is not None:
+        for key in ('selector_hint', 'role', 'name', 'type'):
+            observed_value = get_string(observed_field, key, '')
+            if observed_value and key not in result:
+                if key == 'selector_hint':
+                    result['selector'] = observed_value
+                elif key == 'role':
+                    result['role'] = observed_value
+                elif key == 'name':
+                    result['name'] = observed_value
+                elif key == 'type':
+                    result['type'] = observed_value
     if label and 'label_contains' not in result:
         result['label_contains'] = label
     return result
@@ -350,90 +426,9 @@ def protected(label: str, protected_values: list[str]) -> bool:
     return any(item in folded for item in protected_values)
 
 
-def _plan_matches_field(plan: JsonObject, field: JsonObject) -> bool:
-    element_id = get_string(plan, 'element_id', '')
-    if element_id:
-        return element_id == get_string(field, 'element_id', '')
-    type_hint = get_string(plan, 'type', '').casefold()
-    if type_hint:
-        field_type = get_string(field, 'type', '').casefold()
-        field_tag = get_string(field, 'tag', '').casefold()
-        if type_hint not in {field_type, field_tag}:
-            return False
-    field_key = get_string(field, 'field_key', '').casefold()
-    label = field_label(field, {}).casefold()
-    for key in ('field_key', 'field_label', 'label_contains', 'question_contains', 'name'):
-        hint = get_string(plan, key, '').casefold()
-        if hint and (hint in label or hint in field_key):
-            return True
-    return False
-
-
-def _discovery_is_safe_for_plans(preflight: JsonObject, plans: list[JsonObject]) -> bool:
-    """Allow a disputed deep inventory only for unique active-surface targets."""
-
-    if not plans:
-        return False
-    fields = [item for item in get_array(preflight, 'fields', []) if isinstance(item, dict)]
-    if not fields:
-        return False
-    for plan in plans:
-        matches = [field for field in fields if _plan_matches_field(plan, field)]
-        if get_string(plan, 'element_id', ''):
-            if len(matches) != 1:
-                return False
-            continue
-        if (
-            any(
-                get_string(plan, key, '').strip()
-                for key in ('field_key', 'field_label', 'label_contains', 'question_contains', 'name')
-            )
-            and len(matches) != 1
-        ):
-            return False
-        if not any(
-            get_string(plan, key, '').strip()
-            for key in ('field_key', 'field_label', 'label_contains', 'question_contains', 'name')
-        ):
-            return False
-    return True
-
-
 def hard_prepare_blockers(preflight: JsonObject, plans: list[JsonObject] | None = None) -> JsonArray:
-    blockers: JsonArray = []
-    protected_values = [
-        item.casefold() for item in get_array(preflight, 'do_not_touch', []) if isinstance(item, str) and item.strip()
-    ]
-    attestations = get_array(preflight, 'attestation_handoffs', [])
-    for value in get_array(preflight, 'blockers', []):
-        if not isinstance(value, dict):
-            blockers.append(value)
-            continue
-        kind = get_string(value, 'kind', '')
-        if kind == 'discovery' and get_string(get_object(value, 'details', {}), 'status', '') == 'consistent':
-            continue
-        if kind == 'discovery' and _discovery_is_safe_for_plans(preflight, plans or []):
-            continue
-        if kind == 'primary_action' and get_string(value, 'reason', '') == 'not_found' and plans:
-            continue
-        if kind == 'security_control':
-            # A passive CAPTCHA or similar control blocks submission, but it does not
-            # make safe field preparation impossible. The review remains blocked and
-            # no submit token can be issued until the candidate completes the control.
-            continue
-        if kind not in {'required_field', 'missing_candidate_data'}:
-            if kind == 'attestation' and attestations:
-                protected_attestations = all(
-                    protected(get_string(item, 'label', ''), protected_values)
-                    for item in attestations
-                    if isinstance(item, dict)
-                )
-                if protected_attestations:
-                    continue
-            blockers.append(value)
-    return blockers
+    return _hard_prepare_blockers(preflight, plans)
 
 
 def is_final_submit_text(text: str) -> bool:
-    folded = text.casefold().strip()
-    return any(word in folded for word in _SUBMIT_WORDS)
+    return _is_final_submit_text(text)

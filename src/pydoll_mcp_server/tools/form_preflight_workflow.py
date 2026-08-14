@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import unicodedata
+import time
 
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
@@ -11,13 +11,49 @@ from pydoll_mcp_server.json_types import (
     JsonObject,
     get_array,
     get_bool,
+    get_int,
+    get_object,
     get_string,
-    normalize_json_value,
 )
 from pydoll_mcp_server.tools.active_surface import page_get_active_surface
 from pydoll_mcp_server.tools.form_choice_discovery import discover_choice_states
-from pydoll_mcp_server.tools.form_contracts import form_fingerprint, v2_envelope
+from pydoll_mcp_server.tools.form_contracts import form_fingerprint, new_operation_id, v2_envelope
 from pydoll_mcp_server.tools.form_deep_surface import enrich_surface_from_deep
+from pydoll_mcp_server.tools.form_preflight_support import (
+    choice_discovery_required as _choice_discovery_required,
+)
+from pydoll_mcp_server.tools.form_preflight_support import (
+    choice_text as _choice_text,
+)
+from pydoll_mcp_server.tools.form_preflight_support import (
+    deep_discovery_required as _deep_discovery_required,
+)
+from pydoll_mcp_server.tools.form_preflight_support import (
+    json_array as _json_array,
+)
+from pydoll_mcp_server.tools.form_preflight_support import (
+    json_object_list as _json_object_list,
+)
+from pydoll_mcp_server.tools.form_preflight_support import (
+    match_choice_plan as _match_choice_plan,
+)
+from pydoll_mcp_server.tools.form_preflight_support import (
+    merge_envelope as _merge_envelope,
+)
+from pydoll_mcp_server.tools.form_preflight_support import (
+    nonblocking_discovery_errors as _nonblocking_discovery_errors,
+)
+from pydoll_mcp_server.tools.form_preflight_support import restricted_preflight as _restricted_preflight
+from pydoll_mcp_server.tools.form_preflight_support import semantic_field_states as _semantic_field_states
+from pydoll_mcp_server.tools.form_presets import get_form_preset
+from pydoll_mcp_server.tools.form_runtime import (
+    PerformanceSummary,
+    cache_key,
+    get_cached_deep,
+    get_cached_preflight,
+    store_cached_deep,
+    store_cached_preflight,
+)
 from pydoll_mcp_server.tools.form_workflow_helpers import (
     active_domain_restriction,
     attestation_handoffs,
@@ -41,6 +77,8 @@ async def form_preflight(
     do_not_touch: list[str] | None = None,
     employer_domain: str = '',
     include_values: bool = False,
+    preset: str = 'generic_form',
+    force_refresh: bool = False,
 ) -> JsonObject:
     plans = _json_object_list(planned_fields or [])
     plans.extend(_json_object_list(planned_choices or []))
@@ -52,22 +90,106 @@ async def form_preflight(
     except StructuredError as exc:
         return _merge_envelope(exc.to_dict(), 'form_preflight', 'blocked', False)
 
-    surface = await page_get_active_surface(client_id, tab_id, scope=scope, include_values=include_values)
+    if get_form_preset(preset) is None:
+        return _merge_envelope(
+            StructuredError(
+                ErrorCode.INVALID_INPUT,
+                f'Unsupported preset: {preset}. Use generic_form, linkedin_easy_apply, or external_ats_multistep.',
+            ).to_dict(),
+            'form_preflight',
+            'blocked',
+            False,
+        )
+
+    metrics = PerformanceSummary()
+    domain = normalize_employer_domain(employer_domain)
+    restriction = active_domain_restriction(domain) if domain else None
+    if restriction is not None:
+        return _restricted_preflight(
+            client_id,
+            tab_id,
+            domain,
+            restriction.reason,
+            tab_info.document_generation,
+            getattr(tab_info, 'mutation_epoch', 0),
+            preset,
+            list(do_not_touch or []),
+            metrics.to_json(),
+        )
+
+    cache_version = cache_key(
+        client_id,
+        tab_id,
+        scope,
+        preset,
+        include_values,
+        True,
+        tab_info=tab_info,
+    )
+    cached_preflight = None
+    if not force_refresh and not plans and not include_values:
+        cached_preflight = get_cached_preflight(
+            cache_version,
+            do_not_touch or [],
+            domain,
+        )
+    if cached_preflight is not None:
+        metrics.cache_hits += 1
+        cached_preflight['cache_hit'] = True
+        cached_preflight['performance'] = metrics.to_json()
+        return cached_preflight
+
+    discovery_started = time.monotonic()
+    surface = await page_get_active_surface(
+        client_id,
+        tab_id,
+        scope=scope,
+        include_values=include_values,
+        preset=preset,
+        use_cache=not force_refresh,
+        include_shadow=False,
+    )
+    metrics.browser_call()
+    if get_bool(surface, 'cache_hit', False):
+        metrics.cache_hits += 1
+    else:
+        metrics.cache_misses += 1
+        metrics.full_scans += 1
+        metrics.browser_call(2)
+    metrics.add_phase('discovery', discovery_started)
     discovery_errors: JsonArray = []
     from pydoll_mcp_server.dom.deep_traversal import page_get_tree_deep
 
-    deep = await page_get_tree_deep(
-        client_id,
-        tab_id,
-        # Long job descriptions and Workable application pages routinely exceed
-        # the old 500-node cap before their form controls are reached. Keep
-        # the deep pass bounded, but do not turn a complete active form
-        # surface into a false partial-discovery blocker.
-        max_nodes=2000,
-        timeout=8.0,
-        include_shadow=True,
-        include_iframes=True,
-    )
+    deep_required = _deep_discovery_required(surface, plans)
+    deep: JsonObject | None = get_cached_deep(cache_version) if deep_required and not force_refresh else None
+    if deep is None and deep_required:
+        deep_started = time.monotonic()
+        deep = await page_get_tree_deep(
+            client_id,
+            tab_id,
+            # Long job descriptions and Workable application pages routinely exceed
+            # the old 500-node cap before their form controls are reached. Keep
+            # surface into a false partial-discovery blocker.
+            max_nodes=2000,
+            timeout=8.0,
+            include_shadow=True,
+            include_iframes=True,
+        )
+        metrics.browser_call()
+        metrics.deep_scans += 1
+        metrics.add_phase('discovery', deep_started)
+        if get_bool(deep, 'success', False):
+            store_cached_deep(cache_version, deep)
+    if deep is None:
+        deep = {
+            'success': True,
+            'partial': False,
+            'elements': [],
+            'frames': [],
+            'errors': [],
+            'timing_ms': 0.0,
+            'skipped': True,
+        }
     deep_discovery: JsonObject = {
         'success': bool(deep.get('success', False)),
         'partial': get_bool(deep, 'partial', False),
@@ -103,16 +225,24 @@ async def form_preflight(
                 'inconclusive',
                 False,
             )
-
     active_surface_partial = (
         get_bool(surface, 'partial', False)
         if get_bool(surface, 'success', False)
         else get_bool(source, 'partial', False)
     )
     source = enrich_surface_from_deep(source, deep)
-    fields = get_array(source, 'fields', [])
+    fields = _semantic_field_states(get_array(source, 'fields', []), include_values=include_values)
+    source['fields'] = fields
     upload_states = await collect_upload_states(client_id, tab_id, fields)
-    choice_discovery = await discover_choice_states(client_id, tab_id, scope)
+    if upload_states:
+        metrics.browser_call(len(upload_states))
+    choice_surface = [*fields, *get_array(source, 'controls', [])]
+    choice_discovery: JsonObject
+    if _choice_discovery_required(choice_surface, _json_object_list(planned_choices or [])):
+        choice_discovery = await discover_choice_states(client_id, tab_id, scope)
+        metrics.browser_call()
+    else:
+        choice_discovery = {'success': True, 'choices': [], 'skipped': True}
     choices = get_array(choice_discovery, 'choices', [])
     pending_fields = pending_required(fields, protected)
     security_controls = get_array(source, 'security_controls', [])
@@ -130,7 +260,15 @@ async def form_preflight(
         )
     from pydoll_mcp_server.tools.form_controls import form_errors
 
-    rendered_errors = await form_errors(client_id, tab_id)
+    validation_state = get_object(get_object(source, 'site_diagnostics', {}), 'validation_state', {})
+    should_read_rendered_errors = bool(errors) or get_int(validation_state, 'invalid_count', 0) > 0
+    rendered_errors: JsonObject = (
+        await form_errors(client_id, tab_id)
+        if should_read_rendered_errors
+        else {'success': True, 'errors': [], 'skipped': True}
+    )
+    if should_read_rendered_errors:
+        metrics.browser_call()
     if rendered_errors.get('success'):
         for item in get_array(rendered_errors, 'errors', []):
             if not isinstance(item, dict):
@@ -264,10 +402,6 @@ async def form_preflight(
                 'details': disagreement,
             }
         )
-    domain = normalize_employer_domain(employer_domain)
-    restriction = active_domain_restriction(domain) if domain else None
-    if restriction:
-        blockers.append({'kind': 'domain_restriction', 'domain': domain, 'reason': restriction.reason})
     missing_candidate_data = [
         item for item in pending_fields if isinstance(item, dict) and not covered_by_plans(item, plans)
     ]
@@ -301,72 +435,16 @@ async def form_preflight(
             'surface_disagreement': disagreement,
             'form_fingerprint': fingerprint,
             'document_generation': tab_info.document_generation,
+            'mutation_epoch': getattr(tab_info, 'mutation_epoch', 0),
+            'snapshot_id': new_operation_id('snapshot'),
+            'cache_hit': False,
+            'preset': preset,
             'employer_domain': domain,
             'ready_for_submission': not blockers,
             'do_not_touch': list(do_not_touch or []),
+            'performance': metrics.to_json(),
         }
     )
+    if not force_refresh and not plans and not include_values:
+        store_cached_preflight(cache_version, do_not_touch or [], domain, result)
     return result
-
-
-def _merge_envelope(value: JsonObject, operation: str, status: str, success: bool) -> JsonObject:
-    result = dict(value)
-    result.update(v2_envelope(operation, status, success))
-    return result
-
-
-def _json_object_list(value: object) -> list[JsonObject]:
-    normalized_value = normalize_json_value(value, 'form plan list')
-    if not isinstance(normalized_value, list):
-        return []
-    return [item for item in normalized_value if isinstance(item, dict)]
-
-
-def _json_array(value: object) -> JsonArray:
-    normalized = normalize_json_value(value, 'form result')
-    return normalized if isinstance(normalized, list) else []
-
-
-def _match_choice_plan(plan: JsonObject, choices: JsonArray) -> JsonObject | None:
-    hints = [
-        str(plan.get('field_label', '') or ''),
-        str(plan.get('field_key', '') or ''),
-        str(plan.get('question_contains', '') or ''),
-    ]
-    normalized_hints = [_choice_text(item) for item in hints if item.strip()]
-    if not normalized_hints:
-        return None
-    candidates: list[JsonObject] = []
-    for choice in choices:
-        if not isinstance(choice, dict):
-            continue
-        label = _choice_text(get_string(choice, 'field_label', ''))
-        key = _choice_text(get_string(choice, 'field_key', ''))
-        if any(hint == label or hint in label or hint in key for hint in normalized_hints):
-            candidates.append(choice)
-    return candidates[0] if len(candidates) == 1 else None
-
-
-def _choice_text(value: str) -> str:
-    return ' '.join(unicodedata.normalize('NFC', value).casefold().split())
-
-
-def _nonblocking_discovery_errors(
-    errors: JsonArray,
-    disagreement: JsonObject,
-    fields: JsonArray,
-    active_surface: JsonObject,
-) -> bool:
-    if not errors or get_string(disagreement, 'status', '') != 'consistent':
-        return False
-    if not get_bool(active_surface, 'success', False) or get_bool(active_surface, 'partial', False):
-        return False
-    if any(isinstance(field, dict) and get_array(field, 'frame_path', []) for field in fields):
-        return False
-    return all(
-        isinstance(error, dict) and get_string(error, 'path', '').casefold() in {'iframe', 'iframes'}
-        for error in errors
-    )
-
-
-__all__ = ['form_preflight']

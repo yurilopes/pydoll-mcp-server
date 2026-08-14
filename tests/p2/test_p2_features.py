@@ -74,8 +74,20 @@ class TestCapabilities:
     def test_capabilities_includes_inspection(self) -> None:
         with patch.dict(os.environ, {'PYDOLL_MCP_AUTH_TOKEN': 'test-token'}):
             from pydoll_mcp_server.server import server_status
+            from pydoll_mcp_server.tool_metadata import ToolProfile
+            from pydoll_mcp_server.tool_runtime import (
+                get_active_tool_count,
+                get_active_tool_profile,
+                set_active_tool_profile,
+            )
 
-            result = asyncio.run(server_status(client_id='test-p2'))
+            previous_profile = get_active_tool_profile()
+            previous_count = get_active_tool_count()
+            set_active_tool_profile(ToolProfile.FULL, 151)
+            try:
+                result = asyncio.run(server_status(client_id='test-p2'))
+            finally:
+                set_active_tool_profile(previous_profile, previous_count)
             caps = object_at(result, 'capabilities')
             inspection = array_at(caps, 'inspection')
             assert 'inspection' in caps

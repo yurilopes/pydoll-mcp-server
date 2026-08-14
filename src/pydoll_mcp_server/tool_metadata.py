@@ -12,6 +12,7 @@ from mcp.types import ToolAnnotations
 class ToolProfile(str, Enum):
     """Public tool exposure profiles."""
 
+    JOBS = 'jobs'
     FULL = 'full'
     AGENT = 'agent'
     LINKEDIN = 'linkedin'
@@ -75,6 +76,32 @@ LINKEDIN_TOOL_NAMES = frozenset(
     )
 )
 
+JOBS_TOOL_NAMES = frozenset(
+    _split_names(
+        """
+    health_check server_status browser_launch browser_list browser_close browser_attach profile_list
+    tab_list tab_activate tab_close tab_recover tab_new tab_health_check
+    page_goto page_reload page_back page_forward page_get_text page_screenshot page_snapshot
+    page_get_interactive_summary page_get_active_surface page_scroll page_scroll_to frame_list
+    page_wait_for_url page_wait_for_text page_wait_text_gone page_wait_for_selector page_wait_for_network_idle
+    element_wait_for_state element_wait_value operation_cancel
+    element_find element_click element_click_by_text element_type element_fill element_fill_and_verify
+    element_get_text element_get_attribute element_get_state element_select_option element_check element_uncheck
+    element_scroll_into_view keyboard_press element_find_by_role element_find_by_text element_find_by_label
+    element_find_by_placeholder element_resolve_again element_find_by_text_candidates
+    form_snapshot form_errors combobox_get_options select_get_options combobox_type_and_select
+    combobox_select_option form_fill_fields form_select_choice form_preflight form_review form_prepare
+    form_submit_after_review application_domain_status page_click_primary_action submission_wait_for_confirmation
+    upload_files upload_files_from_trigger file_upload_state artifact_get_paths artifact_prepare_upload artifact_export
+    linkedin_job_snapshot linkedin_easy_apply_open linkedin_easy_apply_close linkedin_easy_apply_snapshot
+    linkedin_easy_apply_wait_ready linkedin_easy_apply_upload_resume linkedin_easy_apply_click_next
+    linkedin_easy_apply_fill_questions linkedin_easy_apply_handle_save_prompt linkedin_easy_apply_submit
+    linkedin_jobs_page_snapshot linkedin_jobs_open_result linkedin_application_evidence linkedin_jobs_search
+    linkedin_jobs_search_results linkedin_message_recruiter
+        """
+    )
+)
+
 PUBLIC_TOOL_NAMES = _split_names(
     """
     health_check server_status browser_launch browser_list browser_close browser_attach proxy_validate proxy_get
@@ -109,7 +136,7 @@ PUBLIC_TOOL_NAMES = _split_names(
     """
 )
 
-_CANONICAL_TOOL_NAMES = AGENT_TOOL_NAMES | LINKEDIN_TOOL_NAMES
+_CANONICAL_TOOL_NAMES = AGENT_TOOL_NAMES | LINKEDIN_TOOL_NAMES | JOBS_TOOL_NAMES
 _MUTATING_TOOL_NAMES = frozenset(
     _split_names(
         """
@@ -143,6 +170,13 @@ _OPEN_WORLD_TOOL_NAMES = frozenset(
     )
 )
 
+_PROFILE_LIFECYCLE = {
+    ToolProfile.JOBS: 'recommended',
+    ToolProfile.AGENT: 'legacy',
+    ToolProfile.LINKEDIN: 'legacy',
+    ToolProfile.FULL: 'compatibility',
+}
+
 _CATEGORY_PREFIXES = (
     ('linkedin_', 'linkedin'),
     ('browser_', 'lifecycle'),
@@ -158,6 +192,8 @@ _CATEGORY_PREFIXES = (
     ('page_screenshot', 'observation'),
     ('page_', 'navigation'),
     ('element_', 'elements'),
+    ('submission_', 'applications'),
+    ('application_', 'applications'),
     ('form_', 'forms'),
     ('combobox_', 'forms'),
     ('select_', 'forms'),
@@ -200,13 +236,16 @@ _TITLE_OVERRIDES = {
 
 _DESCRIPTION_OVERRIDES = {
     'health_check': 'Check server health and version. Use this before diagnosing a connection.',
-    'server_status': ('Inspect owned resources and the active tool profile. Use this to confirm runtime capabilities.'),
+    'server_status': (
+        'Inspect the job-search session, active profile, workflow capabilities, and owned browser resources.'
+    ),
     'browser_launch': (
         'Launch an owned browser and return its first tab. '
         'Use profile_mode and site_hint when preserving authenticated state matters.'
     ),
     'element_find': (
-        'Find an element with CSS or XPath and cache its element_id. Use semantic finders when intent is known.'
+        'Find an element with CSS, XPath, or visible text and cache its element_id. '
+        'Resolution crosses open shadow roots when needed and refuses ambiguous matches.'
     ),
     'element_click': (
         'Click a cached element_id and optionally verify an effect. '
@@ -241,6 +280,7 @@ _DESCRIPTION_OVERRIDES = {
     ),
     'page_get_active_surface': (
         'Inspect the focused modal, dialog, form, or main surface with cached fields and actions. '
+        'The semantic index reuses the current document state and crosses open shadow roots when needed. '
         'Prefer this for focused workflows.'
     ),
     'page_snapshot': (
@@ -256,7 +296,8 @@ _DESCRIPTION_OVERRIDES = {
         'Use immediately after a submit action.'
     ),
     'form_preflight': (
-        'Inspect required fields, blockers, security controls, and candidate data gaps without changing the page.'
+        'Inspect required fields, blockers, security controls, and candidate data gaps without changing the page. '
+        'Use the returned snapshot and performance summary to avoid repeated discovery.'
     ),
     'form_review': (
         'Capture a compact, redacted review of the current application form and issue a short-lived review token '
@@ -264,7 +305,7 @@ _DESCRIPTION_OVERRIDES = {
     ),
     'form_prepare': (
         'Prepare an application form from explicit caller-provided facts, choices, comboboxes, uploads, and steps. '
-        'Never clicks the final submit action.'
+        'Uses safe_batch by default, returns redacted performance data, and never clicks the final submit action.'
     ),
     'form_submit_after_review': (
         'Submit exactly once after validating a scoped review token and explicit authorization. '
@@ -355,10 +396,18 @@ def parse_tool_profile(value: str) -> ToolProfile:
         raise ValueError(f'Unknown tool profile {value!r}. Choose one of: {choices}.') from exc
 
 
+def profile_lifecycle(profile: ToolProfile) -> str:
+    """Return the product lifecycle state of a public exposure profile."""
+
+    return _PROFILE_LIFECYCLE[profile]
+
+
 def tool_names_for_profile(profile: ToolProfile, all_names: Iterable[str]) -> frozenset[str]:
     """Return the public names exposed by one profile."""
 
     names = frozenset(all_names)
+    if profile is ToolProfile.JOBS:
+        return JOBS_TOOL_NAMES
     if profile is ToolProfile.FULL:
         return names
     if profile is ToolProfile.AGENT:
@@ -368,11 +417,13 @@ def tool_names_for_profile(profile: ToolProfile, all_names: Iterable[str]) -> fr
 
 __all__ = [
     'AGENT_TOOL_NAMES',
+    'JOBS_TOOL_NAMES',
     'LINKEDIN_TOOL_NAMES',
     'PUBLIC_TOOL_NAMES',
     'TOOL_METADATA',
     'ToolMetadata',
     'ToolProfile',
     'parse_tool_profile',
+    'profile_lifecycle',
     'tool_names_for_profile',
 ]

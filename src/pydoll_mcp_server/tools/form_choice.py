@@ -14,9 +14,10 @@ from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
 from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonObject, get_bool, get_float, get_string
+from pydoll_mcp_server.json_types import JsonObject, get_array, get_bool, get_float, get_string
 from pydoll_mcp_server.tools.choice_group_scripts import choice_group_helpers_script
 from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 
 VALID_SCOPES = frozenset({'auto', 'modal', 'dialog', 'form', 'main', 'viewport'})
 
@@ -52,6 +53,7 @@ async def form_select_choice(
     except StructuredError as exc:
         return exc.to_dict()
     invalidate_review_tokens(client_id, tab_id)
+    advance_mutation_epoch(client_id, tab_id, 'choice', tab_info)
     payload = json.dumps({'field': field_label, 'option': option_label, 'scope': scope})
     result: JsonObject = {}
     pointer_fallback_used = False
@@ -106,6 +108,8 @@ async def form_select_choice(
             else 'unselected'
         ),
         'element_id': element_id,
+        'shadow_path': get_array(result, 'shadow_path', []),
+        'frame_path': get_array(result, 'frame_path', []),
         'selected': get_bool(result, 'checked'),
         'checked': get_bool(result, 'checked'),
         'indeterminate': get_bool(result, 'indeterminate'),
@@ -170,6 +174,8 @@ def _cache_choice(tab_id: str, generation: int, result: JsonObject) -> str:
             document_generation=generation,
             tag_name=get_string(result, 'tag'),
             text_summary=get_string(result, 'label')[:100],
+            frame_path=[value for value in get_array(result, 'frame_path', []) if isinstance(value, str)],
+            shadow_path=[value for value in get_array(result, 'shadow_path', []) if isinstance(value, str)],
             selector_hint=get_string(result, 'selector_hint'),
             xpath_hint=get_string(result, 'xpath_hint'),
         )
@@ -214,11 +220,12 @@ def _choice_script(payload: str) -> str:
         clicked:true,strategy_used:strategy,
         tag:target.tagName.toLowerCase(),label:choiceOptionText(target),field_label:match.group.label,
         selector_hint:selector,
+        shadow_path:choiceShadowPath(target),frame_path:[],
         pointer_fallback: target.tagName === 'BUTTON' && Boolean(choiceButtonGroup(target))}};
     return {{checked:true,indeterminate:indeterminate(),verified:true,strategy_used:strategy,
         tag:target.tagName.toLowerCase(),
         label:choiceOptionText(target),field_label:match.group.label,
-        selector_hint:selector}};
+        selector_hint:selector,shadow_path:choiceShadowPath(target),frame_path:[]}};
 """
         + choice_group_helpers_script()
         + """

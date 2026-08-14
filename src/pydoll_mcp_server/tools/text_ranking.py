@@ -12,7 +12,15 @@ from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_script_array
 from pydoll_mcp_server.dom.element_cache import ElementCacheEntry, get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_float, get_string, require_json_object
+from pydoll_mcp_server.json_types import (
+    JsonArray,
+    JsonObject,
+    get_array,
+    get_float,
+    get_object,
+    get_string,
+    require_json_object,
+)
 
 
 async def element_find_by_text_candidates(
@@ -86,6 +94,7 @@ async def element_find_by_text_candidates(
         candidate = require_json_object(item, 'text candidate')
         unstable_index = str(candidate.get('unstable_index', '0'))
         element_id = f'el_c{unstable_index}'
+        shadow_path = [value for value in get_array(candidate, '_shadow_path', []) if isinstance(value, str)]
         cache.store(
             ElementCacheEntry(
                 element_id=element_id,
@@ -95,8 +104,11 @@ async def element_find_by_text_candidates(
                 text_summary=get_string(candidate, 'text', '')[:100],
                 selector_hint=get_string(candidate, 'selector_hint', ''),
                 xpath_hint=get_string(candidate, 'xpath_hint', ''),
+                shadow_path=shadow_path,
+                fingerprint=json.dumps(get_object(candidate, 'fingerprint', {}), ensure_ascii=False, sort_keys=True),
             )
         )
+        candidate.pop('_shadow_path', None)
         candidate['element_id'] = element_id
         candidates.append(candidate)
 
@@ -178,8 +190,19 @@ if (opts.within_selector_hint) {
     const parent = document.querySelector(opts.within_selector_hint);
     if (parent) scope = parent;
 }
-const allEls = scope.querySelectorAll('button,a,input,textarea,select,label,[role],[tabindex],div,span,li,p,td,th,h1,h2,h3,h4,h5,h6');
-for (const el of allEls) {
+const allEls = [];
+function collect(root, shadowPath) {
+    if (!root || !root.querySelectorAll) return;
+    for (const el of root.querySelectorAll('button,a,input,textarea,select,label,[role],[tabindex],div,span,li,p,td,th,h1,h2,h3,h4,h5,h6')) {
+        allEls.push({el, shadowPath});
+    }
+    for (const host of root.querySelectorAll('*')) {
+        if (host.shadowRoot) collect(host.shadowRoot, [...shadowPath, selectorHint(host)]);
+    }
+}
+collect(scope, []);
+for (const entry of allEls) {
+    const el = entry.el;
     if (!visible(el)) continue;
     const text = textOf(el);
     if (!text) continue;
@@ -247,7 +270,9 @@ for (const el of allEls) {
         bounds: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
         reasons: [opts.exact ? 'exact_text' : 'contains_text',
                   actionable ? 'semantic_actionable' : '',
-                  enabled ? 'enabled' : ''].filter(Boolean)
+                  enabled ? 'enabled' : ''].filter(Boolean),
+        fingerprint: {tag: el.tagName.toLowerCase(), role, label: text},
+        _shadow_path: entry.shadowPath
     });
 }
 

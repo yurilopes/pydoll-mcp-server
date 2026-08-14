@@ -15,11 +15,13 @@ from pydoll_mcp_server.browser.pydoll_compat import set_input_files
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
 from pydoll_mcp_server.config import get_config, get_timeout_config
+from pydoll_mcp_server.dom.element_cache import get_element_cache
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_int, get_string
 from pydoll_mcp_server.security.upload_policy import validate_upload_path
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 
 _UPLOAD_IDS: dict[tuple[str, str, str], str] = {}
 _UPLOAD_STATES: dict[tuple[str, str, str], str] = {}
@@ -137,6 +139,7 @@ async def upload_files(
 
     try:
         invalidate_review_tokens(client_id, tab_id)
+        advance_mutation_epoch(client_id, tab_id, 'upload', tab_info)
         await set_input_files(element, paths)
     except Exception as e:
         return StructuredError(
@@ -188,6 +191,7 @@ async def file_upload_state(client_id: str, tab_id: str, element_id: str = '', u
         )
         return stale
     try:
+        cache_entry = get_element_cache().get_for_tab(element_id, tab_id)
         result = await element.execute_script(
             """
             const files = [...(this.files || [])].map((file) => ({
@@ -298,6 +302,9 @@ async def file_upload_state(client_id: str, tab_id: str, element_id: str = '', u
             'state': semantic_state,
             'upload_id': stable_upload_id,
             'element_id': element_id,
+            'fingerprint': cache_entry.fingerprint if cache_entry is not None else '',
+            'shadow_path': list(cache_entry.shadow_path) if cache_entry is not None else [],
+            'frame_path': list(cache_entry.frame_path) if cache_entry is not None else [],
             'label': str(state.get('label', '')),
             'files': records,
             'count': len(records),

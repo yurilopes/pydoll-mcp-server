@@ -30,6 +30,7 @@ from pydoll_mcp_server.tools.element_resolver import (
 from pydoll_mcp_server.tools.element_screenshot import element_screenshot as element_screenshot
 from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
 from pydoll_mcp_server.tools.form_controls import fill_element_framework_safe
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 
 
 async def element_find(
@@ -151,6 +152,7 @@ async def element_click(
                 if security_control:
                     return security_control_error(security_control)
             invalidate_review_tokens(client_id, tab_id)
+            advance_mutation_epoch(client_id, tab_id, 'click', tab_info)
             try:
                 choice_result = await set_choice_state(element, True)
                 choice_error = get_string(choice_result, 'error', '')

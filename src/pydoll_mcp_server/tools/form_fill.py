@@ -9,11 +9,18 @@ import uuid
 from typing import Annotated, TypedDict
 
 from pydantic import Field
+from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import PydollException
 
 from pydoll_mcp_server.browser.locks import tab_operation_lock
+from pydoll_mcp_server.browser.models import TabInfo
 from pydoll_mcp_server.browser.registry import get_registry
-from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
+from pydoll_mcp_server.browser.script_utils import (
+    InvalidScriptResponseError,
+    extract_normalized_array,
+    extract_normalized_object,
+)
+from pydoll_mcp_server.dom.element_cache import ElementCacheEntry
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import (
     JsonArray,
@@ -23,7 +30,9 @@ from pydoll_mcp_server.json_types import (
     get_string,
     normalize_json_value,
 )
+from pydoll_mcp_server.tools.element_resolver import resolve_deep_scope
 from pydoll_mcp_server.tools.form_fill_script import fill_script as _fill_script
+from pydoll_mcp_server.tools.form_fill_script import read_states_script
 from pydoll_mcp_server.tools.form_input_modes import (
     keyboard_fallback_decision,
     keyboard_fill,
@@ -31,10 +40,12 @@ from pydoll_mcp_server.tools.form_input_modes import (
     value_equivalent,
     wait_expected_enabled,
 )
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 from pydoll_mcp_server.tools.form_scripts import read_filled_state_reference_script
 
 
 class FormFillField(TypedDict, total=False):
+    field_key: str
     label_contains: str
     question_contains: str
     placeholder_contains: str
@@ -121,13 +132,57 @@ async def form_fill_fields(
     )
 
     fallback_used = False
+    fallback_count = 0
+    operation_started = time.monotonic()
+    browser_calls = 0
     dependent_control_enabled: bool | None = None
     try:
         async with tab_operation_lock(tab_id):
+            if normalized_fields:
+                advance_mutation_epoch(client_id, tab_id, 'batch_fill', tab_info)
+                browser_calls += 1
             result = await tab_info.pydoll_tab.execute_script(_fill_script(payload), return_by_value=True)
             data = extract_normalized_object(result, 'form_fill')
             filled_items = get_array(data, 'filled', [])
+            if filled_items and state_verification != 'dom' and mode != 'keyboard':
+                await asyncio.sleep(0.12)
+                stabilization_requests = [
+                    {
+                        'selector_hint': get_string(item, 'selector_hint', ''),
+                        'shadow_path': get_array(item, 'shadow_path', []),
+                    }
+                    for item in filled_items
+                    if isinstance(item, dict)
+                ]
+                try:
+                    browser_calls += 1
+                    stabilized = extract_normalized_array(
+                        await tab_info.pydoll_tab.execute_script(
+                            read_states_script(json.dumps(stabilization_requests, ensure_ascii=False)),
+                            return_by_value=True,
+                        ),
+                        'form_fill_stabilization',
+                    )
+                except (PydollException, InvalidScriptResponseError, TypeError, ValueError):
+                    stabilized = []
+                for index, item in enumerate(filled_items):
+                    if not isinstance(item, dict):
+                        continue
+                    stabilized_state = stabilized[index] if index < len(stabilized) else {}
+                    if not isinstance(stabilized_state, dict):
+                        stabilized_state = {}
+                    expected = get_string(item, 'requested_value', '')
+                    survived = value_equivalent(stabilized_state, expected)
+                    item['controlled_value_survived'] = survived
+                    item['framework_event'] = get_bool(item, 'framework_event', False)
+                    item['blurred'] = get_bool(stabilized_state, 'blurred', get_bool(item, 'blurred', False))
+                    item['validity'] = get_string(stabilized_state, 'validity', 'not_yet_validated')
+                    item['errors'] = get_array(stabilized_state, 'errors', [])
+                    item['framework_value'] = 'present' if survived else 'absent'
+                    item['verified'] = survived
+                    item['field_valid'] = survived and item['validity'] != 'invalid' and not item['errors']
             if expected_enabled_element_id:
+                browser_calls += 1
                 dependent_control_enabled = await wait_expected_enabled(
                     tab_info,
                     expected_enabled_element_id,
@@ -153,7 +208,7 @@ async def form_fill_fields(
                 selector = str(item_value.get('selector_hint', ''))
                 if not selector:
                     continue
-                element = await tab_info.pydoll_tab.query(selector, timeout=1, find_all=False, raise_exc=False)
+                element = await _resolve_fill_target(tab_info, item_value, selector)
                 if element is None:
                     item_value['fallback_error'] = 'target_not_found'
                     continue
@@ -163,6 +218,7 @@ async def form_fill_fields(
                     continue
                 request_value = str(item_value.get('requested_value', ''))
                 await keyboard_fill(tab_info.pydoll_tab, element, request_value)
+                browser_calls += 4
                 await asyncio.sleep(0.12)
                 state: JsonObject | None = None
                 try:
@@ -191,6 +247,7 @@ async def form_fill_fields(
                 item_value['verified'] = item_value['controlled_value_survived']
                 item_value['field_valid'] = item_value['verified']
                 fallback_used = True
+                fallback_count += 1
             if expected_enabled_element_id and fallback_used:
                 dependent_control_enabled = await wait_expected_enabled(
                     tab_info,
@@ -285,6 +342,20 @@ async def form_fill_fields(
         'validation_timeout': min(max(validation_timeout, 0.1), 30.0),
         'warnings': list(warnings),
         'evidence': evidence,
+        'performance': {
+            'total_ms': round(max(0.0, (time.monotonic() - operation_started) * 1000), 1),
+            'discovery_ms': 0.0,
+            'mutation_ms': 0.0,
+            'verification_ms': 0.0,
+            'wait_ms': 0.0,
+            'browser_calls': browser_calls,
+            'full_scans': 0,
+            'deep_scans': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'fallbacks': fallback_count,
+            'round_trips_saved': max(0, len(filled) - 1),
+        },
     }
 
 
@@ -300,3 +371,20 @@ def keyboard_verification_needed(item: JsonObject, level: str) -> bool:
     if not get_bool(item, 'framework_event', False) or not get_bool(item, 'controlled_value_survived', False):
         return True
     return level in {'blurred', 'submission_ready'} and not get_bool(item, 'blurred', False)
+
+
+async def _resolve_fill_target(tab_info: TabInfo, item: JsonObject, selector: str) -> WebElement | None:
+    shadow_path = [value for value in get_array(item, 'shadow_path', []) if isinstance(value, str)]
+    frame_path = [value for value in get_array(item, 'frame_path', []) if isinstance(value, str)]
+    if shadow_path or frame_path:
+        entry = ElementCacheEntry(
+            element_id='',
+            tab_id=tab_info.tab_id,
+            document_generation=tab_info.document_generation,
+            selector_hint=selector,
+            frame_path=frame_path,
+            shadow_path=shadow_path,
+        )
+        return await resolve_deep_scope(tab_info.pydoll_tab, entry)
+    result = await tab_info.pydoll_tab.query(selector, timeout=1, find_all=False, raise_exc=False)
+    return result if isinstance(result, WebElement) else None

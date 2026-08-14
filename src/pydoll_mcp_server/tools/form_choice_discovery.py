@@ -55,8 +55,9 @@ function choiceRoot(scope) {
 
 function associatedLabelVisible(element) {
   const labels = [];
+  const root = choiceOwnerRoot(element);
   if (element.id) {
-    const explicit = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+    const explicit = choiceQueryAll(root, `label[for="${CSS.escape(element.id)}"]`)[0];
     if (explicit) labels.push(explicit);
   }
   const parent = element.closest('label');
@@ -95,7 +96,9 @@ function optionState(option) {
     tag: option.tagName.toLowerCase(),
     role: option.getAttribute('role') || choiceType(option),
     selector_hint: choiceSelectorHint(option),
-    xpath_hint: structuralXPath(option)
+    xpath_hint: structuralXPath(option),
+    shadow_path: choiceShadowPath(option),
+    frame_path: []
   };
 }
 
@@ -132,7 +135,9 @@ for (const item of groups) {
     ready_for_submission: enabled && (!required || selectedState === 'selected'),
     blocker: required && selectedState !== 'selected' ? 'missing_required_choice' : '',
     selector_hint: choiceSelectorHint(item.group),
-    xpath_hint: structuralXPath(item.group)
+    xpath_hint: structuralXPath(item.group),
+    shadow_path: choiceShadowPath(item.group),
+    frame_path: []
   });
 }
 return {success: true, choices};

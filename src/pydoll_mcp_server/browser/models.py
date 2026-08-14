@@ -74,6 +74,7 @@ class TabInfo:
     title: str = ''
     health: ResourceHealth = ResourceHealth.HEALTHY
     document_generation: int = 0
+    mutation_epoch: int = 0
     discovered: bool = False
     close_pending: bool = False
     one_tab_safety_blocked: bool = False
@@ -90,6 +91,8 @@ class TabInfo:
             'url': self.url,
             'title': self.title,
             'health': self.health.value,
+            'document_generation': self.document_generation,
+            'mutation_epoch': self.mutation_epoch,
             'discovered': self.discovered,
             'close_pending': self.close_pending,
             'one_tab_safety_blocked': self.one_tab_safety_blocked,
@@ -101,6 +104,7 @@ class TabInfo:
 
     def mark_navigated(self) -> None:
         self.document_generation += 1
+        self.mutation_epoch = 0
 
 
 @dataclass

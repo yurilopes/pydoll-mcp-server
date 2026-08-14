@@ -9,13 +9,40 @@ def choice_group_helpers_script() -> str:
 function choiceFold(value) {
   return String(value ?? '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
 }
+function choiceOwnerRoot(el) {
+  const root = el && typeof el.getRootNode === 'function' ? el.getRootNode() : document;
+  return root && typeof root.querySelectorAll === 'function' ? root : document;
+}
+function choiceQueryAll(root, selector) {
+  const result = [];
+  const seen = new Set();
+  function walk(current) {
+    if (!current || typeof current.querySelectorAll !== 'function') return;
+    for (const node of current.querySelectorAll(selector)) {
+      if (!seen.has(node)) { seen.add(node); result.push(node); }
+    }
+    for (const host of current.querySelectorAll('*')) {
+      if (host.shadowRoot) walk(host.shadowRoot);
+    }
+  }
+  walk(root);
+  return result;
+}
+function choiceFindById(root, id) {
+  const escaped = CSS.escape ? CSS.escape(id) : id;
+  return choiceQueryAll(root, `[id="${escaped}"]`)[0] || null;
+}
 function choiceVisible(el) {
   if (!el || !el.isConnected) return false;
-  const rect = el.getBoundingClientRect();
-  const style = getComputedStyle(el);
-  return rect.width > 0 && rect.height > 0
-    && style.display !== 'none' && style.visibility !== 'hidden'
-    && parseFloat(style.opacity || '1') > 0;
+  for (let current = el; current;) {
+    const rect = current.getBoundingClientRect();
+    const style = getComputedStyle(current);
+    if (rect.width <= 0 || rect.height <= 0 || style.display === 'none'
+        || style.visibility === 'hidden' || parseFloat(style.opacity || '1') <= 0) return false;
+    if (current.parentElement) current = current.parentElement;
+    else current = current.getRootNode()?.host || null;
+  }
+  return true;
 }
 function choiceType(el) {
   const type = (el.getAttribute('type') || '').toLowerCase();
@@ -50,8 +77,9 @@ function choiceText(value) {
 }
 function choiceOptionText(el) {
   if (!el) return '';
+  const root = choiceOwnerRoot(el);
   if (el.id) {
-    const explicit = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    const explicit = choiceQueryAll(root, `label[for="${CSS.escape(el.id)}"]`)[0];
     if (explicit) return choiceText(explicit.innerText || explicit.textContent || '');
   }
   const label = el.closest('label');
@@ -72,10 +100,10 @@ function choiceGroupFor(el, root) {
     '[data-field-path], .form-group, .yesno, .choice-group, .radio-group, .checkbox-group, ' +
     '.jobs-easy-apply-form-section__grouping'
   );
-  if (grouped && root.contains(grouped)) return grouped;
+  if (grouped) return grouped;
   const name = choiceText(el.getAttribute('name') || '');
   if (name) {
-    const sameName = [...root.querySelectorAll(choiceOptionSelector())]
+    const sameName = choiceQueryAll(root, choiceOptionSelector())
       .filter((candidate) => choiceType(candidate) === choiceType(el)
         && choiceText(candidate.getAttribute('name') || '') === name);
     if (sameName.length > 1) return sameName[0].parentElement || root;
@@ -88,7 +116,7 @@ function choiceCandidateText(node) {
 }
 function choiceQuestionText(group, root) {
   const labelledBy = (group.getAttribute('aria-labelledby') || '').split(/\s+/)
-    .filter(Boolean).map((id) => document.getElementById(id)?.innerText || '')
+    .filter(Boolean).map((id) => choiceFindById(choiceOwnerRoot(group), id)?.innerText || '')
     .map(choiceText).filter(Boolean);
   if (labelledBy.length) return labelledBy.join(' ');
   const direct = [...group.children].find((node) =>
@@ -118,7 +146,7 @@ function choiceQuestionText(group, root) {
 }
 function choiceGroupsFor(root) {
   const map = new Map();
-  const controls = [...root.querySelectorAll(choiceOptionSelector())]
+  const controls = choiceQueryAll(root, choiceOptionSelector())
     .filter((el) => Boolean(choiceType(el)));
   for (const control of controls) {
     const group = choiceGroupFor(control, root);
@@ -198,14 +226,16 @@ function choiceChecked(el) {
 }
 function choiceSelectorHint(el) {
   if (!el || !el.tagName) return '';
+  const root = choiceOwnerRoot(el);
   if (el.id) return `#${CSS.escape(el.id)}`;
   const name = el.getAttribute('name');
   const value = el.getAttribute('value');
   if (name && value) return `${el.tagName.toLowerCase()}[name="${name.replace(/"/g, '\\"')}"]`
     + `[value="${value.replace(/"/g, '\\"')}"]`;
   const parts = [];
+  const stop = root.body || root.documentElement || null;
   let current = el;
-  while (current && current.nodeType === 1 && current !== document.body) {
+  while (current && current.nodeType === 1 && current !== stop) {
     let position = 1;
     let sibling = current.previousElementSibling;
     while (sibling) {
@@ -215,6 +245,17 @@ function choiceSelectorHint(el) {
     parts.unshift(`${current.tagName.toLowerCase()}:nth-of-type(${position})`);
     current = current.parentElement;
   }
-  return `body > ${parts.join(' > ')}`;
+  return parts.join(' > ') || el.tagName.toLowerCase();
+}
+function choiceShadowPath(el) {
+  const path = [];
+  let current = el;
+  while (current && typeof current.getRootNode === 'function') {
+    const root = current.getRootNode();
+    if (!root || !root.host) break;
+    path.unshift(choiceSelectorHint(root.host));
+    current = root.host;
+  }
+  return path;
 }
 """

@@ -38,7 +38,7 @@ For Windows native mode, keep stdio UTF-8 explicit:
 python -m pip install "pydoll-mcp-server[windows]"
 $env:PYDOLL_MCP_ALLOW_NO_AUTH = "true"
 $env:PYTHONIOENCODING = "utf-8"
-python -m pydoll_mcp_server.cli --transport stdio --tool-profile linkedin
+python -m pydoll_mcp_server.cli --transport stdio --tool-profile jobs
 ```
 
 The `windows` extra is needed only when an upload portal opens a native file
@@ -53,11 +53,12 @@ $env:PYTHONIOENCODING = "utf-8"
 python -m pydoll_mcp_server.cli --transport stdio
 ```
 
-Use the `linkedin` profile for the current OpenCode job-application workflow.
-It exposes the canonical browser tools plus the LinkedIn search and Easy Apply
-helpers, while keeping advanced network, JavaScript, and diagnostic tools out
-of the default model context. Use `agent` for non-LinkedIn browser automation
-or `full` only when advanced compatibility is required.
+Use the `jobs` profile for the OpenCode job-search and application workflow.
+It exposes semantic navigation, the form workflow, uploads, evidence, and
+LinkedIn search and Easy Apply helpers while keeping advanced network,
+JavaScript, storage, cookies, and diagnostic tools out of the default model
+context. Use `full` only when advanced compatibility is required. The
+`agent` and `linkedin` profiles remain legacy options.
 
 ```jsonc
 {
@@ -71,7 +72,7 @@ or `full` only when advanced compatibility is required.
         "--transport",
         "stdio",
         "--tool-profile",
-        "linkedin"
+        "jobs"
       ],
       "environment": {
         "PYDOLL_MCP_ALLOW_NO_AUTH": "true",
@@ -95,8 +96,8 @@ Use the pydoll MCP server.
 1. Show server status.
 2. Launch a headless browser with a temporary profile.
 3. Open a local page served through http://127.0.0.1.
-4. Get the page tree.
-5. Click a button by the returned element_id.
+4. Get a semantic page snapshot and active surface.
+5. Find and click a button through the semantic element tools.
 6. Fill an input with: Olá mundo, 日本語, 한국어, 中文.
 7. Read the input value and confirm UTF-8 was preserved.
 8. Save a screenshot to an allowed artifact path.

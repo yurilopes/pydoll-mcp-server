@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "pydoll-mcp-server"
 dynamic = ["version"]
-description = "MCP server for browser automation using Pydoll"
+description = "MCP server for job search and job application workflows using Pydoll"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     {name = "Pydoll MCP Server Contributors"},
 ]
-keywords = ["mcp", "browser", "automation", "pydoll", "chrome", "chromium"]
+keywords = ["mcp", "jobs", "job-search", "job-application", "linkedin", "ats", "forms", "evidence", "pydoll"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

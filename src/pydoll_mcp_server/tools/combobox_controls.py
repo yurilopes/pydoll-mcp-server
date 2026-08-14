@@ -26,9 +26,11 @@ from pydoll_mcp_server.json_types import (
     get_string,
     require_json_object,
 )
+from pydoll_mcp_server.tools.combobox_native import select_native_option
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
 from pydoll_mcp_server.tools.form_controls import fill_element_framework_safe
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 from pydoll_mcp_server.tools.form_scripts import combobox_options_script, select_options_script
 
 
@@ -71,6 +73,27 @@ async def combobox_type_and_select(
     timeout: float | None = None,
     allow_approximate: bool = False,
 ) -> JsonObject:
+    try:
+        tab_info = get_registry().get_tab(client_id, tab_id)
+        element = await resolve_element(tab_info, element_id)
+    except StructuredError as exc:
+        return exc.to_dict()
+    if element is None:
+        return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
+    try:
+        tag_result = await element.execute_script(
+            "return {tag:(this.tagName||'').toLowerCase(),disabled:!!this.disabled};",
+            return_by_value=True,
+        )
+        tag_state = extract_normalized_object(tag_result, 'combobox_target')
+    except (PydollException, InvalidScriptResponseError, TypeError, ValueError) as exc:
+        return StructuredError(
+            ErrorCode.EXECUTION_ERROR,
+            f'Combobox target inspection failed: {exc}',
+            retryable=True,
+        ).to_dict()
+    if get_string(tag_state, 'tag', '') == 'select':
+        return await select_native_option(client_id, tab_id, element_id, option_text or query, allow_approximate)
     invalidate_review_tokens(client_id, tab_id)
     set_result = await fill_element_framework_safe(
         client_id,
@@ -104,6 +127,10 @@ async def combobox_select_option(
     timeout: float | None = None,
     allow_approximate: bool = False,
 ) -> JsonObject:
+    try:
+        tab_info = get_registry().get_tab(client_id, tab_id)
+    except StructuredError as exc:
+        return exc.to_dict()
     limit = min(timeout or 10.0, 120.0)
     deadline = time.monotonic() + limit
     selected: JsonObject | None = None
@@ -133,6 +160,7 @@ async def combobox_select_option(
         ).to_dict()
 
     invalidate_review_tokens(client_id, tab_id)
+    advance_mutation_epoch(client_id, tab_id, 'combobox', tab_info)
     bounds = require_json_object(selected.get('bounds'), 'option bounds')
     width = get_float(bounds, 'width')
     height = get_float(bounds, 'height')
@@ -146,7 +174,7 @@ async def combobox_select_option(
     x = get_float(bounds, 'x') + width / 2
     y = get_float(bounds, 'y') + height / 2
     try:
-        tab = get_registry().get_tab(client_id, tab_id).pydoll_tab
+        tab = tab_info.pydoll_tab
         async with tab_operation_lock(tab_id):
             await tab.mouse.click(x, y)
     except (PydollException, StructuredError) as exc:
@@ -261,7 +289,21 @@ async def _dispatch_option_click(
         const style = getComputedStyle(el);
         return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     }}
-    for (const option of document.querySelectorAll('[role="option"]')) {{
+    const roots = [];
+    const seenRoots = new Set();
+    function addRoot(root) {{
+        if (root && !seenRoots.has(root)) {{ seenRoots.add(root); roots.push(root); }}
+    }}
+    function collectOptions(root) {{
+        const options = [...root.querySelectorAll('[role="option"]')];
+        for (const host of root.querySelectorAll('*')) {{
+            if (host.shadowRoot) options.push(...collectOptions(host.shadowRoot));
+        }}
+        return options;
+    }}
+    addRoot(this.getRootNode ? this.getRootNode() : document);
+    addRoot(document);
+    for (const root of roots) for (const option of collectOptions(root)) {{
         const text = norm(option.innerText || option.textContent || '');
         const matched = payload.exact ? text === expected : text.includes(expected);
         if (matched && visible(option) && option.getAttribute('aria-disabled') !== 'true') {{

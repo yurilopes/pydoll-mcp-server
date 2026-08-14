@@ -39,6 +39,7 @@ from pydoll_mcp_server.tools.form_input_modes import (
     wait_expected_enabled,
 )
 from pydoll_mcp_server.tools.form_keyboard import read_keyboard_state, safe_keyboard_target
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 from pydoll_mcp_server.tools.form_scripts import fill_script, select_options_script
 
 DEFAULT_EVENTS = ['input', 'change', 'blur']
@@ -98,6 +99,7 @@ async def fill_element_framework_safe(
                 response['failure_origin'] = 'security'
                 return response
             invalidate_review_tokens(client_id, tab_id)
+            advance_mutation_epoch(client_id, tab_id, 'fill', tab_info)
             try:
                 await element.execute_script(
                     "this.scrollIntoView({block:'center'}); return true;", return_by_value=True

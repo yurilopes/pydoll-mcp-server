@@ -12,6 +12,7 @@ from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.browser.script_utils import InvalidScriptResponseError, extract_normalized_object
+from pydoll_mcp_server.browser.tab_reconciliation import sync_browser_tabs
 from pydoll_mcp_server.config import get_timeout_config
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_bool, get_object, get_string
@@ -25,6 +26,7 @@ from pydoll_mcp_server.tools.click_observation import (
 )
 from pydoll_mcp_server.tools.element_resolver import resolve_element_for_action
 from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 
 VALID_STRATEGIES = frozenset(
     {'auto', 'native', 'center_mouse', 'dispatch_pointer_sequence', 'trusted_fallback_if_safe'}
@@ -66,6 +68,9 @@ async def element_click_enhanced(
         return exc.to_dict()
 
     pre_click_url = await get_tab_url(tab_info.pydoll_tab) or ''
+    before_target_ids = {
+        tab.target_id for tab in get_registry().list_tabs(client_id, tab_info.browser_id) if tab.target_id
+    }
     fallbacks_attempted: list[str] = []
     strategy_used = click_strategy
     clicked = False
@@ -83,7 +88,6 @@ async def element_click_enhanced(
         element = resolution.element
         if element is None:
             return StructuredError(ErrorCode.STALE_ELEMENT, f'Element {element_id} is stale').to_dict()
-        invalidate_review_tokens(client_id, tab_id)
         security_control = await inspect_element_security(element)
         if security_control:
             response = StructuredError(
@@ -96,6 +100,8 @@ async def element_click_enhanced(
             response['failure_origin'] = 'security'
             response['mcp_action'] = resolution.details
             return response
+        invalidate_review_tokens(client_id, tab_id)
+        advance_mutation_epoch(client_id, tab_id, 'click', tab_info)
         if any(
             (expect_attribute_selector, expect_enabled_element_id, expect_progress_change, expect_active_surface_change)
         ):
@@ -207,6 +213,27 @@ async def element_click_enhanced(
         )
         matched_effects = list(effect_list)
 
+    new_tabs: JsonArray = []
+    try:
+        await sync_browser_tabs(client_id, tab_info.browser_id)
+        for candidate in get_registry().list_tabs(client_id, tab_info.browser_id):
+            if candidate.target_id and candidate.target_id not in before_target_ids:
+                new_tabs.append(
+                    {
+                        'target_id': candidate.target_id,
+                        'tab_id': candidate.tab_id,
+                        'url': candidate.url,
+                        'title': candidate.title,
+                        'opener_tab_id': tab_id,
+                        'provenance': 'click',
+                    }
+                )
+    except (PydollException, StructuredError, RuntimeError, TimeoutError, OSError):
+        new_tabs = []
+    if new_tabs:
+        matched_effects.append({'kind': 'new_target_effect', 'targets': new_tabs})
+        effect_observed = True
+
     evidence: JsonObject = {
         'timestamp': time.time(),
         'strategy': strategy_used,
@@ -227,7 +254,11 @@ async def element_click_enhanced(
         expect_progress_change=expect_progress_change,
         expect_active_surface_change=expect_active_surface_change,
     )
-    diagnostics = await inspect_site_diagnostics(tab_info.pydoll_tab)
+    diagnostics = (
+        await inspect_site_diagnostics(tab_info.pydoll_tab)
+        if not clicked or (has_effect_request and not effect_observed)
+        else _diagnostics_skipped()
+    )
     mcp_action: JsonObject = {
         'element_id': element_id,
         'event_sent': clicked,
@@ -303,7 +334,7 @@ async def element_click_enhanced(
                 'page_effect': page_effect,
                 'site_diagnostics': diagnostics,
                 'failure_origin': 'page',
-                'effect_status': effect_kind if effect_kind == 'hidden_effect' else 'unknown',
+                'effect_status': effect_kind,
             }
         )
         return response
@@ -324,8 +355,9 @@ async def element_click_enhanced(
         'evidence': evidence,
         'mcp_action': mcp_action,
         'page_effect': page_effect,
-        'effect_status': effect_kind if has_effect_request else 'no_effect',
+        'effect_status': effect_kind,
         'site_diagnostics': diagnostics,
+        'new_tabs': new_tabs,
         'failure_origin': '',
     }
 
@@ -369,3 +401,12 @@ def _strategy_order(requested: str) -> list[str]:
     if requested == 'trusted_fallback_if_safe':
         return ['native', 'center_mouse', 'dispatch_pointer_sequence']
     return [requested]
+
+
+def _diagnostics_skipped() -> JsonObject:
+    return {
+        'framework_hints': [],
+        'security_controls': [],
+        'validation_state': {},
+        'diagnostics_skipped': True,
+    }

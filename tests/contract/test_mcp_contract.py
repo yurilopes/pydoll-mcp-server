@@ -270,39 +270,28 @@ class TestMCPTools:
 
         tools = await mcp.list_tools()
         tool_names = {tool.name for tool in tools}
-        expected_p0 = {
+        expected_jobs = {
             'health_check',
             'server_status',
             'browser_launch',
             'browser_list',
             'browser_close',
-            'http_request',
-            'network_replay_request',
             'tab_list',
             'tab_activate',
             'tab_close',
             'tab_recover',
             'page_goto',
             'page_reload',
-            'page_wait',
             'page_screenshot',
             'page_get_text',
-            'page_get_tree',
             'element_find',
             'element_click',
             'element_click_by_text',
-            'element_click_center',
             'element_type',
             'element_fill',
             'element_fill_and_verify',
             'element_get_text',
             'element_get_attribute',
-            'js_evaluate_readonly',
-            'js_evaluate',
-            'user_agent_set',
-            'user_agent_get',
-            'viewport_set',
-            'viewport_get',
             'page_get_interactive_summary',
             'page_wait_for_text',
             'page_wait_text_gone',
@@ -317,8 +306,6 @@ class TestMCPTools:
             'combobox_select_option',
             'file_upload_state',
             'artifact_get_paths',
-            'artifact_import',
-            'mouse_click',
             'page_get_active_surface',
             'element_find_by_text_candidates',
             'element_resolve_again',
@@ -328,9 +315,21 @@ class TestMCPTools:
             'artifact_prepare_upload',
             'submission_wait_for_confirmation',
             'profile_list',
-            'profile_promote',
+            'linkedin_jobs_search',
+            'linkedin_easy_apply_open',
+            'linkedin_easy_apply_submit',
         }
-        assert expected_p0.issubset(tool_names)
+        assert expected_jobs.issubset(tool_names)
+        assert {
+            'http_request',
+            'network_replay_request',
+            'js_evaluate',
+            'cookies_get',
+            'storage_get',
+            'page_get_tree_deep',
+            'element_find_deep',
+            'mouse_click',
+        }.isdisjoint(tool_names)
 
     @pytest.mark.asyncio
     async def test_tool_catalog_does_not_generate_recursive_output_schemas(self) -> None:

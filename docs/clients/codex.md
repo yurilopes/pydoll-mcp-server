@@ -27,16 +27,16 @@ mcp_servers:
 
 ## stdio transport (optional)
 
-The default `full` profile preserves compatibility. For general browser
-automation, prefer `--tool-profile agent`; use `--tool-profile linkedin` when
-LinkedIn search or Easy Apply helpers are needed.
+The default `jobs` profile is focused on job search and application workflows.
+Use `--tool-profile full` only when advanced browser compatibility tools are
+explicitly required. The `agent` and `linkedin` profiles remain legacy options.
 
 ```yaml
 mcp_servers:
   pydoll-mcp:
     transport: stdio
     command: pydoll-mcp-server
-    args: ["--transport", "stdio", "--tool-profile", "agent"]
+    args: ["--transport", "stdio", "--tool-profile", "jobs"]
 ```
 
 Restart Codex after config changes.
@@ -50,7 +50,8 @@ profile keeps its login state for the next session.
 Use `tab_list` as the authoritative tab count. The server reconciles the live Chrome targets
 and permits at most five tabs per browser. Keep the search tab open when working in an
 application tab. Do not assume a close succeeded until `tab_close` returns
-`confirmed_closed=true`; handle `DIALOG_PRESENT` with `dialog_list` and `dialog_handle`.
+`confirmed_closed=true`. If a browser-dialog-specific tool is required, start an
+explicit `full` compatibility profile; it is not part of the default `jobs` surface.
 
 For application forms, use `form_preflight`, `form_prepare`, `form_review`, and
 `form_submit_after_review` in that order. The final tool requires an explicit

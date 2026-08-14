@@ -27,6 +27,7 @@ from pydoll_mcp_server.errors import ErrorCode, ResourceState, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject
 from pydoll_mcp_server.logging import get_logger
 from pydoll_mcp_server.server_state import get_server_state
+from pydoll_mcp_server.tools.form_runtime import mark_document_changed
 
 
 async def tab_list(
@@ -134,6 +135,7 @@ async def tab_close(
             return {'success': True, 'tab_id': tab_id, 'closed': True, 'already_closed': True}
         return e.to_dict()
 
+    requested_target_id = tab_info.target_id
     try:
         browser_info = registry.get_browser(client_id, tab_info.browser_id)
         async with browser_operation_lock(browser_info.browser_id):
@@ -156,6 +158,18 @@ async def tab_close(
             except StructuredError as e:
                 if registry.was_tab_closed(client_id, tab_id):
                     return {'success': True, 'tab_id': tab_id, 'closed': True, 'already_closed': True}
+                if requested_target_id and all(
+                    tab.target_id != requested_target_id
+                    for tab in registry.list_tabs(client_id, browser_info.browser_id)
+                ):
+                    registry.mark_tab_closed(client_id, tab_id)
+                    return {
+                        'success': True,
+                        'tab_id': tab_id,
+                        'closed': True,
+                        'already_closed': True,
+                        'stale_inventory_reconciled': True,
+                    }
                 return e.to_dict()
             target_id = tab_info.target_id or get_tab_target_id(tab_info.pydoll_tab)
             pydoll_tab = tab_info.pydoll_tab
@@ -294,6 +308,7 @@ async def tab_recover(
             async with tab_operation_lock(tab_id):
                 pydoll_tab = tab_info.pydoll_tab
                 await asyncio.wait_for(refresh_tab(pydoll_tab), timeout=30.0)
+                mark_document_changed(client_id, tab_id, tab_info)
                 tab_info.health = ResourceHealth.HEALTHY
                 state.record_recovery()
                 return {
@@ -332,7 +347,7 @@ async def tab_recover(
 
                     get_inspection_manager().remove(tab_id)
                     tab_info.health = ResourceHealth.HEALTHY
-                    tab_info.document_generation += 1
+                    mark_document_changed(client_id, tab_id, tab_info)
                     tab_info.close_pending = False
                 sync = await sync_browser_tabs(client_id, browser_info.browser_id)
                 if not old_closed:

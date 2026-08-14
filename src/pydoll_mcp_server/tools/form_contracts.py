@@ -112,6 +112,8 @@ class ReviewTokenRecord:
     created_at: float
     consumed: bool
     review: JsonObject
+    mutation_epoch: int = 0
+    snapshot_id: str = ''
 
 
 _REVIEW_TTL_SECONDS = 600.0
@@ -208,6 +210,8 @@ def issue_review_token(
     fingerprint: str,
     review: JsonObject,
     ttl_seconds: float = _REVIEW_TTL_SECONDS,
+    mutation_epoch: int = 0,
+    snapshot_id: str = '',
 ) -> ReviewTokenRecord:
     now = time.time()
     token = f'review_{uuid.uuid4().hex}'
@@ -221,6 +225,8 @@ def issue_review_token(
         created_at=now,
         consumed=False,
         review=review,
+        mutation_epoch=mutation_epoch,
+        snapshot_id=snapshot_id,
     )
     _review_tokens[token] = record
     _prune_review_tokens(now)
@@ -260,6 +266,8 @@ def token_summary(record: ReviewTokenRecord) -> JsonObject:
         'review_expires_at': record.expires_at,
         'form_fingerprint': record.form_fingerprint,
         'document_generation': record.document_generation,
+        'mutation_epoch': record.mutation_epoch,
+        'snapshot_id': record.snapshot_id,
     }
 
 

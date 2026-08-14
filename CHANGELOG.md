@@ -20,6 +20,20 @@
 - Added `AMBIGUOUS_ELEMENT` error code for cases where multiple candidates are too close to act safely
 
 ### Changed
+- Realigned the product around job search and application workflows. Added the
+  focused `jobs` profile as the default, while preserving `full`, `agent`, and
+  `linkedin` as explicit compatibility profiles.
+- Added job-oriented `server_status` product metadata and capability groups for
+  search, application workflow, uploads, evidence, and security handoffs.
+- Added a shared semantic form runtime with mutation-epoch cache invalidation,
+  compact performance counters, adaptive verification, and safe batching for
+  fields and choices.
+- Made form discovery reuse one semantic surface per document state and traverse
+  open shadow roots only when coverage requires it. Added explicit generic,
+  LinkedIn Easy Apply, and external ATS multi-step presets.
+- Added text-based element resolution, native select handling, portal-aware
+  combobox discovery, click-time tab reconciliation, and hidden-surface effect
+  classification.
 - Changed high-risk script consumers to use a common normalized result boundary
   with explicit runtime types and structured retry information
 - Changed final submission classification so URL changes and modal disappearance

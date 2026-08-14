@@ -9,10 +9,11 @@ from pydantic import Field
 
 from pydoll_mcp_server.browser.registry import get_registry
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
-from pydoll_mcp_server.json_types import JsonObject, get_array, get_bool, get_string
+from pydoll_mcp_server.json_types import JsonObject, get_array, get_bool, get_int, get_string
 from pydoll_mcp_server.tools.elements import element_click
 from pydoll_mcp_server.tools.form_contracts import consume_review_token, get_review_token
-from pydoll_mcp_server.tools.form_workflow_helpers import is_final_submit_text, record_domain_restriction
+from pydoll_mcp_server.tools.form_prepare_support import is_final_submit_text
+from pydoll_mcp_server.tools.form_workflow_helpers import record_domain_restriction
 from pydoll_mcp_server.tools.submission import submission_wait_for_confirmation
 
 
@@ -48,8 +49,24 @@ async def form_submit_after_review(
             ErrorCode.REVIEW_TOKEN_INVALID,
             {'expected_generation': record.document_generation, 'actual_generation': tab_info.document_generation},
         )
+    current_epoch = getattr(tab_info, 'mutation_epoch', 0)
+    if not isinstance(current_epoch, int) or isinstance(current_epoch, bool):
+        current_epoch = 0
+    if current_epoch != record.mutation_epoch:
+        return _error(
+            'The form mutated after review.',
+            ErrorCode.REVIEW_TOKEN_INVALID,
+            {'expected_mutation_epoch': record.mutation_epoch, 'actual_mutation_epoch': current_epoch},
+        )
     employer_domain = get_string(record.review, 'employer_domain', '')
-    review = await form_review(client_id, tab_id, employer_domain=employer_domain, capture_evidence=True)
+    review = await form_review(
+        client_id,
+        tab_id,
+        employer_domain=employer_domain,
+        capture_evidence=True,
+        preset=get_string(record.review, 'preset', 'generic_form'),
+        force_refresh=True,
+    )
     if not review.get('success'):
         return review
     current_fingerprint = get_string(review, 'form_fingerprint', '')
@@ -59,6 +76,13 @@ async def form_submit_after_review(
             ErrorCode.REVIEW_TOKEN_INVALID,
             {'expected_fingerprint': record.form_fingerprint, 'actual_fingerprint': current_fingerprint},
         )
+    current_review_epoch = get_int(review, 'mutation_epoch', 0)
+    if current_review_epoch != record.mutation_epoch:
+        return _error(
+            'The form mutated after review.',
+            ErrorCode.REVIEW_TOKEN_INVALID,
+            {'expected_mutation_epoch': record.mutation_epoch, 'actual_mutation_epoch': current_review_epoch},
+        )
     if not get_bool(review, 'ready_for_submission', False):
         return _merge_envelope(
             {'blockers': get_array(review, 'blockers', []), 'review': review, 'handoff': True},
@@ -67,7 +91,11 @@ async def form_submit_after_review(
         )
     primary = review.get('primary_action') if isinstance(review.get('primary_action'), dict) else {}
     primary_id = get_string(primary if isinstance(primary, dict) else {}, 'element_id', '')
-    primary_name = get_string(primary if isinstance(primary, dict) else {}, 'name', '')
+    primary_name = get_string(
+        primary if isinstance(primary, dict) else {},
+        'name',
+        get_string(primary if isinstance(primary, dict) else {}, 'text', ''),
+    )
     if not primary_id or not is_final_submit_text(primary_name):
         return _error(
             'The reviewed primary action is not an explicit final submit action.',

@@ -12,7 +12,7 @@ function collectFields() {
     );
     for (const el of nodes) {
         if (!visible(el) || (surfaceScope === 'viewport' && !inViewport(el))) continue;
-        if (['hidden','file','button','submit','reset'].includes((el.type || '').toLowerCase())) continue;
+        if (['hidden','button','submit','reset'].includes((el.type || '').toLowerCase())) continue;
         const role = el.getAttribute('role') || '';
         const isRadio = el.type === 'radio' || role === 'radio';
         const isCheckbox = el.type === 'checkbox' || role === 'checkbox';
@@ -31,7 +31,13 @@ function collectFields() {
         if (fields.length >= maxFields) continue;
         const meta = fieldMeta(el);
         const preview = fieldPreview(el);
-        const entry = { ...meta, value_length: (el.value||'').length };
+        const isFile = (el.type || '').toLowerCase() === 'file';
+        const entry = {
+            ...meta,
+            value_length: isFile ? (el.files?.length || 0) : (el.value || '').length,
+            value_present: isFile ? Boolean(el.files?.length) : String(el.value || '').trim().length > 0,
+            file_count: isFile ? (el.files?.length || 0) : 0
+        };
         if (preview) Object.assign(entry, preview);
         const error = el.closest('[class*="field"]')?.querySelector('[class*="error"], [role="alert"]');
         if (error && visible(error)) entry.errors = [norm(error.innerText || '')];

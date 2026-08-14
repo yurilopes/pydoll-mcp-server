@@ -11,7 +11,7 @@ from pydoll_mcp_server.tool_metadata import ToolProfile
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Pydoll MCP Server - Browser automation via MCP')
+    parser = argparse.ArgumentParser(description='Pydoll MCP Server - Job search and application workflows via MCP')
     parser.add_argument(
         '--transport',
         default=os.environ.get('PYDOLL_MCP_TRANSPORT', 'http'),
@@ -37,9 +37,9 @@ def main() -> None:
     )
     parser.add_argument(
         '--tool-profile',
-        default=os.environ.get('PYDOLL_MCP_TOOL_PROFILE', ToolProfile.FULL.value),
+        default=os.environ.get('PYDOLL_MCP_TOOL_PROFILE', ToolProfile.JOBS.value),
         choices=[profile.value for profile in ToolProfile],
-        help='Tool exposure profile: full, agent, or linkedin',
+        help='Tool exposure profile: jobs (default), full, agent, or linkedin',
     )
     args = parser.parse_args()
 

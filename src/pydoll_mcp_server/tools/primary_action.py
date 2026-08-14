@@ -13,11 +13,13 @@ from pydoll.exceptions import PydollException
 from pydoll_mcp_server.browser.locks import tab_operation_lock
 from pydoll_mcp_server.browser.pydoll_compat import get_tab_url
 from pydoll_mcp_server.browser.registry import get_registry
+from pydoll_mcp_server.browser.tab_reconciliation import sync_browser_tabs
 from pydoll_mcp_server.errors import ErrorCode, StructuredError
 from pydoll_mcp_server.json_types import JsonArray, JsonObject, get_array, get_object, get_string, require_json_object
 from pydoll_mcp_server.security.site_signals import inspect_element_security
 from pydoll_mcp_server.tools.active_surface import page_get_active_surface
 from pydoll_mcp_server.tools.element_resolver import resolve_element_for_action
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 
 
 async def page_click_primary_action(
@@ -72,6 +74,9 @@ async def page_click_primary_action(
         ).to_dict()
 
     target_el_id = str(target['element_id'])
+    before_target_ids = {
+        tab.target_id for tab in get_registry().list_tabs(client_id, tab_info.browser_id) if tab.target_id
+    }
 
     clicked = False
     before_url = ''
@@ -104,6 +109,7 @@ async def page_click_primary_action(
                 ).to_dict()
                 response['failure_origin'] = 'security'
                 return response
+            advance_mutation_epoch(client_id, tab_id, 'primary_action', tab_info)
             await element.execute_script("this.scrollIntoView({block:'center'}); return true;", return_by_value=True)
             await element.click()
             clicked = True
@@ -114,14 +120,34 @@ async def page_click_primary_action(
             retryable=True,
         ).to_dict()
 
-    after_surface = await _wait_for_surface_effect(
-        client_id,
-        tab_id,
-        scope,
-        before_surface,
-        before_url,
-        min(timeout or 5.0, 30.0),
-    )
+    if expected_next_text or expected_progress_change:
+        after_surface = await _wait_for_surface_effect(
+            client_id,
+            tab_id,
+            scope,
+            before_surface,
+            before_url,
+            min(timeout or 5.0, 30.0),
+        )
+    else:
+        after_surface = await page_get_active_surface(client_id, tab_id, scope=scope)
+    new_tabs: JsonArray = []
+    try:
+        await sync_browser_tabs(client_id, tab_info.browser_id)
+        for candidate in get_registry().list_tabs(client_id, tab_info.browser_id):
+            if candidate.target_id and candidate.target_id not in before_target_ids:
+                new_tabs.append(
+                    {
+                        'target_id': candidate.target_id,
+                        'tab_id': candidate.tab_id,
+                        'url': candidate.url,
+                        'title': candidate.title,
+                        'opener_tab_id': tab_id,
+                        'provenance': 'primary_action',
+                    }
+                )
+    except (PydollException, StructuredError, RuntimeError, TimeoutError, OSError):
+        new_tabs = []
     after_progress = get_object(after_surface, 'progress', {}) if after_surface.get('success') else {}
     after_errors = get_array(after_surface, 'errors', []) if after_surface.get('success') else []
     after_pending = get_array(after_surface, 'pending_required', []) if after_surface.get('success') else []
@@ -136,6 +162,7 @@ async def page_click_primary_action(
         'timestamp': time.time(),
         'clicked': clicked,
         'effect_observed': effect_observed,
+        'new_tabs': new_tabs,
     }
 
     warnings: JsonArray = []
@@ -161,6 +188,7 @@ async def page_click_primary_action(
             {
                 'clicked': clicked,
                 'button': {'element_id': target_el_id, 'name': target.get('name', ''), 'tag': target.get('tag', '')},
+                'new_tabs': new_tabs,
                 'page_effect': page_effect,
                 'site_diagnostics': diagnostics,
                 'failure_origin': 'page',
@@ -172,6 +200,7 @@ async def page_click_primary_action(
         'success': True,
         'clicked': clicked,
         'effect_observed': effect_observed,
+        'new_tabs': new_tabs,
         'button': {
             'element_id': target_el_id,
             'name': target.get('name', ''),
@@ -249,15 +278,18 @@ async def _wait_for_surface_effect(
     timeout: float,
 ) -> JsonObject:
     deadline = time.monotonic() + timeout
+    delay = 0.08
     while time.monotonic() < deadline:
         current = await page_get_active_surface(client_id, tab_id, scope=scope)
         if not current.get('success'):
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(delay)
+            delay = min(0.8, delay * 1.6)
             continue
         current_url = await _safe_tab_url(get_registry().get_tab(client_id, tab_id).pydoll_tab)
         if _surface_changed(before_surface, current, before_url, current_url):
             return current
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(delay)
+        delay = min(0.8, delay * 1.6)
     return await page_get_active_surface(client_id, tab_id, scope=scope)
 
 

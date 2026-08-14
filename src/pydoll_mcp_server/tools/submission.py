@@ -108,6 +108,7 @@ async def submission_wait_for_confirmation(
     outcome = SubmissionOutcome.UNKNOWN
     body = ''
     validation_started_at: float | None = None
+    poll_delay = 0.12
 
     while time.monotonic() < deadline:
         body = await _visible_body_text(tab_info.pydoll_tab)
@@ -126,12 +127,14 @@ async def submission_wait_for_confirmation(
                 outcome = SubmissionOutcome.CONFIRMED
                 break
             if time.monotonic() - validation_started_at < min(_VALIDATION_SETTLE_GRACE_SECONDS, limit):
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(poll_delay)
+                poll_delay = min(1.0, poll_delay * 1.5)
                 continue
         if outcome is not SubmissionOutcome.UNKNOWN or (url_changed and not expect_url_change and modal_gone):
             break
         if outcome is SubmissionOutcome.UNKNOWN and not (url_changed or modal_gone):
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(poll_delay)
+            poll_delay = min(1.0, poll_delay * 1.5)
         else:
             break
 
@@ -154,7 +157,7 @@ async def submission_wait_for_confirmation(
         'url_after': post_url,
         'url_changed': url_changed,
         'modal_gone': modal_gone,
-        'surface': 'visible_body_inner_text',
+        'surface': 'active_application_surface',
     }
     return {
         'contract_version': 2,
@@ -201,7 +204,30 @@ def classify_submission_outcome(body: str, success_texts: list[str], status_text
 async def _visible_body_text(tab: Tab) -> str:
     try:
         result = await tab.execute_script(
-            "return document.body ? (document.body.innerText || '') : '';",
+            """
+            (() => {
+                const visible = (element) => {
+                    if (!element) return false;
+                    const rect = element.getBoundingClientRect();
+                    const style = getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                        && style.display !== 'none' && style.visibility !== 'hidden'
+                        && parseFloat(style.opacity || '1') > 0;
+                };
+                const candidates = [
+                    ...document.querySelectorAll(
+                        '[role="dialog"], dialog[open], [aria-modal="true"], form, main, [role="main"]'
+                    )
+                ].filter(visible);
+                const dialog = candidates.find((element) =>
+                    element.matches('[role="dialog"], dialog[open], [aria-modal="true"]')
+                );
+                const surface = dialog || candidates.find((element) => element.matches('form'))
+                    || candidates.find((element) => element.matches('main,[role="main"]'))
+                    || document.body;
+                return surface ? (surface.innerText || surface.textContent || '') : '';
+            })()
+            """,
             return_by_value=True,
         )
         return extract_normalized_string(result, 'submission_visible_body')

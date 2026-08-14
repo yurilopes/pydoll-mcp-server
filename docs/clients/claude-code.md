@@ -32,9 +32,9 @@ In Claude Code config (`~/.claude/claude_desktop_config.json` or project `.mcp.j
 
 ## stdio transport (optional)
 
-The default `full` profile preserves compatibility. For general browser
-automation, prefer `--tool-profile agent`; use `--tool-profile linkedin` when
-LinkedIn search or Easy Apply helpers are needed.
+The default `jobs` profile is focused on job search and application workflows.
+Use `--tool-profile full` only when advanced browser compatibility tools are
+explicitly required. The `agent` and `linkedin` profiles remain legacy options.
 
 ```json
 {
@@ -42,7 +42,7 @@ LinkedIn search or Easy Apply helpers are needed.
     "pydoll-mcp": {
       "transport": "stdio",
       "command": "pydoll-mcp-server",
-      "args": ["--transport", "stdio", "--tool-profile", "agent"]
+      "args": ["--transport", "stdio", "--tool-profile", "jobs"]
     }
   }
 }

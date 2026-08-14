@@ -20,6 +20,7 @@ from pydoll_mcp_server.security.upload_policy import upload_allowlist, validate_
 from pydoll_mcp_server.tools.element_resolver import resolve_element
 from pydoll_mcp_server.tools.files import file_info
 from pydoll_mcp_server.tools.form_contracts import invalidate_review_tokens
+from pydoll_mcp_server.tools.form_runtime import advance_mutation_epoch
 
 
 async def artifact_prepare_upload(
@@ -132,6 +133,7 @@ async def upload_files_enhanced(
 
     try:
         invalidate_review_tokens(client_id, tab_id)
+        advance_mutation_epoch(client_id, tab_id, 'enhanced_upload', tab_info)
         await set_input_files(element, paths)
     except (PydollException, InvalidScriptResponseError, KeyError, TypeError, ValueError, OSError) as exc:
         return StructuredError(
