@@ -2588,6 +2588,36 @@ Required changes:
   a required combobox whose native hidden input remains invalid until the
   option event is dispatched.
 
+### Live observation: open custom option list
+
+The observed control renders a text field with a clear button and a separate
+arrow trigger. Clicking the trigger opens a list below the field, with the
+currently visible answer highlighted. This looks like a select to a person,
+but it is not a native select and the list may live in a portal outside the
+field's local DOM subtree.
+
+This case is difficult for an automation client for three concrete reasons:
+
+- The visible text and highlighted row are presentation state. They do not
+  prove that the form's hidden value, component state, and validation state
+  were updated.
+- The trigger, input, popup, and option can be replaced during opening or
+  selection. References obtained before the list opens can therefore become
+  stale or point to a different option.
+- The option must be matched and selected by its exact logical label, then
+  verified after the popup closes. A click that only changes focus or hover
+  state must be reported as inconclusive, not successful.
+
+The seamless MCP contract should expose this as one logical field operation.
+The agent should provide a field label and desired option, while the MCP
+handles trigger resolution, popup discovery, portal traversal, fresh option
+resolution, selection, and post-selection verification. The result should
+include the selected label, whether the popup closed, the hidden or native
+value state when observable, the rendered state, a fresh element fingerprint,
+and a recovery instruction when the result is stale, ambiguous, or
+inconclusive. The agent should not need to know that the control is a custom
+combobox or which UI framework rendered it.
+
 The same retest exposed two related issues. A custom range slider returned a
 verified fill even though its value remained `0` and the visible control did
 not move; keyboard interaction changed it correctly to `9`. Slider success
