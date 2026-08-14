@@ -2650,6 +2650,56 @@ Required changes:
   reveals an email-code challenge after submit, and prevents duplicate
   submission while the challenge is pending.
 
+### Live retest: invalid security code and browser lease recovery
+
+The candidate entered the Greenhouse email code three times, but the portal
+rejected each attempt as invalid. No confirmation was obtained, so the
+vacancy was explicitly skipped and not counted. The workflow must preserve
+the distinction between a pending security handoff, an invalid-code result,
+and a confirmed submission. It must also avoid asking for another blind retry
+after repeated invalid attempts.
+
+Required changes:
+
+- Return a typed `security_challenge` result with an attempt counter,
+  `invalid_code` classification, and a terminal recovery instruction after a
+  bounded number of failed code attempts.
+- Keep the application unconfirmed and prevent automatic resubmission after
+  the security code is rejected. The caller must explicitly choose whether
+  to retry or skip.
+- Record the portal's visible error text as evidence without storing the
+  security code itself.
+
+The same live retest exposed a lifecycle defect. Closing the skipped
+Storyblok tab returned an HTTP 500 with an unknown transport state. A
+subsequent tab inventory lost both the tab registry and the browser lease,
+even though the visible Chrome process was still alive on the managed
+persistent profile. Attaching by profile then returned no live lease, while a
+new launch initially failed because the existing profile process still held
+the profile. Closing the old browser through its known browser identifier and
+launching the same profile restored a visible browser, but this recovery was
+more invasive than closing one tab should be.
+
+Required changes:
+
+- Make `tab_close` target-scoped and idempotent. A failed or unknown close
+  transport must not delete the browser lease or the registry entries for
+  unrelated tabs.
+- Reconcile the target by CDP identity after a close command. Return
+  `already_closed`, `close_pending`, or a retryable transport error while
+  retaining the browser lease until the browser process itself is confirmed
+  closed.
+- Allow `browser_list` and `browser_attach` to discover and adopt an owned
+  live process when its profile, endpoint, and process identity match the
+  lease owner. Do not require a registry entry that was lost during a tab
+  operation.
+- When a profile process is live but the endpoint is temporarily
+  unobservable, return an explicit handoff instead of attempting a duplicate
+  launch or silently discarding the existing browser identity.
+- Add a fixture that closes one of two tabs with a rejected WebSocket
+  transport, then asserts that the second tab, browser lease, and profile
+  ownership remain recoverable.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
