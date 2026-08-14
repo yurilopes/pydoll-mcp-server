@@ -2548,6 +2548,78 @@ Required changes:
   security markers and is persisted together with the pre-submit and
   confirmation artifacts.
 
+## Live retest: custom comboboxes are not native selects
+
+The Storyblok Greenhouse form uses React-style comboboxes and flyout buttons
+instead of native `<select>` elements. The visible text can show `LinkedIn`,
+`Brazil`, or another answer while the form's underlying required state is
+still empty. In other words, typing text into the input is not equivalent to
+selecting an option. The portal validates the option selected in its component
+state, not merely the string rendered in the textbox.
+
+This interaction is materially harder than a native select because the
+workflow must coordinate several short-lived objects: the trigger, the input,
+the portal list, and the option. Opening one list can replace the option
+nodes, and a previously returned option reference can become stale before the
+click. A result such as `value=LinkedIn` therefore cannot be reported as
+submission-ready by itself.
+
+Required changes:
+
+- Expose a semantic combobox operation that accepts a logical field label and
+  exact option text, opens the trigger, re-resolves the rendered option, and
+  selects it through the component's supported interaction path.
+- Return the option label, option value when non-sensitive, trigger
+  fingerprint, popup identity, selected state, and popup-closed state in one
+  result. Distinguish `typed`, `selected`, `not_found`, `stale`, and
+  `inconclusive`.
+- Re-read the active surface after selection and verify the form's native
+  validity or submission state. Visible text alone must not satisfy a
+  required custom combobox.
+- Handle portal-rendered options and recreated nodes by using a fresh
+  fingerprint or popup relationship, never by treating an option DOM id as a
+  permanent reference.
+- Support country, city, notice, sponsorship, consent-answer, source, and
+  relationship comboboxes without requiring the agent to know whether the
+  portal implemented them with React Select, an ARIA listbox, or another
+  custom widget.
+- Add fixtures for a selected-looking but uncommitted value, a portal option
+  recreated during selection, an option list that closes after selection, and
+  a required combobox whose native hidden input remains invalid until the
+  option event is dispatched.
+
+The same retest exposed two related issues. A custom range slider returned a
+verified fill even though its value remained `0` and the visible control did
+not move; keyboard interaction changed it correctly to `9`. Slider success
+must require an observed value change and rendered-state verification. The
+resume input also became stale during the Greenhouse form rerender. Upload
+operations need a fresh control handoff and a durable pending state rather
+than a generic stale failure when the browser may still be processing the
+file.
+
+The same live submission then reached a visible email verification step. The
+portal sent an 8-character code to the candidate's email and disabled final
+submission until the code was entered. This was not a visible CAPTCHA, but it
+is still an authentication or security challenge and must remain a human
+handoff. The MCP correctly stopped without reading email, inferring the code,
+or retrying the submit.
+
+Required changes:
+
+- Detect visible email or security-code forms separately from passive CAPTCHA
+  markers and return `security_challenge` with the exact visible action,
+  target surface, and candidate notification destination redacted or
+  minimized as appropriate.
+- Preserve the prepared form, review fingerprint, and one-way submit attempt
+  as resumable state, while making the submit token terminal until the caller
+  explicitly revalidates after the candidate completes the challenge.
+- Never read a mailbox, infer a code, or type a verification code without a
+  dedicated connector and explicit authorization. A browser-visible code
+  input is a handoff, not an automation target.
+- Add a fixture for a Greenhouse form that accepts the application data,
+  reveals an email-code challenge after submit, and prevents duplicate
+  submission while the challenge is pending.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
