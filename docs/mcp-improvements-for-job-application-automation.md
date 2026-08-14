@@ -2812,6 +2812,31 @@ Required changes:
   status when portal metadata promises Easy Apply but the live surface has no
   safe actionable control.
 
+### Live handoff: refreshed email code and security gate
+
+The UL Solutions code expired. The workflow requested a new code through the
+visible `Send New Code` control, then the authorized Gmail connector found a
+newer `Confirm your identity` message addressed to the candidate. The code was
+not copied into the public trace or returned in the application record.
+
+An attempted semantic fill of the six verification inputs was refused by the
+MCP security gate. The fields remained empty and preflight continued to report
+`two_factor`, `requires_user_action=true`, and a manual security blocker. This
+is the correct safety boundary, but the result should make the handoff more
+explicit instead of looking like a generic fill failure.
+
+Required changes:
+
+- Return a dedicated `security_handoff` result containing challenge type,
+  visible action, destination category, expiration warning when observable,
+  and the exact manual next step, without returning the secret value.
+- Preserve the prepared browser state while the candidate completes the
+  challenge manually. A later preflight must revalidate the document and form
+  fingerprint before resuming.
+- Keep secret retrieval and browser interaction separate. Even when an
+  authorized mail connector finds a fresh code, the browser MCP must not
+  automatically enter it into a protected 2FA control.
+
 ## Out of scope
 
 - Bypassing CAPTCHA, two-factor authentication, login controls, rate limits, or portal terms.
